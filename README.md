@@ -43,7 +43,7 @@ brew install android-platform-tools
 ```bash
 # Install eden-cheats-manager itself
 mkdir -p ~/.local/bin
-curl -o ~/.local/bin/eden-cheats-manager https://raw.githubusercontent.com/ChrisA95G/eden-cheats-manager/main/eden-cheats-manager
+curl -o ~/.local/bin/eden-cheats-manager https://raw.githubusercontent.com/ChrisA95G/eden-cheats-manager/master/eden-cheats-manager
 chmod +x ~/.local/bin/eden-cheats-manager
 
 # Add to PATH (add this line to your .bashrc / .zshrc / config.fish)
