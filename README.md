@@ -52,6 +52,11 @@ export PATH="$HOME/.local/bin:$PATH"
 fish_add_path ~/.local/bin
 ```
 
+> **Tip:** `eden-cheats-manager` is a mouthful. Add this alias to your shell config:
+> ```bash
+> alias ecm='eden-cheats-manager'
+> ```
+
 ### Connect your phone
 
 **USB (first time):**
