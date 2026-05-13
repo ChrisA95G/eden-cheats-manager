@@ -1,0 +1,75 @@
+mod adb;
+mod build_ids;
+mod cheatslips;
+mod cheats;
+mod db;
+mod games;
+mod settings;
+
+use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode, ColorChoice, WriteLogger};
+use std::fs::OpenOptions;
+use tauri::Manager;
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            // ── Logging setup ───────────────────────────────────────────
+            // Log to terminal and to a rotating log file in the app log dir.
+            let log_dir = app.path().app_log_dir()
+                .unwrap_or_else(|_| std::path::PathBuf::from("."));
+            std::fs::create_dir_all(&log_dir).ok();
+            let log_file = log_dir.join("eden-cheats-manager.log");
+            let file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_file)
+                .expect("could not open log file");
+            CombinedLogger::init(vec![
+                TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto),
+                WriteLogger::new(LevelFilter::Debug, Config::default(), file),
+            ]).ok();
+            log::info!("Eden Cheats Manager started — log file: {}", log_file.display());
+            // ── DB init ─────────────────────────────────────────────────
+            db::init_db(&app.handle());
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            // settings
+            settings::get_settings,
+            settings::save_settings,
+            settings::detect_pc_load_dir,
+            // adb
+            adb::get_adb_status,
+            adb::adb_tcpip,
+            adb::adb_pair,
+            adb::adb_connect,
+            adb::extract_build_ids_android,
+            adb::extract_build_ids_pc,
+            adb::adb_ls,
+            // per-title build ID detection
+            build_ids::detect_build_ids_android,
+            build_ids::detect_build_ids_pc,
+            build_ids::scan_build_id_android,
+            adb::get_usb_devices,
+            // local cheats lookup + custom cheats
+            cheatslips::search_cheats,
+            cheatslips::save_custom_cheat,
+            cheatslips::delete_custom_cheat,
+            // games
+            games::scan_eden_games_android,
+            games::scan_eden_games_pc,
+            // cheats
+            cheats::install_cheat_android,
+            cheats::list_installed_cheats_android,
+            cheats::delete_cheat_android,
+            cheats::install_cheat_pc,
+            cheats::list_installed_cheats_pc,
+            cheats::delete_cheat_pc,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}

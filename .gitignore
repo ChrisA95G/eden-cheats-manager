@@ -1,2 +1,11 @@
 __pycache__/
 *.pyc
+.worktrees/
+.superpowers/
+.~lock.titles.json#
+titles.json
+cheats/
+node_modules/
+target/
+.vscode/
+CLAUDE.md
