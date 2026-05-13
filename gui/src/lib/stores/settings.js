@@ -9,6 +9,7 @@ export async function loadSettings() {
   return s;
 }
 
+/** @param {any} updated */
 export async function saveSettings(updated) {
   await invoke('save_settings', { settings: updated });
   settings.set(updated);

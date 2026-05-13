@@ -63,9 +63,13 @@
 
 <aside class="sidebar">
   <div class="sidebar-header">
-    <div class="status-dot {statusColor}"></div>
-    <span class="status-label">{statusLabel}</span>
-    <button class="btn-icon" title="Settings" onclick={() => onopenSettings?.()}>⚙</button>
+    <span class="app-brand">ECM</span>
+    <span class="brand-sep">//</span>
+    <div class="status-group">
+      <div class="status-dot {statusColor}"></div>
+      <span class="status-label">{statusLabel}</span>
+    </div>
+    <button class="btn-icon" title="Settings" onclick={() => onopenSettings?.()}>SYS</button>
   </div>
 
   {#if settings?.targetMode === 'android' && (hasUsb || savedConnections.length > 0)}
@@ -109,7 +113,7 @@
     disabled={$gamesLoading}
     onclick={() => scanGames(settings)}
   >
-    {$gamesLoading ? 'Scanning…' : 'Scan Games'}
+    {$gamesLoading ? '[ SCANNING... ]' : '[ SCAN LIBRARY ]'}
   </button>
 
   {#if $gamesError}
@@ -119,8 +123,8 @@
   <div class="game-list">
     {#if $games.length === 0 && !$gamesLoading}
       <div class="empty-state">
-        <p>No games found.</p>
-        <p class="hint">Click "Scan Games" to discover your Eden game library.</p>
+        <p class="empty-prompt">&gt; NO GAMES FOUND</p>
+        <p class="hint">Run [ SCAN LIBRARY ] to load your Eden game library.</p>
       </div>
     {:else}
       {#each $games as group (group.baseTitleId)}
@@ -241,130 +245,225 @@
     height: 100vh;
     overflow: hidden;
   }
+
+  /* Header */
   .sidebar-header {
     display: flex;
     align-items: center;
     gap: .5rem;
-    padding: .9rem 1rem;
+    padding: .65rem .85rem;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    background: var(--surface2);
   }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--text-muted); }
-  .status-dot.ok  { background: var(--text); border-color: var(--text); }
-  .status-dot.warn{ background: transparent; }
-  .status-dot.err { background: transparent; }
-  .status-label { flex: 1; font-size: .82rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .btn-icon { background: none; border: none; cursor: pointer; font-size: 1.1rem; padding: 0; line-height: 1; opacity: .7; }
-  .btn-icon:hover { opacity: 1; }
+  .app-brand {
+    font-size: .9rem;
+    letter-spacing: .25em;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .brand-sep {
+    font-size: .72rem;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    letter-spacing: .05em;
+  }
+  .status-group {
+    display: flex;
+    align-items: center;
+    gap: .35rem;
+    flex: 1;
+    overflow: hidden;
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 1px solid var(--text-muted);
+  }
+  .status-dot.ok   { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 4px var(--accent-glow); }
+  .status-dot.warn { background: transparent; }
+  .status-dot.err  { background: transparent; }
+  .status-label {
+    flex: 1;
+    font-size: .72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    letter-spacing: .03em;
+  }
+  .btn-icon {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: .65rem;
+    padding: .15rem .35rem;
+    letter-spacing: .1em;
+    flex-shrink: 0;
+    transition: color .12s, border-color .12s;
+  }
+  .btn-icon:hover { color: var(--accent); border-color: var(--accent); }
 
-  .conn-bar { position: relative; padding: .35rem .75rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  /* Connection bar */
+  .conn-bar { position: relative; padding: .35rem .6rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .conn-toggle {
-    background: none; border: 1px solid var(--border); border-radius: 3px;
-    color: var(--text-muted); font-size: .75rem; padding: .25rem .6rem; cursor: pointer; width: 100%;
-    text-align: left; display: flex; justify-content: space-between; align-items: center;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .72rem;
+    padding: .2rem .5rem;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    letter-spacing: .04em;
+    transition: color .12s, border-color .12s;
   }
   .conn-toggle:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
-  .conn-toggle:disabled { opacity: .5; cursor: default; }
-  .toggle-arrow { font-size: .6rem; }
+  .conn-toggle:disabled { opacity: .4; cursor: default; }
+  .toggle-arrow { font-size: .55rem; }
   .conn-picker {
-    position: absolute; left: .75rem; right: .75rem; top: calc(100% - .35rem);
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 4px;
+    position: absolute; left: .6rem; right: .6rem; top: calc(100% - .35rem);
+    background: var(--surface2);
+    border: 1px solid var(--border);
     z-index: 50; overflow: hidden; max-height: 220px; overflow-y: auto;
   }
   .conn-section-label {
-    font-size: .65rem; text-transform: uppercase; letter-spacing: .04em;
-    color: var(--text-muted); padding: .35rem .7rem .1rem; font-weight: 600;
+    font-size: .62rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    padding: .3rem .6rem .1rem;
   }
   .conn-item {
     display: flex; flex-direction: column; gap: .1rem;
     width: 100%; background: none; border: none; border-bottom: 1px solid var(--border);
-    padding: .45rem .7rem; cursor: pointer; text-align: left; color: var(--text);
+    padding: .4rem .6rem; cursor: pointer; text-align: left; color: var(--text);
+    transition: background .1s;
   }
   .conn-item:last-child { border-bottom: none; }
-  .conn-item:hover { background: var(--surface); }
-  .conn-item.conn-active { border-left: 2px solid var(--text-muted); padding-left: calc(.7rem - 2px); }
-  .conn-name { font-size: .82rem; font-weight: 500; }
-  .conn-addr { font-size: .72rem; color: var(--text-muted); font-family: monospace; }
+  .conn-item:hover { background: rgba(245, 168, 0, 0.05); }
+  .conn-item.conn-active { border-left: 2px solid var(--accent); padding-left: calc(.6rem - 2px); }
+  .conn-name { font-size: .78rem; }
+  .conn-addr { font-size: .68rem; color: var(--text-muted); }
 
+  /* Scan button */
   .scan-btn {
-    margin: .75rem;
-    background: var(--text);
-    color: var(--bg);
-    border: none;
-    border-radius: 3px;
-    padding: .5rem 1rem;
-    font-size: .83rem;
-    font-weight: 600;
+    margin: .6rem .75rem;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: .45rem 1rem;
+    font-size: .78rem;
+    letter-spacing: .1em;
     cursor: pointer;
-    transition: opacity .15s;
+    transition: background .15s, box-shadow .15s;
     flex-shrink: 0;
+    font-family: inherit;
   }
-  .scan-btn:disabled { opacity: .5; cursor: default; }
-  .scan-btn:not(:disabled):hover { opacity: .85; }
-  .error-msg { margin: 0 .75rem .5rem; background: var(--surface2); color: var(--text-muted); border-radius: 3px; border-left: 2px solid var(--border); padding: .4rem .7rem; font-size: .78rem; }
-  .game-list { flex: 1; overflow-y: auto; padding: .25rem .5rem; }
-  .empty-state { padding: 2rem 1rem; text-align: center; color: var(--text-muted); }
-  .empty-state p { margin: 0 0 .25rem; font-size: .85rem; }
-  .empty-state .hint { font-size: .78rem; opacity: .7; }
+  .scan-btn:not(:disabled):hover {
+    background: var(--accent-dim);
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  .scan-btn:disabled { opacity: .35; cursor: default; }
 
-  /* Group */
-  .game-group { margin-bottom: 0; }
+  .error-msg {
+    margin: 0 .75rem .4rem;
+    background: var(--surface2);
+    color: var(--error);
+    border-left: 2px solid var(--error);
+    padding: .35rem .6rem;
+    font-size: .72rem;
+  }
+
+  /* Game list */
+  .game-list { flex: 1; overflow-y: auto; padding: .2rem .4rem; }
+  .empty-state { padding: 2rem .75rem; color: var(--text-muted); }
+  .empty-prompt { font-size: .82rem; color: var(--text-muted); margin-bottom: .5rem; letter-spacing: .03em; }
+  .empty-state .hint { font-size: .72rem; opacity: .7; line-height: 1.5; }
+
+  /* Game groups */
+  .game-group { margin-bottom: 1px; }
   .group-header {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: .6rem;
+    gap: .5rem;
     background: none;
     border: none;
     border-left: 2px solid transparent;
-    border-radius: 0;
-    padding: .45rem .5rem;
+    padding: .4rem .5rem;
     cursor: pointer;
     text-align: left;
     color: var(--text);
-    transition: background .1s;
+    transition: background .1s, border-color .1s;
   }
-  .group-header:hover { background: var(--surface2); }
-  .group-header.active { background: var(--surface2); border-left-color: var(--text-muted); padding-left: calc(.5rem - 2px); }
-  .expand-chevron { font-size: .65rem; width: 12px; flex-shrink: 0; color: var(--text-muted); }
+  .group-header:hover { background: rgba(245, 168, 0, 0.04); }
+  .group-header.active {
+    background: var(--accent-dim);
+    border-left-color: var(--accent);
+    padding-left: calc(.5rem - 2px);
+  }
+  .expand-chevron { font-size: .6rem; width: 10px; flex-shrink: 0; color: var(--text-dim); }
 
-  /* Children container */
+  /* Group children */
   .group-children {
-    padding-left: 1.4rem;
+    padding-left: 1.2rem;
     border-left: 1px solid var(--border);
-    margin-left: .95rem;
+    margin-left: .85rem;
   }
   .section-label {
-    font-size: .68rem;
+    font-size: .6rem;
     text-transform: uppercase;
-    letter-spacing: .04em;
-    color: var(--text-muted);
-    padding: .35rem .4rem .15rem;
-    font-weight: 600;
+    letter-spacing: .1em;
+    color: var(--text-dim);
+    padding: .3rem .4rem .1rem;
   }
   .child-item {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: .6rem;
+    gap: .5rem;
     background: none;
     border: none;
     border-left: 2px solid transparent;
-    border-radius: 0;
-    padding: .35rem .5rem;
+    padding: .3rem .5rem;
     cursor: pointer;
     text-align: left;
     color: var(--text);
-    transition: background .1s;
-    opacity: .65;
+    transition: background .1s, border-color .1s;
+    opacity: .55;
   }
-  .child-item:hover { background: var(--surface2); opacity: .85; }
-  .child-item.active { background: var(--surface2); border-left-color: var(--text-muted); padding-left: calc(.5rem - 2px); opacity: 1; }
+  .child-item:hover { background: rgba(245, 168, 0, 0.04); opacity: .8; }
+  .child-item.active {
+    background: var(--accent-dim);
+    border-left-color: var(--accent);
+    padding-left: calc(.5rem - 2px);
+    opacity: 1;
+  }
 
-  .game-cover { width: 38px; height: 38px; border-radius: 3px; object-fit: cover; flex-shrink: 0; }
-  .game-cover-placeholder { width: 38px; height: 38px; border-radius: 3px; background: var(--surface2); border: 1px solid var(--border); flex-shrink: 0; }
-  .game-info { display: flex; flex-direction: column; gap: .1rem; overflow: hidden; flex: 1; }
-  .game-name { font-size: .85rem; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .game-tid { font-size: .72rem; color: var(--text-muted); font-family: monospace; }
-  .installed-dot { color: #34c759; font-size: .6rem; flex-shrink: 0; line-height: 1; }
+  /* Game art */
+  .game-cover {
+    width: 34px;
+    height: 34px;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+  }
+  .game-cover-placeholder {
+    width: 34px;
+    height: 34px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .game-info { display: flex; flex-direction: column; gap: .05rem; overflow: hidden; flex: 1; }
+  .game-name { font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .game-tid { font-size: .65rem; color: var(--text-muted); letter-spacing: .03em; }
+  .installed-dot { color: var(--success); font-size: .55rem; flex-shrink: 0; line-height: 1; }
 </style>

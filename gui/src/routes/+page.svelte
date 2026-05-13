@@ -7,10 +7,10 @@
   import CheatPanel from '$lib/components/CheatPanel.svelte';
   import Settings from '$lib/components/Settings.svelte';
 
-  let appSettings = $state(null);
+  let appSettings = $state(/** @type {any} */ (null));
   let loading = $state(true);
   let showSettings = $state(false);
-  let adbStatus = $state(null);
+  let adbStatus = $state(/** @type {any} */ (null));
 
   onMount(async () => {
     try {
@@ -41,6 +41,7 @@
 
   let saveError = $state('');
 
+  /** @param {any} updated */
   async function handleOnboardingDone(updated) {
     try {
       await saveSettings(updated);
@@ -56,6 +57,7 @@
     }
   }
 
+  /** @param {any} local */
   async function handleSettingsClose(local) {
     if (local) {
       appSettings = local;
@@ -68,14 +70,17 @@
     showSettings = false;
   }
 
+  /** @param {any} local */
   async function handleRerunSetup(local) {
     if (local) appSettings = local;
     showSettings = false;
   }
 </script>
 
+<div class="scanlines" aria-hidden="true"></div>
+
 {#if loading}
-  <div class="loading-screen">Loading…</div>
+  <div class="loading-screen">LOADING</div>
 {:else if !appSettings?.onboardingDone}
   <Onboarding currentSettings={appSettings ?? {}} ondone={handleOnboardingDone} />
   {#if saveError}<div style="position:fixed;bottom:1rem;left:1rem;right:1rem;background:#c00;color:#fff;padding:.5rem .75rem;border-radius:4px;font-size:.8rem;z-index:999">{saveError}</div>{/if}
@@ -98,17 +103,22 @@
   :global(*) { box-sizing: border-box; margin: 0; padding: 0; }
 
   :global(:root) {
-    --bg: #0e0e0e;
-    --surface: #181818;
-    --surface2: #222;
-    --border: #333;
-    --text: #e8e8e8;
-    --text-muted: #666;
-    --accent: #e8e8e8;
-    --accent2: #888;
-    --accent-rgb: 232,232,232;
-    font-family: Inter, system-ui, -apple-system, sans-serif;
-    font-size: 15px;
+    --bg: #080600;
+    --surface: #111006;
+    --surface2: #1a1808;
+    --border: #352510;
+    --text: #f2e4a8;
+    --text-muted: #9a7c4a;
+    --text-bright: #fde68a;
+    --text-dim: #3a2c10;
+    --accent: #f5a800;
+    --accent-dim: rgba(245, 168, 0, 0.08);
+    --accent-glow: rgba(245, 168, 0, 0.2);
+    --accent-rgb: 245, 168, 0;
+    --error: #ef4444;
+    --success: #c8860c;
+    font-family: 'Share Tech Mono', ui-monospace, 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 14px;
     line-height: 1.5;
     color-scheme: dark;
   }
@@ -121,10 +131,25 @@
     width: 100vw;
   }
 
-  :global(::-webkit-scrollbar) { width: 6px; }
-  :global(::-webkit-scrollbar-track) { background: transparent; }
-  :global(::-webkit-scrollbar-thumb) { background: var(--border); border-radius: 99px; }
+  :global(::-webkit-scrollbar) { width: 5px; }
+  :global(::-webkit-scrollbar-track) { background: var(--surface); }
+  :global(::-webkit-scrollbar-thumb) { background: var(--border); border-radius: 0; }
+  :global(::-webkit-scrollbar-thumb:hover) { background: var(--text-muted); }
   :global(select) { outline: none; }
+
+  .scanlines {
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 3px,
+      rgba(0, 0, 0, 0.05) 3px,
+      rgba(0, 0, 0, 0.05) 4px
+    );
+    pointer-events: none;
+    z-index: 9998;
+  }
 
   .loading-screen {
     display: flex;
@@ -133,6 +158,19 @@
     height: 100vh;
     color: var(--text-muted);
     font-size: 1rem;
+    letter-spacing: 0.2em;
+  }
+
+  .loading-screen::after {
+    content: '_';
+    color: var(--accent);
+    margin-left: 2px;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
   }
 
   .app-layout {

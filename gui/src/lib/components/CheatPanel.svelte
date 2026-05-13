@@ -5,27 +5,27 @@
   let { settings } = $props();
 
   // Available cheats loaded from local DB
-  let gameInfo = $state(null);
+  let gameInfo = $state(/** @type {any} */ (null));
   let cheatsLoading = $state(false);
   let cheatsError = $state('');
 
   // Which build-id accordion row is open (by cheat.id)
-  let expandedId = $state(null);
+  let expandedId = $state(/** @type {string | null} */ (null));
 
   // Detected build IDs on the device / PC for the selected game
-  let detectedBuildIds = $state([]);
+  let detectedBuildIds = $state(/** @type {string[]} */ ([]));
   let detectingBuildIds = $state(false);
 
   // Installed cheats on the device / PC
-  let installedCheats = $state([]);
+  let installedCheats = $state(/** @type {any[]} */ ([]));
   let installedLoadError = $state('');
   let installedSet = $derived(new Set(installedCheats.map(ic => `${ic.buildId}_${ic.cheatName}`)));
   let installedLoading = $state(false);
 
   // Install / delete state — keyed by `${cheat.id}_${sectionName}`
-  let installing = $state({});
-  let deleting = $state({});
-  let installMsg = $state({});
+  let installing = $state(/** @type {Record<string, boolean>} */ ({}));
+  let deleting = $state(/** @type {Record<string, boolean>} */ ({}));
+  let installMsg = $state(/** @type {Record<string, string>} */ ({}));
 
   // Scan Build ID state
   let scanningBuildId = $state(false);
@@ -37,7 +37,7 @@
   let customContent = $state('');
   let savingCustom = $state(false);
   let customSaveError = $state('');
-  let deletingCustom = $state({});
+  let deletingCustom = $state(/** @type {Record<string, boolean>} */ ({}));
 
   // Group cheat entries by build ID — declared here so effects below can reference it.
   // parseSections is a hoisted function declaration, so the forward reference is fine.
@@ -96,6 +96,7 @@
     : (groupedCheats.find(g => detectedBuildIds.includes(g.buildId))
         ?.buildId ?? detectedBuildIds[0]));
 
+  /** @param {any} game */
   async function detectBuildIds(game) {
     detectingBuildIds = true;
     try {
@@ -111,7 +112,7 @@
           titleId: game.titleId,
         });
       }
-      detectedBuildIds = (result ?? []).map(id => id.toUpperCase());
+      detectedBuildIds = (result ?? []).map(/** @param {string} id */ id => id.toUpperCase());
     } catch (e) {
       // Detection is best-effort; errors are non-fatal
       console.debug('[build_ids] detect failed:', e);
@@ -141,6 +142,7 @@
     }
   }
 
+  /** @param {any} game */
   async function loadInstalledCheats(game) {
     installedLoading = true;
     installedLoadError = '';
@@ -178,6 +180,7 @@
    * Parse the raw cheat file content into individual named sections.
    * Each section starts with a [Name] header line.
    */
+  /** @param {string} content */
   function parseSections(content) {
     const sections = [];
     let current = null;
@@ -194,12 +197,17 @@
     return sections.map(s => ({ name: s.name, content: s.lines.join('\n').trimEnd() }));
   }
 
-  /** Sanitise a section name for use as a directory / file label. */
+  /** @param {string} sectionName */
   function toCheatName(sectionName) {
     return sectionName.slice(0, 60).replace(/[^\w\s\-()]/g, '').trim();
   }
 
+  /**
+   * @param {string} buildId
+   * @param {any} section
+   */
   async function installSection(buildId, section) {
+    if (!$selectedGame) return;
     const key = `${buildId}_${section.name}`;
     installing[key] = true;
     installMsg[key] = '';
@@ -259,10 +267,11 @@
     }
   }
 
+  /** @param {any} group */
   async function deleteCustomCheat(group) {
     deletingCustom[group.buildId] = true;
     try {
-      await Promise.all(group.customIds.map(id =>
+      await Promise.all(group.customIds.map(/** @param {any} id */ id =>
         invoke('delete_custom_cheat', { cheatId: id })
       ));
       await searchCheats();
@@ -273,7 +282,9 @@
     }
   }
 
+  /** @param {any} ic */
   async function deleteInstalledCheat(ic) {
+    if (!$selectedGame) return;
     const key = `del_${ic.cheatName}__${ic.buildId}`;
     deleting[key] = true;
     try {
@@ -304,9 +315,9 @@
 <main class="cheat-panel">
   {#if !$selectedGame}
     <div class="empty-state">
-      <div class="empty-icon">🎮</div>
-      <h2>No game selected</h2>
-      <p>Scan your library from the sidebar, then click a game to manage its cheats.</p>
+      <div class="empty-prompt">&gt;_</div>
+      <h2>NO GAME SELECTED</h2>
+      <p>Scan your library from the sidebar, then select a game to manage cheats.</p>
     </div>
 
   {:else if $selectedGame.category === 'dlc'}
@@ -356,7 +367,7 @@
           disabled={scanningBuildId || detectingBuildIds}
           onclick={scanBuildId}
         >
-          {scanningBuildId ? 'Scanning…' : '⟳ Scan Build ID'}
+          {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
         </button>
         {#if scanBuildIdError}
           <span class="scan-build-error">{scanBuildIdError}</span>
@@ -392,7 +403,7 @@
                 <code class="installed-bid">{ic.buildId}</code>
               </div>
               <button class="btn-delete" disabled={deleting[key]} onclick={() => deleteInstalledCheat(ic)}>
-                {deleting[key] ? '…' : '🗑'}
+                {deleting[key] ? '...' : '[ DEL ]'}
               </button>
             </div>
           {/each}
@@ -454,7 +465,7 @@
         <div class="build-list">
           {#each groupedCheats as group}
             {@const isOpen = expandedId === group.buildId}
-            {@const uninstalledSections = group.sections.filter(s => !installedSet.has(`${group.buildId}_${toCheatName(s.name)}`))}
+            {@const uninstalledSections = group.sections.filter(/** @param {any} s */ s => !installedSet.has(`${group.buildId}_${toCheatName(s.name)}`))}
             {@const installedCount = group.sections.length - uninstalledSections.length}
             <div class="build-group" class:open={isOpen}>
 
@@ -483,7 +494,7 @@
                     title="Delete custom cheats from database"
                     disabled={deletingCustom[group.buildId]}
                     onclick={() => deleteCustomCheat(group)}
-                  >{deletingCustom[group.buildId] ? '…' : '🗑'}</button>
+                  >{deletingCustom[group.buildId] ? '...' : '[ DEL ]'}</button>
                 {/if}
               </div>
 
@@ -505,7 +516,7 @@
                           disabled={installing[skey]}
                           onclick={() => installSection(group.buildId, section)}
                         >
-                          {installing[skey] ? '…' : '⬇ Install'}
+                          {installing[skey] ? '...' : '[ INSTALL ]'}
                         </button>
                       </div>
                     </div>
@@ -532,7 +543,7 @@
     background: var(--bg);
   }
 
-  /* ── Empty / DLC states ─────────────────────────────────────── */
+  /* ── Empty / DLC states ── */
   .empty-state {
     display: flex;
     flex-direction: column;
@@ -540,246 +551,297 @@
     justify-content: center;
     height: 100%;
     color: var(--text-muted);
-    gap: .5rem;
+    gap: .75rem;
     padding: 2rem;
   }
-  .empty-icon { font-size: 3.5rem; }
-  .empty-state h2 { margin: 0; color: var(--text); font-size: 1.2rem; }
-  .empty-state p  { font-size: .9rem; text-align: center; }
-  .dlc-info { padding: 1.5rem; color: var(--text-muted); font-size: .88rem; line-height: 1.5; }
+  .empty-prompt {
+    font-size: 2rem;
+    color: var(--accent);
+    letter-spacing: .1em;
+    animation: blink-cursor 1.2s step-end infinite;
+  }
+  @keyframes blink-cursor {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.2; }
+  }
+  .empty-state h2 { margin: 0; color: var(--text); font-size: 1rem; letter-spacing: .15em; }
+  .empty-state p  { font-size: .82rem; text-align: center; color: var(--text-muted); }
+  .dlc-info { padding: 1.5rem; color: var(--text-muted); font-size: .82rem; line-height: 1.6; }
 
-  /* ── Game header ────────────────────────────────────────────── */
+  /* ── Game header ── */
   .game-header {
-    min-height: 110px;
+    min-height: 100px;
     background: var(--surface);
     background-size: cover;
     background-position: center;
     flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
   }
   .game-header-overlay {
-    min-height: 110px;
-    background: linear-gradient(to right, rgba(16,16,24,.92) 0%, rgba(16,16,24,.6) 100%);
+    min-height: 100px;
+    background: linear-gradient(to right, rgba(8,6,0,.95) 0%, rgba(8,6,0,.7) 100%);
     display: flex;
     align-items: center;
-    gap: 1.25rem;
-    padding: 1.25rem 1.5rem;
+    gap: 1rem;
+    padding: 1rem 1.25rem;
   }
-  .game-art { width: 72px; height: 72px; border-radius: 8px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,.5); flex-shrink: 0; }
-  .game-title-info { display: flex; flex-direction: column; gap: .25rem; }
-  .game-title-info h1 { margin: 0; font-size: 1.4rem; }
-  .game-title-info > code { font-size: .8rem; color: var(--text-muted); }
+  .game-art {
+    width: 64px;
+    height: 64px;
+    object-fit: cover;
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    box-shadow: 0 0 12px rgba(0,0,0,.6);
+  }
+  .game-title-info { display: flex; flex-direction: column; gap: .2rem; }
+  .game-title-info h1 { margin: 0; font-size: 1.1rem; letter-spacing: .04em; }
+  .game-title-info > code { font-size: .72rem; color: var(--text-muted); letter-spacing: .06em; }
 
   .header-build-id {
     display: flex;
     align-items: center;
     gap: .4rem;
-    font-size: .75rem;
-    color: #34c759;
-    font-weight: 500;
+    font-size: .68rem;
+    color: var(--accent);
     margin-top: .1rem;
+    letter-spacing: .05em;
   }
   .header-build-id code {
-    font-size: .78rem;
-    font-weight: 700;
-    color: #34c759;
-    letter-spacing: .04em;
+    font-size: .72rem;
+    color: var(--accent);
+    letter-spacing: .06em;
   }
   .header-build-id.detecting {
     color: var(--text-muted);
     font-style: italic;
-    font-weight: 400;
   }
   .header-build-extra {
-    font-size: .7rem;
+    font-size: .65rem;
     color: var(--text-muted);
-    font-weight: 400;
   }
 
-  /* ── Misc ───────────────────────────────────────────────────── */
-  .error-msg { margin: .75rem 1.5rem 0; background: rgba(255,59,48,.15); color: #ff3b30; border-radius: 8px; padding: .5rem .9rem; font-size: .85rem; }
-  .no-cheats  { margin: .5rem 0 1.5rem; color: var(--text-muted); font-size: .9rem; }
-  .loading-msg { color: var(--text-muted); font-size: .88rem; padding: .5rem 0 1.5rem; }
+  /* ── Misc ── */
+  .error-msg {
+    margin: .75rem 1.25rem 0;
+    background: rgba(239,68,68,.1);
+    color: var(--error);
+    border-left: 2px solid var(--error);
+    padding: .4rem .75rem;
+    font-size: .78rem;
+  }
+  .no-cheats  { margin: .5rem 0 1.25rem; color: var(--text-muted); font-size: .82rem; }
+  .loading-msg { color: var(--text-muted); font-size: .78rem; padding: .5rem 0 1.25rem; letter-spacing: .08em; }
 
-  /* ── Sections ───────────────────────────────────────────────── */
-  .section { padding: 1.25rem 1.5rem 0; }
+  /* ── Sections ── */
+  .section { padding: 1rem 1.25rem 0; }
   .section-title {
-    margin: 0 0 .75rem;
-    font-size: .95rem;
+    margin: 0 0 .65rem;
+    font-size: .72rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
     display: flex;
     align-items: center;
     gap: .5rem;
+    color: var(--text-muted);
+  }
+  .section-title::before {
+    content: '//';
+    color: var(--text-dim);
+    font-size: .65rem;
   }
   .count-badge {
-    font-size: .75rem;
-    font-weight: 400;
+    font-size: .68rem;
     background: var(--surface2);
-    border-radius: 4px;
-    padding: .1rem .4rem;
+    padding: .05rem .4rem;
     color: var(--text-muted);
+    border: 1px solid var(--border);
+    letter-spacing: .04em;
   }
   .btn-refresh {
     background: none;
     border: 1px solid var(--border);
-    border-radius: 5px;
     color: var(--text-muted);
-    font-size: .85rem;
-    padding: .15rem .45rem;
+    font-size: .75rem;
+    padding: .1rem .4rem;
     cursor: pointer;
+    font-family: inherit;
+    transition: color .1s, border-color .1s;
   }
-  .btn-refresh:not(:disabled):hover { color: var(--text); }
-  .btn-refresh:disabled { opacity: .4; cursor: default; }
+  .btn-refresh:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
+  .btn-refresh:disabled { opacity: .35; cursor: default; }
 
-  /* ── Installed cheats ───────────────────────────────────────── */
-  .installed-list { display: flex; flex-direction: column; gap: .4rem; margin-bottom: 1.25rem; }
-  .installed-item { display: flex; align-items: center; background: var(--surface); border-radius: 8px; padding: .5rem .85rem; gap: .75rem; }
-  .installed-info { display: flex; flex-direction: column; flex: 1; gap: .1rem; }
-  .installed-name { font-size: .85rem; font-weight: 500; }
-  .installed-bid  { font-size: .72rem; color: var(--text-muted); }
-  .btn-delete { background: none; border: none; cursor: pointer; font-size: 1rem; padding: .2rem; opacity: .5; }
-  .btn-delete:not(:disabled):hover { opacity: 1; }
+  /* ── Installed cheats ── */
+  .installed-list { display: flex; flex-direction: column; gap: .3rem; margin-bottom: 1rem; }
+  .installed-item {
+    display: flex;
+    align-items: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--success);
+    padding: .45rem .75rem;
+    gap: .6rem;
+  }
+  .installed-info { display: flex; flex-direction: column; flex: 1; gap: .05rem; }
+  .installed-name { font-size: .8rem; }
+  .installed-bid  { font-size: .65rem; color: var(--text-muted); letter-spacing: .05em; }
+  .btn-delete {
+    background: none;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: .65rem;
+    padding: .1rem .35rem;
+    opacity: .4;
+    color: var(--text-muted);
+    font-family: inherit;
+    letter-spacing: .05em;
+    transition: opacity .12s, color .12s, border-color .12s;
+  }
+  .btn-delete:not(:disabled):hover { opacity: 1; color: var(--error); border-color: var(--error); }
 
-  /* ── Add-custom button ──────────────────────────────────────── */
+  /* ── Add-custom button ── */
   .btn-add-custom {
     background: none;
     border: 1px solid var(--border);
-    border-radius: 5px;
     color: var(--text-muted);
-    font-size: .78rem;
-    padding: .15rem .5rem;
+    font-size: .68rem;
+    padding: .1rem .45rem;
     cursor: pointer;
     margin-left: auto;
+    font-family: inherit;
+    letter-spacing: .05em;
+    transition: color .1s, border-color .1s;
   }
   .btn-add-custom:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
-  .btn-add-custom:disabled { opacity: .4; cursor: default; }
+  .btn-add-custom:disabled { opacity: .35; cursor: default; }
 
-  /* ── Custom cheat form ──────────────────────────────────────── */
+  /* ── Custom cheat form ── */
   .custom-form {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1rem;
-    margin-bottom: .75rem;
+    border-left: 2px solid var(--accent);
+    padding: .85rem 1rem;
+    margin-bottom: .65rem;
     display: flex;
     flex-direction: column;
-    gap: .65rem;
+    gap: .55rem;
   }
-  .custom-form-row { display: flex; flex-direction: column; gap: .3rem; }
-  .custom-label { font-size: .78rem; color: var(--text-muted); font-weight: 500; }
+  .custom-form-row { display: flex; flex-direction: column; gap: .25rem; }
+  .custom-label { font-size: .68rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
   .custom-input {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
     color: var(--text);
-    font-family: monospace;
-    font-size: .88rem;
-    padding: .4rem .65rem;
+    font-family: inherit;
+    font-size: .82rem;
+    padding: .35rem .55rem;
     width: 100%;
-    box-sizing: border-box;
+    letter-spacing: .04em;
+    transition: border-color .1s;
+    outline: none;
   }
-  .custom-input:focus { outline: none; border-color: var(--accent); }
+  .custom-input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
   .custom-textarea {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 6px;
     color: var(--text);
-    font-family: monospace;
-    font-size: .82rem;
-    padding: .4rem .65rem;
+    font-family: inherit;
+    font-size: .78rem;
+    padding: .35rem .55rem;
     width: 100%;
-    box-sizing: border-box;
     resize: vertical;
     line-height: 1.5;
+    transition: border-color .1s;
+    outline: none;
   }
-  .custom-textarea:focus { outline: none; border-color: var(--accent); }
-  .custom-error { font-size: .8rem; color: #ff3b30; }
-  .custom-form-actions { display: flex; gap: .5rem; justify-content: flex-end; }
+  .custom-textarea:focus { border-color: var(--accent); }
+  .custom-error { font-size: .75rem; color: var(--error); }
+  .custom-form-actions { display: flex; gap: .45rem; justify-content: flex-end; }
   .btn-cancel {
     background: none;
     border: 1px solid var(--border);
-    border-radius: 6px;
     color: var(--text-muted);
-    font-size: .82rem;
-    padding: .3rem .75rem;
+    font-size: .75rem;
+    padding: .25rem .65rem;
     cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .05em;
+    transition: color .1s;
   }
   .btn-cancel:hover { color: var(--text); }
   .btn-save-custom {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    font-size: .82rem;
-    font-weight: 600;
-    padding: .3rem .9rem;
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    font-size: .75rem;
+    padding: .25rem .8rem;
     cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .08em;
+    transition: background .15s, box-shadow .15s;
   }
-  .btn-save-custom:disabled { opacity: .4; cursor: default; }
-  .btn-save-custom:not(:disabled):hover { opacity: .85; }
+  .btn-save-custom:not(:disabled):hover { background: var(--accent-dim); box-shadow: 0 0 6px var(--accent-glow); }
+  .btn-save-custom:disabled { opacity: .35; cursor: default; }
 
-  /* ── Build-ID accordion ─────────────────────────────────────── */
-  .build-list { display: flex; flex-direction: column; gap: .5rem; padding-bottom: 1.5rem; }
+  /* ── Build-ID accordion ── */
+  .build-list { display: flex; flex-direction: column; gap: .35rem; padding-bottom: 1.5rem; }
 
   .build-group {
     background: var(--surface);
-    border-radius: 10px;
-    overflow: hidden;
     border: 1px solid var(--border);
+    overflow: hidden;
   }
-  .build-group.open { border-color: var(--accent); }
+  .build-group.open { border-color: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
 
-  .build-header-row {
-    display: flex;
-    align-items: center;
-  }
+  .build-header-row { display: flex; align-items: center; }
   .build-header {
     flex: 1;
     display: flex;
     align-items: center;
-    gap: .65rem;
-    padding: .75rem 1rem;
+    gap: .55rem;
+    padding: .6rem .85rem;
     background: none;
     border: none;
     color: var(--text);
     cursor: pointer;
     text-align: left;
     min-width: 0;
+    transition: background .1s;
   }
-  .build-header:hover { background: rgba(255,255,255,.04); }
+  .build-header:hover { background: rgba(245, 168, 0, 0.04); }
 
   .btn-delete-custom {
     background: none;
     border: none;
     cursor: pointer;
-    font-size: .95rem;
-    padding: .75rem .85rem;
-    opacity: .45;
+    font-size: .85rem;
+    padding: .6rem .75rem;
+    opacity: .35;
     flex-shrink: 0;
-    color: var(--text);
+    color: var(--text-muted);
+    transition: opacity .1s, color .1s;
   }
-  .btn-delete-custom:not(:disabled):hover { opacity: 1; color: #ff3b30; }
-  .btn-delete-custom:disabled { opacity: .25; cursor: default; }
+  .btn-delete-custom:not(:disabled):hover { opacity: 1; color: var(--error); }
+  .btn-delete-custom:disabled { opacity: .2; cursor: default; }
 
   .custom-badge {
-    font-size: .68rem;
-    font-weight: 700;
-    background: rgba(255,179,0,.15);
-    color: #ffb300;
-    border-radius: 4px;
-    padding: .05rem .4rem;
+    font-size: .62rem;
+    background: rgba(245, 168, 0, 0.12);
+    color: var(--accent);
+    padding: .05rem .35rem;
+    border: 1px solid rgba(245, 168, 0, 0.25);
     flex-shrink: 0;
-    letter-spacing: .02em;
+    letter-spacing: .06em;
+    text-transform: uppercase;
   }
 
-  .build-arrow { font-size: .7rem; color: var(--text-muted); flex-shrink: 0; width: .75rem; }
+  .build-arrow { font-size: .6rem; color: var(--text-dim); flex-shrink: 0; width: .7rem; }
   .build-id {
-    font-family: monospace;
-    font-size: .88rem;
-    font-weight: 600;
-    letter-spacing: .03em;
+    font-size: .8rem;
+    letter-spacing: .05em;
     flex-shrink: 0;
   }
   .build-meta {
-    font-size: .78rem;
+    font-size: .72rem;
     color: var(--text-muted);
     display: flex;
     align-items: center;
@@ -788,15 +850,14 @@
     flex-wrap: wrap;
   }
   .installed-count {
-    background: rgba(52,199,89,.15);
-    color: #34c759;
-    border-radius: 4px;
-    padding: .05rem .35rem;
-    font-size: .72rem;
-    font-weight: 600;
+    background: rgba(200, 134, 12, 0.1);
+    color: var(--success);
+    padding: .02rem .3rem;
+    font-size: .65rem;
+    border: 1px solid rgba(200, 134, 12, 0.25);
+    letter-spacing: .04em;
   }
 
-  /* Truncate long credits strings so bad DB data can't dump walls of text */
   .credits-text {
     display: inline-block;
     max-width: 40ch;
@@ -806,106 +867,97 @@
     vertical-align: bottom;
   }
 
-  /* ── Individual cheat sections ──────────────────────────────── */
+  /* ── Cheat section list ── */
   .section-list {
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
   }
-
   .section-item {
     display: flex;
     align-items: center;
-    padding: .55rem 1rem .55rem 2.1rem;
-    gap: .75rem;
-    border-bottom: 1px solid rgba(255,255,255,.04);
+    padding: .45rem .85rem .45rem 1.75rem;
+    gap: .65rem;
+    border-bottom: 1px solid rgba(53, 37, 16, 0.5);
     transition: background .1s;
   }
   .section-item:last-child { border-bottom: none; }
-  .section-item:hover { background: rgba(255,255,255,.03); }
-  .section-item.installed { background: rgba(52,199,89,.06); }
+  .section-item:hover { background: rgba(245, 168, 0, 0.03); }
 
-  .section-name {
-    flex: 1;
-    font-size: .88rem;
-  }
-  .section-item.installed .section-name { color: #34c759; }
-
-  .section-actions { display: flex; align-items: center; gap: .5rem; flex-shrink: 0; }
+  .section-name { flex: 1; font-size: .82rem; }
+  .section-actions { display: flex; align-items: center; gap: .45rem; flex-shrink: 0; }
 
   .btn-install {
-    background: var(--accent2, var(--accent));
-    color: #fff;
-    border: none;
-    border-radius: 6px;
-    padding: .3rem .75rem;
-    font-size: .8rem;
-    font-weight: 600;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    padding: .2rem .6rem;
+    font-size: .72rem;
     cursor: pointer;
-    transition: opacity .15s;
+    font-family: inherit;
+    letter-spacing: .08em;
+    transition: background .15s, box-shadow .15s;
     white-space: nowrap;
   }
-  .btn-install:disabled { opacity: .4; cursor: default; }
-  .btn-install:not(:disabled):hover { opacity: .85; }
+  .btn-install:not(:disabled):hover {
+    background: var(--accent-dim);
+    box-shadow: 0 0 5px var(--accent-glow);
+  }
+  .btn-install:disabled { opacity: .35; cursor: default; }
 
-  .installed-badge { font-size: .8rem; color: #34c759; font-weight: 600; }
-  .install-msg { font-size: .78rem; color: var(--text-muted); }
-  .install-msg.ok { color: #34c759; }
+  .install-msg { font-size: .72rem; color: var(--text-muted); }
+  .install-msg.ok { color: var(--success); }
 
-  /* ── Build ID detection ─────────────────────────────────────── */
+  /* ── Detection ── */
   .detected-badge {
-    font-size: .72rem;
-    font-weight: 600;
-    background: rgba(52,199,89,.15);
-    color: #34c759;
-    border-radius: 4px;
-    padding: .05rem .4rem;
+    font-size: .62rem;
+    background: rgba(245, 168, 0, 0.12);
+    color: var(--accent);
+    padding: .03rem .35rem;
+    border: 1px solid rgba(245, 168, 0, 0.25);
     flex-shrink: 0;
+    letter-spacing: .05em;
+    text-transform: uppercase;
   }
   .detected-hint {
-    margin: .5rem 1.5rem 0;
-    background: rgba(90,130,255,.12);
+    margin: .5rem 1.25rem 0;
+    background: var(--surface);
+    border-left: 2px solid var(--text-dim);
     color: var(--text-muted);
-    border-radius: 8px;
-    padding: .45rem .9rem;
-    font-size: .82rem;
-  }
-  .detected-hint code {
-    font-size: .8rem;
-    color: var(--text);
+    padding: .4rem .75rem;
+    font-size: .76rem;
   }
 
-  /* ── Scan Build ID ─────────────────────────────────────────────── */
+  /* ── Scan Build ID ── */
   .scan-build-bar {
     display: flex;
     align-items: center;
-    gap: .65rem;
-    padding: .6rem 1.5rem;
+    gap: .55rem;
+    padding: .5rem 1.25rem;
     flex-shrink: 0;
   }
   .btn-scan-build {
-    background: var(--surface);
+    background: transparent;
     border: 1px solid var(--border);
-    border-radius: 7px;
-    color: var(--text);
-    font-size: .82rem;
-    font-weight: 500;
-    padding: .3rem .9rem;
+    color: var(--text-muted);
+    font-size: .75rem;
+    padding: .25rem .75rem;
     cursor: pointer;
-    transition: opacity .15s, border-color .15s;
+    font-family: inherit;
+    letter-spacing: .08em;
+    transition: color .12s, border-color .12s, box-shadow .12s;
     white-space: nowrap;
   }
-  .btn-scan-build:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
-  .btn-scan-build:disabled { opacity: .45; cursor: default; }
+  .btn-scan-build:not(:disabled):hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 5px var(--accent-glow);
+  }
+  .btn-scan-build:disabled { opacity: .4; cursor: default; }
   .scan-build-hint {
-    font-size: .75rem;
-    color: var(--text-muted, #888);
-    margin: -.2rem 1.5rem .4rem;
-    padding: 0;
+    font-size: .7rem;
+    color: var(--text-dim);
+    margin: -.15rem 1.25rem .35rem;
   }
-  .scan-build-error {
-    font-size: .8rem;
-    color: #ff3b30;
-    flex: 1;
-  }
+  .scan-build-error { font-size: .76rem; color: var(--error); flex: 1; }
 </style>

@@ -1,19 +1,18 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { saveSettings } from '../stores/settings.js';
 
   /** @type {{ settings: any, onclose: function, onrerunSetup: function }} */
   let { settings, onclose, onrerunSetup } = $props();
 
-  let local = $state({
-    savedConnections: [],
-    ...settings,
-  });
+  // Snapshot prop — untrack prevents Svelte from warning about reactive prop reads at init
+  const _s = /** @type {any} */ (untrack(() => settings ?? {}));
+  let local = $state({ savedConnections: [], ..._s });
   let saving = $state(false);
   let saved = $state(false);
   let detectedDir = $state('');
-  let adbStatus = $state(null);
+  let adbStatus = $state(/** @type {any} */ (null));
   let checkingAdb = $state(false);
 
   // New connection form
@@ -55,11 +54,17 @@
     newConnPort = '';
   }
 
+  /** @param {number} i */
   function removeConnection(i) {
-    local.savedConnections = local.savedConnections.filter((_, idx) => idx !== i);
+    local.savedConnections = local.savedConnections.filter((/** @type {any} */ _, /** @type {number} */ idx) => idx !== i);
     if (editing?.idx === i) editing = null;
   }
 
+  /**
+   * @param {number} i
+   * @param {string} field
+   * @param {string} current
+   */
   function startEdit(i, field, current) {
     editing = { idx: i, field, value: current };
   }
@@ -67,7 +72,7 @@
   function saveEdit() {
     if (!editing) return;
     const { idx, field, value } = editing;
-    local.savedConnections = local.savedConnections.map((c, i) => {
+    local.savedConnections = local.savedConnections.map((/** @type {any} */ c, /** @type {number} */ i) => {
       if (i !== idx) return c;
       return { ...c, [field]: value };
     });
@@ -78,11 +83,13 @@
     editing = null;
   }
 
+  /** @param {KeyboardEvent} e */
   function handleEditKeydown(e) {
     if (e.key === 'Enter') saveEdit();
     if (e.key === 'Escape') cancelEdit();
   }
 
+  /** @param {any} conn */
   async function connectTo(conn) {
     try {
       await invoke('adb_connect', { adbPath: local.adbPath, ipPort: `${conn.ip}:${conn.port}` });
@@ -112,8 +119,11 @@
 >
   <div class="modal" role="dialog" aria-modal="true" aria-label="Settings">
     <div class="modal-header">
-      <h2>Settings</h2>
-      <button class="btn-close" onclick={() => onclose?.(settings)}>✕</button>
+      <div class="modal-title-row">
+        <span class="modal-brand">ECM</span>
+        <h2>// SETTINGS</h2>
+      </div>
+      <button class="btn-close" onclick={() => onclose?.(settings)}>[ X ]</button>
     </div>
 
     <div class="modal-body">
@@ -123,11 +133,11 @@
         <div class="radio-group">
           <label class="radio-label">
             <input type="radio" bind:group={local.targetMode} value="pc" />
-            🖥️ PC / Desktop
+            PC / DESKTOP
           </label>
           <label class="radio-label">
             <input type="radio" bind:group={local.targetMode} value="android" />
-            📱 Android (ADB)
+            ANDROID (ADB)
           </label>
         </div>
       </fieldset>
@@ -155,7 +165,7 @@
             <input bind:value={local.adbPath} placeholder="/usr/bin/adb" />
           </label>
           <button class="btn-secondary sm" onclick={checkAdb} disabled={checkingAdb}>
-            {checkingAdb ? 'Checking…' : 'Check connection'}
+            {checkingAdb ? '[ CHECKING... ]' : '[ CHECK CONNECTION ]'}
           </button>
           {#if adbStatus !== null}
             <div class="status-badge" class:ok={adbStatus.connected} class:warn={!adbStatus.connected}>
@@ -171,13 +181,14 @@
           {#if local.savedConnections.length > 0}
             <div class="conn-list">
               {#each local.savedConnections as conn, i}
-                {@const isEditing = editing?.idx === i}
+                {@const e = editing !== null && editing.idx === i ? editing : null}
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div class="conn-row" onkeydown={isEditing ? handleEditKeydown : undefined}>
-                  {#if isEditing && editing.field === 'label'}
+                <div class="conn-row" onkeydown={e !== null ? handleEditKeydown : undefined}>
+                  {#if e?.field === 'label'}
+                    <!-- svelte-ignore a11y_autofocus -->
                     <input
                       class="conn-edit-input conn-edit-label"
-                      bind:value={editing.value}
+                      bind:value={e.value}
                       onkeydown={handleEditKeydown}
                       autofocus
                     />
@@ -188,27 +199,29 @@
                     >{conn.label}</span>
                   {/if}
 
-                  {#if isEditing && editing.field === 'ip'}
+                  {#if e?.field === 'ip'}
+                    <!-- svelte-ignore a11y_autofocus -->
                     <input
                       class="conn-edit-input conn-edit-ip"
-                      bind:value={editing.value}
+                      bind:value={e.value}
                       onkeydown={handleEditKeydown}
                       autofocus
                     />
                     <span class="conn-sep">:</span>
                     <span class="conn-addr" role="button" tabindex="0"
                       onclick={() => startEdit(i, 'port', conn.port)}
-                      onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && startEdit(i, 'port', conn.port)}
+                      onkeydown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && startEdit(i, 'port', conn.port)}
                     >{conn.port}</span>
-                  {:else if isEditing && editing.field === 'port'}
+                  {:else if e?.field === 'port'}
                     <span class="conn-addr" role="button" tabindex="0"
                       onclick={() => startEdit(i, 'ip', conn.ip)}
-                      onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && startEdit(i, 'ip', conn.ip)}
+                      onkeydown={(ev) => (ev.key === 'Enter' || ev.key === ' ') && startEdit(i, 'ip', conn.ip)}
                     >{conn.ip}</span>
                     <span class="conn-sep">:</span>
+                    <!-- svelte-ignore a11y_autofocus -->
                     <input
                       class="conn-edit-input conn-edit-port"
-                      bind:value={editing.value}
+                      bind:value={e.value}
                       onkeydown={handleEditKeydown}
                       autofocus
                     />
@@ -221,11 +234,11 @@
                     </span>
                   {/if}
 
-                  <button class="btn-conn-use" onclick={isEditing ? saveEdit : () => connectTo(conn)}>
-                    {isEditing ? 'Save' : 'Use'}
+                  <button class="btn-conn-use" onclick={e !== null ? saveEdit : () => connectTo(conn)}>
+                    {e !== null ? 'Save' : 'Use'}
                   </button>
-                  <button class="btn-conn-del" onclick={isEditing ? cancelEdit : () => removeConnection(i)} title={isEditing ? 'Cancel' : 'Remove'}>
-                    ✕
+                  <button class="btn-conn-del" onclick={e !== null ? cancelEdit : () => removeConnection(i)} title={e !== null ? 'Cancel' : 'Remove'}>
+                    X
                   </button>
                 </div>
               {/each}
@@ -242,7 +255,7 @@
               <input bind:value={newConnPort} placeholder="Port" style="flex:0.6" />
             </div>
             <button class="btn-secondary sm" disabled={!newConnIp || !newConnPort} onclick={addConnection}>
-              Add
+              [ ADD ]
             </button>
           </div>
         </fieldset>
@@ -261,15 +274,15 @@
       <!-- Re-run onboarding -->
       <div class="danger-zone">
         <button class="btn-ghost" onclick={() => { local.onboardingDone = false; onrerunSetup?.(local); }}>
-          ↩ Re-run setup wizard
+          [ RE-RUN SETUP ]
         </button>
       </div>
     </div>
 
     <div class="modal-footer">
-      <button class="btn-secondary" onclick={() => onclose?.(settings)}>Cancel</button>
+      <button class="btn-secondary" onclick={() => onclose?.(settings)}>[ CANCEL ]</button>
       <button class="btn-primary" disabled={saving} onclick={save}>
-        {saving ? 'Saving…' : saved ? '✓ Saved' : 'Save'}
+        {saving ? '[ SAVING... ]' : saved ? '[ SAVED ]' : '[ SAVE ]'}
       </button>
     </div>
   </div>
@@ -278,99 +291,182 @@
 <style>
   .modal-backdrop {
     position: fixed; inset: 0;
-    background: rgba(0,0,0,.55);
+    background: rgba(0,0,0,.7);
     display: flex; align-items: center; justify-content: center;
     z-index: 100;
     padding: 1rem;
   }
   .modal {
     background: var(--surface);
-    border-radius: 14px;
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--accent);
     width: 100%;
     max-width: 500px;
     max-height: 90vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 12px 48px rgba(0,0,0,.5);
+    box-shadow: 0 0 40px rgba(0,0,0,.7), 0 0 20px rgba(245,168,0,.05);
   }
   .modal-header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 1.1rem 1.5rem;
+    padding: .85rem 1.25rem;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+    background: var(--surface2);
   }
-  .modal-header h2 { margin: 0; font-size: 1.1rem; }
-  .btn-close { background: none; border: none; color: var(--text-muted); font-size: 1rem; cursor: pointer; padding: .2rem; }
-  .btn-close:hover { color: var(--text); }
-  .modal-body { overflow-y: auto; padding: 1rem 1.5rem; display: flex; flex-direction: column; gap: 1rem; }
+  .modal-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: .6rem;
+  }
+  .modal-brand {
+    font-size: .82rem;
+    letter-spacing: .2em;
+    color: var(--accent);
+  }
+  .modal-header h2 { margin: 0; font-size: .78rem; color: var(--text-muted); letter-spacing: .1em; }
+  .btn-close {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .65rem;
+    cursor: pointer;
+    padding: .15rem .35rem;
+    letter-spacing: .05em;
+    font-family: inherit;
+    transition: color .12s, border-color .12s;
+  }
+  .btn-close:hover { color: var(--error); border-color: var(--error); }
+
+  .modal-body { overflow-y: auto; padding: .85rem 1.25rem; display: flex; flex-direction: column; gap: .85rem; }
   .modal-footer {
-    display: flex; justify-content: flex-end; gap: .75rem;
-    padding: 1rem 1.5rem;
+    display: flex; justify-content: flex-end; gap: .6rem;
+    padding: .75rem 1.25rem;
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+    background: var(--surface2);
   }
 
-  fieldset { border: 1px solid var(--border); border-radius: 8px; padding: .75rem 1rem; }
-  legend { font-size: .8rem; font-weight: 600; color: var(--text-muted); padding: 0 .4rem; }
-  label { display: flex; flex-direction: column; gap: .3rem; font-size: .82rem; color: var(--text-muted); margin-bottom: .5rem; }
+  fieldset { border: 1px solid var(--border); padding: .65rem .85rem; }
+  legend { font-size: .62rem; text-transform: uppercase; letter-spacing: .1em; color: var(--text-muted); padding: 0 .35rem; }
+  label { display: flex; flex-direction: column; gap: .22rem; font-size: .72rem; color: var(--text-muted); margin-bottom: .45rem; letter-spacing: .04em; }
   input {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
-    color: var(--text); padding: .45rem .7rem; font-size: .88rem; outline: none;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: .38rem .6rem;
+    font-size: .8rem;
+    outline: none;
+    font-family: inherit;
+    transition: border-color .12s;
+    width: 100%;
   }
-  input:focus { border-color: var(--accent); }
-  .radio-group { display: flex; gap: 1.5rem; }
-  .radio-label { flex-direction: row !important; align-items: center; gap: .4rem; cursor: pointer; font-size: .9rem !important; color: var(--text) !important; }
-  .hint { font-size: .78rem; color: var(--text-muted); margin: 0 0 .5rem; }
-  .optional { font-size: .72rem; color: var(--text-muted); }
-  code { font-family: monospace; font-size: .78rem; background: var(--surface2); padding: .1rem .35rem; border-radius: 3px; }
-  .status-badge { margin-top: .5rem; padding: .35rem .75rem; border-radius: 6px; font-size: .82rem; }
-  .status-badge.ok  { background: rgba(52,199,89,.15); color: #34c759; }
-  .status-badge.warn{ background: rgba(255,204,0,.15); color: #ffc500; }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
+  .radio-group { display: flex; gap: 1.25rem; }
+  .radio-label {
+    flex-direction: row !important;
+    align-items: center;
+    gap: .4rem;
+    cursor: pointer;
+    font-size: .78rem !important;
+    color: var(--text) !important;
+    letter-spacing: .04em !important;
+  }
+  .hint { font-size: .72rem; color: var(--text-muted); margin: 0 0 .45rem; line-height: 1.5; }
+  .optional { font-size: .65rem; color: var(--text-dim); }
+  code { font-family: inherit; font-size: .72rem; background: var(--surface2); padding: .05rem .3rem; border: 1px solid var(--border); }
+  .status-badge { margin-top: .45rem; padding: .3rem .65rem; font-size: .75rem; border-left: 2px solid transparent; }
+  .status-badge.ok   { background: rgba(74,222,128,.08); color: var(--success); border-left-color: var(--success); }
+  .status-badge.warn { background: rgba(245,168,0,.08); color: var(--accent); border-left-color: var(--accent); }
 
   .btn-primary, .btn-secondary {
-    border: none; border-radius: 8px; padding: .55rem 1.25rem;
-    font-size: .9rem; font-weight: 600; cursor: pointer; transition: opacity .15s;
+    padding: .42rem 1rem;
+    font-size: .72rem;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .08em;
+    transition: background .15s, box-shadow .15s, color .12s, border-color .12s;
   }
-  .btn-primary { background: var(--accent); color: #fff; }
-  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-  .btn-primary:disabled, .btn-secondary:disabled { opacity: .4; cursor: default; }
-  .btn-primary:not(:disabled):hover, .btn-secondary:not(:disabled):hover { opacity: .85; }
-  .btn-secondary.sm { padding: .35rem .9rem; font-size: .82rem; margin-top: .25rem; }
-  .btn-ghost { background: none; border: none; color: var(--text-muted); font-size: .82rem; cursor: pointer; padding: .25rem 0; text-decoration: underline; }
-  .btn-ghost:hover { color: #ff3b30; }
-  .danger-zone { margin-top: .5rem; }
-  p { margin: 0 0 .4rem; font-size: .85rem; color: var(--text-muted); }
+  .btn-primary {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+  }
+  .btn-primary:not(:disabled):hover { background: rgba(245,168,0,0.15); box-shadow: 0 0 8px var(--accent-glow); }
+  .btn-secondary {
+    background: none;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:not(:disabled):hover { color: var(--text); border-color: var(--text-muted); }
+  .btn-primary:disabled, .btn-secondary:disabled { opacity: .35; cursor: default; }
+  .btn-secondary.sm { padding: .28rem .7rem; font-size: .68rem; margin-top: .2rem; }
+
+  .btn-ghost {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: .72rem;
+    cursor: pointer;
+    padding: .2rem 0;
+    letter-spacing: .05em;
+    font-family: inherit;
+    transition: color .12s;
+  }
+  .btn-ghost:hover { color: var(--error); }
+  .danger-zone { margin-top: .35rem; }
+  p { margin: 0 0 .35rem; font-size: .78rem; color: var(--text-muted); }
 
   /* Saved connections */
-  .conn-list { display: flex; flex-direction: column; gap: .3rem; margin-bottom: .75rem; }
+  .conn-list { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .65rem; }
   .conn-row {
-    display: flex; align-items: center; gap: .4rem;
-    background: var(--surface2); border-radius: 4px; padding: .3rem .5rem;
-    font-size: .82rem;
+    display: flex; align-items: center; gap: .35rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: .28rem .5rem;
+    font-size: .75rem;
   }
-  .conn-label { font-weight: 500; color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
-  .conn-addr { color: var(--text-muted); font-family: monospace; font-size: .78rem; white-space: nowrap; cursor: text; }
-  .conn-sep { color: var(--text-muted); }
+  .conn-label { color: var(--text); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: text; }
+  .conn-addr { color: var(--text-muted); font-size: .68rem; white-space: nowrap; cursor: text; }
+  .conn-sep { color: var(--text-dim); }
   .conn-edit-input {
-    background: var(--surface); border: 1px solid var(--text-muted); border-radius: 3px;
-    color: var(--text); padding: .1rem .3rem; font-size: .78rem; font-family: monospace; outline: none;
+    background: var(--bg);
+    border: 1px solid var(--accent);
+    color: var(--text);
+    padding: .08rem .3rem;
+    font-size: .72rem;
+    font-family: inherit;
+    outline: none;
   }
-  .conn-edit-label { flex: 1; font-family: inherit; font-size: .82rem; font-weight: 500; }
-  .conn-edit-ip { width: 110px; }
-  .conn-edit-port { width: 52px; }
+  .conn-edit-label { flex: 1; font-size: .75rem; }
+  .conn-edit-ip { width: 105px; }
+  .conn-edit-port { width: 50px; }
   .btn-conn-use {
-    background: none; border: 1px solid var(--border); border-radius: 3px;
-    color: var(--text-muted); font-size: .72rem; padding: .1rem .4rem; cursor: pointer;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .65rem;
+    padding: .08rem .35rem;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .04em;
     white-space: nowrap;
+    transition: color .1s, border-color .1s;
   }
-  .btn-conn-use:hover { color: var(--text); border-color: var(--text-muted); }
+  .btn-conn-use:hover { color: var(--accent); border-color: var(--accent); }
   .btn-conn-del {
-    background: none; border: none; color: var(--text-muted); font-size: .75rem;
-    cursor: pointer; padding: .1rem .2rem; line-height: 1;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: .68rem;
+    cursor: pointer;
+    padding: .08rem .2rem;
+    font-family: inherit;
+    transition: color .1s;
   }
-  .btn-conn-del:hover { color: #ff3b30; }
-  .conn-add { margin-top: .5rem; }
-  .add-label { font-size: .72rem; color: var(--text-muted); margin: 0 0 .35rem; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
-  .conn-add-fields { display: flex; gap: .35rem; margin-bottom: .4rem; }
-  .conn-add-fields input { flex: 1; padding: .35rem .55rem; font-size: .82rem; }
+  .btn-conn-del:hover { color: var(--error); }
+  .conn-add { margin-top: .45rem; }
+  .add-label { font-size: .62rem; color: var(--text-dim); margin: 0 0 .3rem; text-transform: uppercase; letter-spacing: .1em; }
+  .conn-add-fields { display: flex; gap: .3rem; margin-bottom: .35rem; }
+  .conn-add-fields input { flex: 1; padding: .3rem .5rem; font-size: .75rem; }
 </style>
