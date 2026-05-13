@@ -1,274 +1,118 @@
-# eden-cheats-manager
+# Eden Cheats Manager
 
-A CLI tool that automates the tedious parts of managing cheats on the
-[Eden](https://github.com/eden-emulator) Nintendo Switch emulator for Android.
+A desktop app for managing cheat codes on the [Eden](https://github.com/eden-emulator) Nintendo Switch emulator. Supports both Android devices (via ADB) and PC installs.
 
-**Before:** hunt through log files by hand, create 3 levels of nested folders
-with exact hex names, fight Android's scoped storage file picker.
+**Before:** hunt through log files by hand, create 3 levels of nested folders with exact hex names, push files over ADB one at a time.
 
-**After:** `eden-cheats-manager wizard` — done in 30 seconds.
+**After:** open the app, pick a game, click Install.
 
-## What it does
+## Features
 
-| Step | Manual | eden-cheats-manager |
-|------|--------|-------------|
-| Find your Build ID | Scroll through logs, guess which `name=main` line is right | `eden-cheats-manager extract --adb` |
-| Create folder structure | File manager → create 3 nested folders one by one | Automatic |
-| Name the `.txt` file | Must be exactly the 16-char Build ID — easy to typo | Automatic |
-| Paste hex codes | Create file, paste, save, hope the format is right | Paste once in your editor |
-| Push to phone | Android file picker, navigate scoped storage | `eden-cheats-manager push` via ADB (WiFi or USB) |
+- Browse your installed Switch library (Android or PC)
+- Search a bundled offline cheat database (sourced from cheatslips.com)
+- Auto-detect Build IDs from Eden's log files
+- **Scan Build ID** — launch the game via ADB and capture the Build ID automatically
+- Install and delete individual cheats to your device or PC load directory
+- Create and save your own custom cheats
+- USB and wireless ADB device management
 
 ## Installation
 
-### Prerequisites
+Download the latest release for your platform from the [Releases](../../releases) page.
 
-- **Python 3.9+** (stdlib only, no pip packages needed)
-- **ADB** (`android-tools`) — for push and extract-over-WiFi
-- The [Eden emulator](https://github.com/eden-emulator) on your Android device
-- USB debugging enabled on your phone (Settings → Developer Options)
+### Build from source
 
-### Quick install
+**Prerequisites:** [Rust](https://rustup.rs), [Node.js](https://nodejs.org), [ADB](https://developer.android.com/tools/adb) (for Android mode)
 
 ```bash
-# Arch 
-sudo pacman -Syu android-tools
-
-# Debian / Ubuntu
-sudo apt install adb
-
-# macOS
-brew install android-platform-tools
+git clone https://github.com/ChrisA95G/eden-cheats-manager
+cd eden-cheats-manager/gui
+npm install
+npm run tauri build
 ```
-
-```bash
-# Install eden-cheats-manager itself
-mkdir -p ~/.local/bin
-curl -o ~/.local/bin/eden-cheats-manager https://raw.githubusercontent.com/ChrisA95G/eden-cheats-manager/master/eden-cheats-manager
-chmod +x ~/.local/bin/eden-cheats-manager
-
-# Add to PATH (add this line to your .bashrc / .zshrc / config.fish)
-export PATH="$HOME/.local/bin:$PATH"
-# Fish users:
-fish_add_path ~/.local/bin
-```
-
-> **Tip:** `eden-cheats-manager` is a mouthful. Add this alias to your shell config:
-> ```bash
-> alias ecm='eden-cheats-manager'
-> ```
-
-### Connect your phone
-
-**USB (first time):**
-```bash
-# Plug in via USB-C, then:
-adb devices
-# Tap "Always allow" on the phone prompt
-```
-
-**WiFi (after initial USB):**
-```bash
-adb tcpip 5555
-adb connect <device_ip>:5555   # your phone's IP
-adb devices                    # should show:  <device_ip>:5555  device
-```
-
----
 
 ## Quick start
 
-### The wizard (recommended)
+1. **First launch** — the setup wizard asks for your target mode:
+   - **Android** — point to your ADB binary and connect a device
+   - **PC** — point to your Eden load directory
 
-```bash
-eden-cheats-manager wizard
+2. **Scan your library** — click *Scan Games* in the sidebar. Your installed titles appear grouped by base game, update, and DLC.
+
+3. **Pick a game** — the right panel loads available cheats from the local database and detects your Build ID from Eden's logs automatically.
+
+4. **Install a cheat** — expand the matching Build ID row and click *Install* next to any cheat section.
+
+### Custom cheats
+
+If you have cheat codes that aren't in the database, click **+ Custom** in the Available Cheats header. Enter the Build ID (pre-filled if detected) and paste your cheat content in Eden's format:
+
+```
+[Cheat Name]
+04000000 00C88A70 3B9AC9FF
 ```
 
-Walks you through every step interactively:
-1. Enter Title ID (long-press game in Eden → Info → Program ID)
-2. Pull Build ID from phone log, parse a local log, or enter manually
-3. Name your cheat
-4. Paste or edit hex codes
-5. Push to device (optional)
+Custom cheats are saved to the local database and appear alongside bundled cheats.
 
-### Step-by-step
+### Scan Build ID (Android)
 
-```bash
-# 1. Find your Build ID
-eden-cheats-manager extract --adb              # from phone (WiFi/USB)
-eden-cheats-manager extract --log eden.log     # from a local log file
+If the Build ID isn't detected from existing logs, use **⟳ Scan Build ID**. The app launches the game via ADB, waits for Eden to write the Build ID to its log, then force-stops the game. Make sure the device screen is unlocked.
 
-# 2. Create the cheat
-eden-cheats-manager create \
-  -t 0100FF500E34A000 \                # Title ID
-  -b 92C78BB3DCBBC3F7 \                # Build ID (from step 1)
-  -n "Infinite HP" \                    # name shown in Eden
-  -c "[Infinite HP]
-04000000 00C88A70 3B9AC9FF"            # hex codes
+## How cheats work
 
-# Or read codes from a file
-eden-cheats-manager create -t ... -b ... -n "Speed 2x" -f cheat.txt
-# Or pipe from clipboard
-wl-paste | eden-cheats-manager create -t ... -b ... -n "Max Money" --stdin
+### Folder structure
 
-# 3. Push to your phone
-eden-cheats-manager push -t 0100FF500E34A000 -n "Infinite HP"
+Eden loads cheats from:
 
-# 4. In Eden: long-press game → Add-ons → Install → Mods and cheats
-#    Navigate to the cheat folder → select it → done
+```
+<load_dir>/
+  └── <TitleID>/        ← 16-char hex  (long-press game in Eden → Info → Program ID)
+       └── <CheatName>/ ← any name you choose
+            └── cheats/
+                 └── <BuildID>.txt   ← 16-char hex, version-specific
 ```
 
-### List what you have
-
-```bash
-eden-cheats-manager list                       # local cheats
-eden-cheats-manager list -t 0100FF500E34A000   # cheats for one game
-eden-cheats-manager list --adb                 # cheats on connected device
-```
-
----
-
-## How it works
-
-### The folder structure
-
-Eden expects cheats at:
-
+On Android the load directory is:
 ```
 /Android/data/dev.eden.eden_emulator/files/load/
-  └── <TitleID>/           ← 16-char hex (long-press → Info in Eden)
-       └── <CheatName>/    ← anything you want ("Infinite HP")
-            └── cheats/     ← must literally be "cheats"
-                 └── <BuildID>.txt  ← 16-char hex, game version specific
 ```
 
-Example:
+### What is a Build ID?
+
+When a game launches, Eden writes a line like this to its log:
 
 ```
-/.../load/0100FF500E34A000/EPX4/cheats/92C78BB3DCBBC3F7.txt
+Querying NSO patch existence for build_id=92C78BB3DCBBC3F7A3CAF601D7B85F7A36C20907, name=main
 ```
 
-### Where does the Build ID come from?
-
-Every time a game launches, Eden writes a line like this to its log:
-
-```
-[  56.453463] Loader <Info> core/file_sys/patch_manager.cpp:456:HasNSOPatch:
-  Querying NSO patch existence for build_id=92C78BB3DCBBC3F7A3CAF601D7B85F7A36C20907, name=main
-```
-
-`eden-cheats-manager extract` finds the `name=main` line and takes the **first 16 characters**
-of the hash — that's your Build ID. Different game versions have different Build IDs,
-so you need cheats matching your exact version.
-
-### Why not just use Cheatslips' download button?
-
-Cheatslips' downloads are packaged for Atmosphere CFW on real Switch hardware
-(`atmosphere/contents/...`). Eden uses a completely different folder structure and
-requires **one cheat per folder**. eden-cheats-manager bridges that gap.
-
----
-
-## Command reference
-
-### `extract` — Find Build IDs
-
-```
-eden-cheats-manager extract --adb          # pull log from phone
-eden-cheats-manager extract --log PATH     # parse local log file
-```
-
-Outputs a table of all unique Build IDs found in the log, showing both the
-16-char version (use this) and the full hash.
-
-### `create` — Build cheat folder
-
-```
-eden-cheats-manager create -t TITLE_ID -b BUILD_ID -n NAME (-c CODE | -f FILE | --stdin)
-```
-
-| Flag | Description |
-|------|-------------|
-| `-t, --title-id` | Game Title ID (16 hex chars) |
-| `-b, --build-id` | Build ID (16 hex chars, from `extract`) |
-| `-n, --name` | Display name in Eden |
-| `-c, --code` | Hex codes as a string |
-| `-f, --file` | Read hex codes from a file |
-| `--stdin` | Read hex codes from stdin |
-| `-o, --output` | Custom output directory |
-| `--no-push` | Don't show push hint after creation |
-
-If no code source is given, opens `$EDITOR` (or nano) for you to type/paste.
-
-### `push` — Send to device via ADB
-
-```
-eden-cheats-manager push -t TITLE_ID [-n NAME]
-```
-
-Pushes one cheat or all cheats for a game. Requires ADB device connected.
-
-### `list` — Show installed cheats
-
-```
-eden-cheats-manager list [-t TITLE_ID] [--adb] [-l PATH]
-```
-
-### `wizard` — Interactive walkthrough
-
-```
-eden-cheats-manager wizard
-```
-
-Guides you through Title ID → Build ID → name → codes → push. Best way to start.
-
----
+The **first 16 characters** (`92C78BB3DCBBC3F7`) are the Build ID. Cheats are tied to a specific game version — a game update changes the Build ID and existing cheats stop working until you find codes for the new version.
 
 ## Troubleshooting
 
-### "Could not pull log" / no Build IDs found
-- Make sure you've launched the game at least once in Eden (to generate a log entry).
-- Check the **old** log too: `eden-cheats-manager extract --adb` checks both
-  `eden_log.txt` and `eden_log.txt.old.txt` automatically.
-- If scoped storage blocks ADB from reading the log, pull it manually:
-  On your phone, use a file manager to copy
-  `Android/data/dev.eden.eden_emulator/files/log/eden_log.txt` to `Downloads/`,
-  then: `eden-cheats-manager extract --log ~/Downloads/eden_log.txt`
+**Build ID not detected**
+Launch the game in Eden at least once to generate a log entry, then use *Detect Build IDs* or *Scan Build ID*.
 
-### Push fails with "Operation not permitted"
-Android's scoped storage prevents `adb push` from creating directories inside
-app-private storage. eden-cheats-manager works around this by creating the directory
-via `adb shell mkdir -p` first. If you still hit this, make sure you're running
-the latest version of the script.
+**Scan Build ID fails**
+- Screen must be unlocked
+- Make sure the game is listed in one of Eden's configured ROM directories
+- If the game is on an SD card, Eden must have SAF access to that directory
 
-### Cheat doesn't appear in Eden
-- **Build ID mismatch** — #1 cause. Triple-check it matches your game version.
-  Each game update changes the Build ID.
-- Make sure you selected the **cheat folder** (the one containing `cheats/`),
-  not the `cheats/` subdirectory itself, in Eden's file picker.
-- File must be named exactly `<BuildID>.txt` (uppercase hex).
+**Cheat doesn't appear in Eden**
+- Confirm the Build ID matches your exact game version — updates change it
+- In Eden: long-press game → Add-ons → Install → navigate to the cheat folder (the folder *containing* `cheats/`, not `cheats/` itself)
 
-### Cheat shows but doesn't work
-- The hex codes may be for a different game version. Even minor updates change
-  memory addresses.
-- Some cheats only work with specific emulator settings (CPU accuracy, etc.).
-- Test on PC with Ryujinx first if you have access to one — it'll confirm
-  whether the codes are valid before you spend time on Android.
+**Cheat shows but doesn't work**
+- The codes may target a different game version — memory addresses change with updates
+- Check whether the cheat requires specific emulator settings (CPU accuracy, etc.)
 
----
-
-## Files and storage
+## File locations
 
 | What | Where |
 |------|-------|
-| Script | `~/.local/bin/eden-cheats-manager` |
-| Local cheat storage | `~/.local/share/eden-cheats-manager/` |
-| Device cheat storage | `/Android/data/dev.eden.eden_emulator/files/load/` |
-| Eden logs (on device) | `/Android/data/dev.eden.eden_emulator/files/log/` |
-
----
+| App data (cached DBs, settings) | Platform app data directory |
+| Android cheat storage | `/Android/data/dev.eden.eden_emulator/files/load/` |
+| Eden logs (Android) | `/Android/data/dev.eden.eden_emulator/files/log/` |
 
 ## License
 
-MIT © 2026
-
-See [LICENSE](LICENSE) for full text.
+MIT © 2026 — see [LICENSE](LICENSE)
