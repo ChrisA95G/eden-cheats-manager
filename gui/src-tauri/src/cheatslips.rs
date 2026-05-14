@@ -147,7 +147,8 @@ fn code_fingerprint(content: &str) -> String {
         .lines()
         .map(|l| l.trim())
         .filter(|l| {
-            l.len() >= 8 && l[..8].chars().all(|c| c.is_ascii_hexdigit())
+            let mut chars = l.chars();
+            (0..8).all(|_| chars.next().map(|c| c.is_ascii_hexdigit()).unwrap_or(false))
         })
         .map(|l| l.to_lowercase())
         .collect::<Vec<_>>()
