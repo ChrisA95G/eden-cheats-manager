@@ -1,5 +1,6 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
+  import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { onMount, untrack } from 'svelte';
   import { saveSettings } from '../stores/settings.js';
 
@@ -29,6 +30,11 @@
     } catch (_) {}
     if (local.targetMode === 'android') checkAdb();
   });
+
+  async function browseLoadDir() {
+    const selected = await openDialog({ directory: true, title: 'Select Eden load directory' });
+    if (selected) local.pcLoadDir = selected;
+  }
 
   async function checkAdb() {
     checkingAdb = true;
@@ -130,15 +136,15 @@
       <!-- Mode -->
       <fieldset>
         <legend>Target Mode</legend>
-        <div class="radio-group">
-          <label class="radio-label">
-            <input type="radio" bind:group={local.targetMode} value="pc" />
+        <div class="mode-btns">
+          <button class="mode-btn" class:active={local.targetMode === 'pc'} onclick={() => local.targetMode = 'pc'}>
+            <span class="mode-check">{local.targetMode === 'pc' ? '[*]' : '[ ]'}</span>
             PC / DESKTOP
-          </label>
-          <label class="radio-label">
-            <input type="radio" bind:group={local.targetMode} value="android" />
+          </button>
+          <button class="mode-btn" class:active={local.targetMode === 'android'} onclick={() => local.targetMode = 'android'}>
+            <span class="mode-check">{local.targetMode === 'android' ? '[*]' : '[ ]'}</span>
             ANDROID (ADB)
-          </label>
+          </button>
         </div>
       </fieldset>
 
@@ -151,7 +157,10 @@
           {/if}
           <label>
             Path
-            <input bind:value={local.pcLoadDir} placeholder="~/.local/share/eden/load/" />
+            <div class="path-row">
+              <input bind:value={local.pcLoadDir} placeholder="~/.local/share/eden/load/" />
+              <button class="btn-browse" onclick={browseLoadDir} title="Browse for folder">[ … ]</button>
+            </div>
           </label>
         </fieldset>
       {/if}
@@ -362,16 +371,41 @@
     width: 100%;
   }
   input:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-glow); }
-  .radio-group { display: flex; gap: 1.25rem; }
-  .radio-label {
-    flex-direction: row !important;
+  .mode-btns { display: flex; gap: .5rem; }
+  .mode-btn {
+    flex: 1;
+    display: flex;
     align-items: center;
-    gap: .4rem;
+    gap: .45rem;
+    padding: .38rem .65rem;
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: .78rem;
+    letter-spacing: .05em;
     cursor: pointer;
-    font-size: .78rem !important;
-    color: var(--text) !important;
-    letter-spacing: .04em !important;
+    transition: border-color .12s, color .12s, background .12s;
   }
+  .mode-btn:hover { border-color: var(--text-muted); color: var(--text); }
+  .mode-btn.active { border-color: var(--accent); color: var(--text); background: var(--accent-dim); }
+  .mode-check { font-size: .8rem; color: var(--accent); flex-shrink: 0; letter-spacing: -.02em; }
+
+  .path-row { display: flex; gap: .35rem; }
+  .path-row input { flex: 1; }
+  .btn-browse {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .72rem;
+    padding: .38rem .55rem;
+    cursor: pointer;
+    font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: color .1s, border-color .1s;
+  }
+  .btn-browse:hover { color: var(--accent); border-color: var(--accent); }
   .hint { font-size: .72rem; color: var(--text-muted); margin: 0 0 .45rem; line-height: 1.5; }
   .optional { font-size: .65rem; color: var(--text-dim); }
   code { font-family: inherit; font-size: .72rem; background: var(--surface2); padding: .05rem .3rem; border: 1px solid var(--border); }
