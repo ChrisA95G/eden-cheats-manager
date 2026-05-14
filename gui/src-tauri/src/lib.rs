@@ -59,6 +59,8 @@ pub fn run() {
             cheatslips::search_cheats,
             cheatslips::save_custom_cheat,
             cheatslips::delete_custom_cheat,
+            cheatslips::clear_api_cheats,
+            cheatslips::fetch_cheats_online,
             // games
             games::scan_eden_games_android,
             games::scan_eden_games_pc,

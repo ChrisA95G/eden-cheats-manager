@@ -94,13 +94,17 @@ fn ensure_cheats_db(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(data_path)
 }
 
-/// Add the `custom` column if it doesn't already exist. Safe to run on every startup.
+/// Add missing columns if they don't already exist. Safe to run on every startup.
 fn migrate_cheats_db(path: &PathBuf) -> Result<(), String> {
     let conn = Connection::open(path)
         .map_err(|e| format!("Failed to open cheats.db for migration: {}", e))?;
-    // Ignore "duplicate column" error — means migration already ran.
+    // Ignore "duplicate column" errors — means that migration already ran.
     let _ = conn.execute(
         "ALTER TABLE cheats ADD COLUMN custom INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE cheats ADD COLUMN api_fetched INTEGER NOT NULL DEFAULT 0",
         [],
     );
     Ok(())
@@ -240,6 +244,140 @@ pub fn save_custom_cheat(
         description,
         custom: true,
     })
+}
+
+// ── Cheatslips API types ─────────────────────────────────────────────────────
+// The API returns a single Game object (not an array), with lowercase field names.
+
+#[derive(Debug, Deserialize)]
+struct ApiCheat {
+    buildid: String,
+    content: String,
+    credits: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApiGame {
+    cheats: Vec<ApiCheat>,
+}
+
+/// Fetch cheats from the Cheatslips API for the given title ID and cache them
+/// in the local cheats.db. Returns the number of new entries inserted.
+#[tauri::command]
+pub async fn fetch_cheats_online(
+    app: AppHandle,
+    title_id: String,
+    api_token: String,
+) -> Result<usize, String> {
+    let token = api_token.trim().to_string();
+    if token.is_empty() {
+        return Err("API token required — add it in Settings.".to_string());
+    }
+
+    let title_id_upper = title_id.trim().to_uppercase();
+    let url = format!(
+        "https://www.cheatslips.com/api/v1/cheats/{}",
+        title_id_upper
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))?;
+
+    let resp = client
+        .get(&url)
+        .header("X-API-TOKEN", &token)
+        .send()
+        .await
+        .map_err(|e| format!("Network error: {}", e))?;
+
+    match resp.status().as_u16() {
+        429 => {
+            return Err(
+                "Daily rate limit reached (3 requests/day). Try again tomorrow.".to_string(),
+            )
+        }
+        401 | 403 => {
+            return Err("Invalid or expired API token. Check your Settings.".to_string())
+        }
+        404 => return Ok(0),
+        s if s >= 400 => return Err(format!("API returned HTTP {}", s)),
+        _ => {}
+    }
+
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read API response body: {}", e))?;
+
+    log::debug!(
+        "[cheatslips_api] raw response for {}: {}",
+        title_id_upper,
+        body
+    );
+
+    let game: ApiGame = serde_json::from_str(&body).map_err(|e| {
+        let preview = &body[..body.len().min(400)];
+        format!("Failed to parse API response: {} — body: {}", e, preview)
+    })?;
+
+    // DB operations — no more .await after this point
+    let cheats_db_path = ensure_cheats_db(&app)?;
+    let conn = Connection::open(&cheats_db_path)
+        .map_err(|e| format!("Failed to open cheats.db: {}", e))?;
+
+    let mut inserted = 0usize;
+    for cheat in &game.cheats {
+        if cheat.content.trim().is_empty() {
+            continue;
+        }
+        let bid = cheat.buildid.trim().to_uppercase();
+        let credits = cheat.credits.as_deref().unwrap_or("").to_string();
+        let n = conn
+            .execute(
+                "INSERT INTO cheats (title_id, build_id, content, credits, custom, api_fetched) \
+                 SELECT ?1, ?2, ?3, ?4, 0, 1 \
+                 WHERE NOT EXISTS (\
+                   SELECT 1 FROM cheats \
+                   WHERE title_id = ?1 AND build_id = ?2 AND content = ?3\
+                 )",
+                rusqlite::params![title_id_upper, bid, cheat.content, credits],
+            )
+            .map_err(|e| format!("DB insert error: {}", e))?;
+        inserted += n;
+    }
+
+    log::info!(
+        "[cheatslips_api] {}: {} new cheats cached from API",
+        title_id_upper,
+        inserted
+    );
+    Ok(inserted)
+}
+
+/// Delete all API-fetched cheats for a given title from cheats.db.
+/// Bundled and user-custom entries are left untouched.
+#[tauri::command]
+pub fn clear_api_cheats(app: AppHandle, title_id: String) -> Result<usize, String> {
+    let cheats_db_path = ensure_cheats_db(&app)?;
+    let conn = Connection::open(&cheats_db_path)
+        .map_err(|e| format!("Failed to open cheats.db: {}", e))?;
+
+    let title_id_upper = title_id.trim().to_uppercase();
+    let deleted = conn
+        .execute(
+            "DELETE FROM cheats WHERE title_id = ?1 AND api_fetched = 1",
+            rusqlite::params![title_id_upper],
+        )
+        .map_err(|e| format!("Failed to clear API cheats: {}", e))?;
+
+    log::info!(
+        "[cheatslips_api] cleared {} API-fetched cheats for {}",
+        deleted,
+        title_id_upper
+    );
+    Ok(deleted)
 }
 
 /// Delete a custom cheat entry from cheats.db. Only works on custom entries.
