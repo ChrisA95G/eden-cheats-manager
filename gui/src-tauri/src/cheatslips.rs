@@ -107,7 +107,41 @@ fn migrate_cheats_db(path: &PathBuf) -> Result<(), String> {
         "ALTER TABLE cheats ADD COLUMN api_fetched INTEGER NOT NULL DEFAULT 0",
         [],
     );
+    let _ = conn.execute(
+        "ALTER TABLE cheats ADD COLUMN code_hash TEXT",
+        [],
+    );
+    // Backfill code_hash for any rows that don't have it yet.
+    let mut stmt = conn
+        .prepare("SELECT id, content FROM cheats WHERE code_hash IS NULL")
+        .map_err(|e| format!("Failed to prepare backfill query: {}", e))?;
+    let ids_and_contents: Vec<(i64, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| format!("Failed to query rows for backfill: {}", e))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+    for (id, content) in ids_and_contents {
+        let hash = code_fingerprint(&content);
+        let _ = conn.execute(
+            "UPDATE cheats SET code_hash = ?1 WHERE id = ?2",
+            rusqlite::params![hash, id],
+        );
+    }
     Ok(())
+}
+
+/// Produce a stable fingerprint of the actual cheat opcodes in a content blob,
+/// ignoring section names, blank lines, and whitespace differences.
+/// Two content strings with identical codes but different names produce the same hash.
+fn code_fingerprint(content: &str) -> String {
+    content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !(l.starts_with('[') && l.ends_with(']')))
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase()
 }
 
 fn build_description(content: &str, build_id: &str) -> String {
@@ -223,11 +257,12 @@ pub fn save_custom_cheat(
     let title_id_upper = title_id.to_uppercase();
     let build_id_upper = build_id.trim().to_uppercase();
     let content_trimmed = content.trim().to_string();
+    let hash = code_fingerprint(&content_trimmed);
 
     conn.execute(
-        "INSERT INTO cheats (title_id, build_id, content, credits, custom) \
-         VALUES (?1, ?2, ?3, '', 1)",
-        rusqlite::params![title_id_upper, build_id_upper, content_trimmed],
+        "INSERT INTO cheats (title_id, build_id, content, credits, custom, code_hash) \
+         VALUES (?1, ?2, ?3, '', 1, ?4)",
+        rusqlite::params![title_id_upper, build_id_upper, content_trimmed, hash],
     )
     .map_err(|e| format!("Failed to save custom cheat: {}", e))?;
 
@@ -334,15 +369,16 @@ pub async fn fetch_cheats_online(
         }
         let bid = cheat.buildid.trim().to_uppercase();
         let credits = cheat.credits.as_deref().unwrap_or("").to_string();
+        let hash = code_fingerprint(&cheat.content);
         let n = conn
             .execute(
-                "INSERT INTO cheats (title_id, build_id, content, credits, custom, api_fetched) \
-                 SELECT ?1, ?2, ?3, ?4, 0, 1 \
+                "INSERT INTO cheats (title_id, build_id, content, credits, custom, api_fetched, code_hash) \
+                 SELECT ?1, ?2, ?3, ?4, 0, 1, ?5 \
                  WHERE NOT EXISTS (\
                    SELECT 1 FROM cheats \
-                   WHERE title_id = ?1 AND build_id = ?2 AND content = ?3\
+                   WHERE title_id = ?1 AND build_id = ?2 AND code_hash = ?5\
                  )",
-                rusqlite::params![title_id_upper, bid, cheat.content, credits],
+                rusqlite::params![title_id_upper, bid, cheat.content, credits, hash],
             )
             .map_err(|e| format!("DB insert error: {}", e))?;
         inserted += n;
