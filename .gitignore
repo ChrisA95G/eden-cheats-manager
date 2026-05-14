@@ -9,3 +9,6 @@ node_modules/
 target/
 .vscode/
 CLAUDE.md
+.agents
+.claude
+skills-lock.json
