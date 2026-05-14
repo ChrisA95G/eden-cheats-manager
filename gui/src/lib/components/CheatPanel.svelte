@@ -31,6 +31,12 @@
   let scanningBuildId = $state(false);
   let scanBuildIdError = $state('');
 
+  // Fetch from API state
+  let fetchingOnline = $state(false);
+  let fetchOnlineMsg = $state('');
+  let fetchOnlineError = $state('');
+  let clearingApi = $state(false);
+
   // Custom cheat form
   let showCustomForm = $state(false);
   let customBuildId = $state('');
@@ -76,6 +82,9 @@
       customBuildId = '';
       customContent = '';
       customSaveError = '';
+      fetchOnlineMsg = '';
+      fetchOnlineError = '';
+      clearingApi = false;
       searchCheats();
       detectBuildIds($selectedGame);
     }
@@ -236,6 +245,45 @@
       installMsg[key] = '✗';
     } finally {
       installing[key] = false;
+    }
+  }
+
+  async function fetchOnline() {
+    if (!$selectedGame) return;
+    fetchingOnline = true;
+    fetchOnlineMsg = '';
+    fetchOnlineError = '';
+    try {
+      const added = await invoke('fetch_cheats_online', {
+        titleId: $selectedGame.titleId,
+        apiToken: settings.apiToken ?? '',
+      });
+      fetchOnlineMsg = added === 0
+        ? 'Already up to date — no new cheats found.'
+        : `${added} new cheat${added !== 1 ? 's' : ''} cached from Cheatslips.`;
+      await searchCheats();
+    } catch (e) {
+      fetchOnlineError = String(e);
+    } finally {
+      fetchingOnline = false;
+    }
+  }
+
+  async function clearApiCheats() {
+    if (!$selectedGame) return;
+    clearingApi = true;
+    fetchOnlineMsg = '';
+    fetchOnlineError = '';
+    try {
+      const deleted = await invoke('clear_api_cheats', { titleId: $selectedGame.titleId });
+      fetchOnlineMsg = deleted === 0
+        ? 'No API-fetched cheats to clear.'
+        : `Cleared ${deleted} API-fetched cheat${deleted !== 1 ? 's' : ''} from local DB.`;
+      await searchCheats();
+    } catch (e) {
+      fetchOnlineError = String(e);
+    } finally {
+      clearingApi = false;
     }
   }
 
@@ -420,9 +468,27 @@
             {groupedCheats.length} build{groupedCheats.length !== 1 ? 's' : ''}
           </span>
         {/if}
+        <button
+          class="btn-fetch-online"
+          onclick={fetchOnline}
+          disabled={fetchingOnline || clearingApi || !settings.apiToken}
+          title={settings.apiToken ? 'Fetch cheats from Cheatslips API (3 requests/day limit)' : 'Set a Cheatslips API token in Settings to use this'}
+        >{fetchingOnline ? '...' : '↓ API'}</button>
+        <button
+          class="btn-clear-api"
+          onclick={clearApiCheats}
+          disabled={clearingApi || fetchingOnline}
+          title="Remove all API-fetched cheats for this game from the local DB"
+        >{clearingApi ? '...' : '✕ API'}</button>
         <button class="btn-add-custom" onclick={openCustomForm} disabled={showCustomForm} title="Add custom cheat">+ Custom</button>
         <button class="btn-refresh" onclick={searchCheats} disabled={cheatsLoading} title="Refresh">↺</button>
       </h3>
+
+      {#if fetchOnlineMsg}
+        <div class="fetch-result ok">{fetchOnlineMsg}</div>
+      {:else if fetchOnlineError}
+        <div class="fetch-result err">{fetchOnlineError}</div>
+      {/if}
 
       {#if showCustomForm}
         <div class="custom-form">
@@ -669,6 +735,43 @@
   }
   .btn-refresh:not(:disabled):hover { color: var(--accent); border-color: var(--accent); }
   .btn-refresh:disabled { opacity: .35; cursor: default; }
+
+  .btn-fetch-online {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .68rem;
+    padding: .1rem .45rem;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .05em;
+    transition: color .1s, border-color .1s;
+  }
+  .btn-fetch-online:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+  .btn-fetch-online:disabled { opacity: .35; cursor: default; }
+
+  .btn-clear-api {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .68rem;
+    padding: .1rem .45rem;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .05em;
+    transition: color .1s, border-color .1s;
+  }
+  .btn-clear-api:not(:disabled):hover { border-color: var(--error); color: var(--error); }
+  .btn-clear-api:disabled { opacity: .35; cursor: default; }
+
+  .fetch-result {
+    margin: 0 0 .5rem;
+    padding: .3rem .6rem;
+    font-size: .75rem;
+    border-left: 2px solid transparent;
+  }
+  .fetch-result.ok  { background: rgba(74,222,128,.07); color: var(--success); border-left-color: var(--success); }
+  .fetch-result.err { background: rgba(239,68,68,.07); color: var(--error); border-left-color: var(--error); }
 
   /* ── Installed cheats ── */
   .installed-list { display: flex; flex-direction: column; gap: .3rem; margin-bottom: 1rem; }
