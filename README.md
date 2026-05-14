@@ -127,8 +127,6 @@ You can change any of these settings later via the **SYS** button in the top-rig
 
 ## 4. Using the app
 
-![Settings modal](docs/images/settings.png)
-
 ### Scan your library
 
 Click **[ SCAN LIBRARY ]** in the sidebar. The app scans your installed games and groups them by title (base game, updates, DLCs).
