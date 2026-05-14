@@ -10,10 +10,12 @@ A desktop app for managing cheat codes on the [Eden](https://github.com/eden-emu
 
 - Browse your installed Switch library (Android or PC)
 - Search a bundled offline cheat database (sourced from cheatslips.com)
+- **Fetch from Cheatslips API** — pull the latest cheats for any game on demand using your own API key (3 requests/day on the free tier)
 - Auto-detect Build IDs from Eden's log files
 - **Scan Build ID** — launch the game via ADB and capture the Build ID automatically
 - Install and delete individual cheats to your device or PC load directory
 - Create and save your own custom cheats
+- Clear API-fetched cheats per game to start fresh
 - USB and wireless ADB device management
 
 ## Installation
@@ -43,6 +45,18 @@ npm run tauri build
 
 4. **Install a cheat** — expand the matching Build ID row and click *Install* next to any cheat section.
 
+### Fetching cheats from Cheatslips
+
+The bundled database covers many games but is static. To get the latest cheats:
+
+1. Sign up at [cheatslips.com](https://www.cheatslips.com) and get your API token
+2. Paste it in **Settings → Cheatslips API Token**
+3. Select a game and click **↓ API** in the Available Cheats header
+
+Fetched cheats are cached in your local database — subsequent opens load instantly without using a request. The free tier allows **3 requests per day**.
+
+To remove API-fetched cheats for a game (e.g. to re-fetch after a bad result), click **✕ API** next to the fetch button.
+
 ### Custom cheats
 
 If you have cheat codes that aren't in the database, click **+ Custom** in the Available Cheats header. Enter the Build ID (pre-filled if detected) and paste your cheat content in Eden's format:
@@ -56,7 +70,7 @@ Custom cheats are saved to the local database and appear alongside bundled cheat
 
 ### Scan Build ID (Android)
 
-If the Build ID isn't detected from existing logs, use **⟳ Scan Build ID**. The app launches the game via ADB, waits for Eden to write the Build ID to its log, then force-stops the game. Make sure the device screen is unlocked.
+If the Build ID isn't detected from existing logs, use **Scan Build ID**. The app launches the game via ADB, waits for Eden to write the Build ID to its log, then force-stops the game. Make sure the device screen is unlocked.
 
 ## How cheats work
 
@@ -104,6 +118,9 @@ Launch the game in Eden at least once to generate a log entry, then use *Detect 
 **Cheat shows but doesn't work**
 - The codes may target a different game version — memory addresses change with updates
 - Check whether the cheat requires specific emulator settings (CPU accuracy, etc.)
+
+**↓ API fetch returns far more cheats than expected**
+This is normal — Cheatslips stores one entry per contributor per build ID, and some contributors bundle many individual cheats into a single submission. Use **✕ API** to clear and re-fetch if needed.
 
 ## File locations
 
