@@ -40,6 +40,15 @@ export async function scanGames(settings) {
   gamesLoading.set(true);
   gamesError.set('');
   try {
+    if (settings.targetMode === 'android') {
+      const status = await invoke('get_adb_status', { adbPath: settings.adbPath });
+      if (!status.connected) {
+        games.set([]);
+        selectedGame.set(null);
+        gamesError.set(`No device connected. ${status.details}`);
+        return;
+      }
+    }
     /** @type {GameGroup[]} */
     let list;
     if (settings.targetMode === 'android') {
