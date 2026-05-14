@@ -9,10 +9,11 @@
   let expandedGroups = $state(/** @type {Set<string>} */ (new Set()));
   let usbDevices = $state(/** @type {string[]} */ ([]));
 
-  let statusColor = $derived(adbStatus?.connected ? 'ok' : settings?.targetMode === 'pc' ? 'ok' : 'warn');
-  let statusLabel = $derived(settings?.targetMode === 'pc'
-    ? 'PC Mode'
-    : (adbStatus?.connected ? `Android: ${adbStatus.deviceId}` : 'No device'));
+  let modeBadge = $derived(settings?.targetMode === 'pc' ? 'PC' : 'ADB');
+  let deviceStatusColor = $derived(settings?.targetMode === 'pc' ? 'ok' : (adbStatus?.connected ? 'ok' : 'warn'));
+  let deviceStatusLabel = $derived(settings?.targetMode === 'pc'
+    ? (settings?.pcLoadDir || 'No load dir set')
+    : (adbStatus?.connected ? adbStatus.deviceId : 'No device'));
 
   let savedConnections = $derived(settings?.savedConnections ?? []);
   let showConnPicker = $state(false);
@@ -65,9 +66,10 @@
   <div class="sidebar-header">
     <span class="app-brand">ECM</span>
     <span class="brand-sep">//</span>
+    <span class="mode-badge">{modeBadge}</span>
     <div class="status-group">
-      <div class="status-dot {statusColor}"></div>
-      <span class="status-label">{statusLabel}</span>
+      <div class="status-dot {deviceStatusColor}"></div>
+      <span class="status-label">{deviceStatusLabel}</span>
     </div>
     <button class="btn-icon" title="Settings" onclick={() => onopenSettings?.()}>SYS</button>
   </div>
@@ -267,6 +269,15 @@
     color: var(--text-dim);
     flex-shrink: 0;
     letter-spacing: .05em;
+  }
+  .mode-badge {
+    font-size: .62rem;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    background: var(--accent-dim);
+    padding: .05rem .35rem;
+    letter-spacing: .1em;
+    flex-shrink: 0;
   }
   .status-group {
     display: flex;
