@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   release:
     permissions:
@@ -16,15 +19,19 @@ jobs:
           - platform: ubuntu-22.04
             runner: ubuntu-22.04
             args: ''
+            rust_target: ''
           - platform: windows-latest
             runner: windows-latest
             args: ''
-          - platform: macos-latest
+            rust_target: ''
+          - platform: macos-aarch64
             runner: macos-latest
             args: '--target aarch64-apple-darwin'
-          - platform: macos-13
-            runner: macos-13
+            rust_target: aarch64-apple-darwin
+          - platform: macos-x86_64
+            runner: macos-latest
             args: '--target x86_64-apple-darwin'
+            rust_target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.runner }}
 
@@ -34,12 +41,12 @@ jobs:
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || matrix.platform == 'macos-13' && 'x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.rust_target }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
