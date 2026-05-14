@@ -1,5 +1,6 @@
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -111,6 +112,12 @@ fn migrate_cheats_db(path: &PathBuf) -> Result<(), String> {
         "ALTER TABLE cheats ADD COLUMN code_hash TEXT",
         [],
     );
+    // Invalidate any old-format code_hash values that are not 64-char hex strings
+    // (previous version stored the raw normalized opcode text instead of a SHA256 hash).
+    let _ = conn.execute(
+        "UPDATE cheats SET code_hash = NULL WHERE code_hash IS NOT NULL AND length(code_hash) != 64",
+        [],
+    );
     // Backfill code_hash for any rows that don't have it yet.
     let mut stmt = conn
         .prepare("SELECT id, content FROM cheats WHERE code_hash IS NULL")
@@ -131,17 +138,23 @@ fn migrate_cheats_db(path: &PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-/// Produce a stable fingerprint of the actual cheat opcodes in a content blob,
-/// ignoring section names, blank lines, and whitespace differences.
-/// Two content strings with identical codes but different names produce the same hash.
+/// SHA256 fingerprint of the opcode lines in a cheat content blob.
+/// Only lines whose first 8 characters are all hex digits count as opcodes —
+/// everything else (section headers, comments, plain text) is ignored.
+/// Two entries with the same codes but different cheat names hash identically.
 fn code_fingerprint(content: &str) -> String {
-    content
+    let opcodes: String = content
         .lines()
         .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !(l.starts_with('[') && l.ends_with(']')))
+        .filter(|l| {
+            l.len() >= 8 && l[..8].chars().all(|c| c.is_ascii_hexdigit())
+        })
+        .map(|l| l.to_lowercase())
         .collect::<Vec<_>>()
-        .join("\n")
-        .to_lowercase()
+        .join("\n");
+    let mut hasher = Sha256::new();
+    hasher.update(opcodes.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 fn build_description(content: &str, build_id: &str) -> String {

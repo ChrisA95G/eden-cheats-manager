@@ -874,12 +874,14 @@ name = "eden-cheats-manager-gui"
 version = "0.1.0"
 dependencies = [
  "dirs-next",
+ "hex",
  "log",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "simplelog",
  "tauri",
  "tauri-build",
