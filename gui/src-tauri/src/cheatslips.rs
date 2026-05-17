@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 const CHEATS_DB_FILENAME: &str = "cheats.db";
+static CHEATS_DB_BYTES: &[u8] = include_bytes!("../../../cheats.db");
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,8 +34,8 @@ pub struct GameInfo {
     pub cheats: Vec<CheatEntry>,
 }
 
-/// Ensure cheats.db is copied from bundled resources to app_data_dir on first run.
-/// Also runs schema migrations. Returns the path to the local copy.
+/// Extract cheats.db from the embedded bytes to app_data_dir on first run (or if
+/// the cached copy is corrupt/missing). Also runs schema migrations. Returns the path.
 fn ensure_cheats_db(app: &AppHandle) -> Result<PathBuf, String> {
     let data_dir = app
         .path()
@@ -42,52 +43,20 @@ fn ensure_cheats_db(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("Failed to resolve app data dir: {}", e))?;
     let data_path = data_dir.join(CHEATS_DB_FILENAME);
 
-    if !data_path.exists() {
+    let cached_size = std::fs::metadata(&data_path).map(|m| m.len()).unwrap_or(0);
+    let needs_write = cached_size < 1_048_576;
+
+    if needs_write {
+        if cached_size > 0 {
+            log::warn!("[cheats_db] cached cheats.db is only {} bytes (corrupt), overwriting", cached_size);
+        }
         let _ = std::fs::create_dir_all(&data_dir);
-
-        let resource_dir = app
-            .path()
-            .resource_dir()
-            .map_err(|e| format!("Failed to resolve resource dir: {}", e))?;
-
-        let candidates = vec![
-            resource_dir.join(CHEATS_DB_FILENAME),
-            resource_dir.join("../../").join(CHEATS_DB_FILENAME),
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join(CHEATS_DB_FILENAME),
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join("../../")
-                .join(CHEATS_DB_FILENAME),
-        ];
-
-        let mut copied = false;
-        for candidate in &candidates {
-            let canonical =
-                std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.clone());
-            log::debug!("[cheats_db] trying {:?}", canonical);
-            if canonical.exists() {
-                match std::fs::copy(&canonical, &data_path) {
-                    Ok(_) => {
-                        log::info!(
-                            "[cheats_db] copied from {:?} to {:?}",
-                            canonical, data_path
-                        );
-                        copied = true;
-                        break;
-                    }
-                    Err(e) => log::warn!("[cheats_db] copy failed from {:?}: {}", canonical, e),
-                }
-            }
-        }
-
-        if !copied {
-            return Err(format!(
-                "cheats.db not found in bundled resources. Searched: {:?}",
-                candidates
-            ));
-        }
+        std::fs::write(&data_path, CHEATS_DB_BYTES)
+            .map_err(|e| format!("Failed to write cheats.db: {}", e))?;
+        log::info!("[cheats_db] extracted cheats.db ({:.1} MB) to {:?}",
+            CHEATS_DB_BYTES.len() as f64 / 1_048_576.0, data_path);
+    } else {
+        log::debug!("[cheats_db] cheats.db already at {:?} ({:.1} MB)", data_path, cached_size as f64 / 1_048_576.0);
     }
 
     migrate_cheats_db(&data_path)?;
