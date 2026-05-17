@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { selectedGame } from '../stores/games.js';
 
-  let { settings, platform = 'desktop' } = $props();
+  let { settings, platform = 'desktop', isMobile = false } = $props();
 
   // Available cheats loaded from local DB
   let gameInfo = $state(/** @type {any} */ (null));
@@ -36,6 +36,10 @@
   let fetchOnlineMsg = $state('');
   let fetchOnlineError = $state('');
   let clearingApi = $state(false);
+
+  // On mobile the installed cheats section starts collapsed
+  let installedExpanded = $state(false);
+  let didAutoExpand = $state(false);
 
   // Custom cheat form
   let showCustomForm = $state(false);
@@ -85,17 +89,26 @@
       fetchOnlineMsg = '';
       fetchOnlineError = '';
       clearingApi = false;
+      installedExpanded = false;
+      didAutoExpand = false;
       searchCheats();
       detectBuildIds($selectedGame);
     }
   });
 
-  // Auto-expand the accordion row that matches a detected build ID.
-  // Only fires once per game selection (when expandedId is still null).
+  // Auto-expand the best accordion row once per game load.
+  // Desktop: only when a detected build ID matches. Mobile: always expand first available.
+  // didAutoExpand prevents re-expanding when the user manually closes the accordion.
   $effect(() => {
-    if (groupedCheats.length > 0 && detectedBuildIds.length > 0 && expandedId === null) {
-      const match = groupedCheats.find(g => detectedBuildIds.includes(g.buildId));
-      if (match) expandedId = match.buildId;
+    if (groupedCheats.length > 0 && !didAutoExpand) {
+      const detected = groupedCheats.find(g => detectedBuildIds.includes(g.buildId));
+      if (detected) {
+        expandedId = detected.buildId;
+        didAutoExpand = true;
+      } else if (isMobile) {
+        expandedId = groupedCheats[0].buildId;
+        didAutoExpand = true;
+      }
     }
   });
 
@@ -391,7 +404,13 @@
 
 </script>
 
-<main class="cheat-panel">
+<main class="cheat-panel" class:mobile={isMobile}>
+  {#if isMobile}
+    <div class="back-bar">
+      <button class="btn-back" onclick={() => selectedGame.set(null)}>← GAMES</button>
+    </div>
+  {/if}
+
   {#if !$selectedGame}
     <div class="empty-state">
       <div class="empty-prompt">&gt;_</div>
@@ -476,21 +495,32 @@
     <!-- Installed cheats -->
     {#if installedCheats.length > 0}
       <section class="section">
-        <h3 class="section-title">Installed Cheats</h3>
-        <div class="installed-list">
-          {#each installedCheats as ic}
-            {@const key = `del_${ic.cheatName}__${ic.buildId}`}
-            <div class="installed-item">
-              <div class="installed-info">
-                <span class="installed-name">{ic.cheatName}</span>
-                <code class="installed-bid">{ic.buildId}</code>
+        <h3 class="section-title">
+          {#if isMobile}
+            <button class="btn-installed-toggle" onclick={() => installedExpanded = !installedExpanded}>
+              {installedExpanded ? '▾' : '▸'} Installed Cheats
+              <span class="count-badge">{installedCheats.length}</span>
+            </button>
+          {:else}
+            Installed Cheats
+          {/if}
+        </h3>
+        {#if !isMobile || installedExpanded}
+          <div class="installed-list">
+            {#each installedCheats as ic}
+              {@const key = `del_${ic.cheatName}__${ic.buildId}`}
+              <div class="installed-item">
+                <div class="installed-info">
+                  <span class="installed-name">{ic.cheatName}</span>
+                  <code class="installed-bid">{ic.buildId}</code>
+                </div>
+                <button class="btn-delete" disabled={deleting[key]} onclick={() => deleteInstalledCheat(ic)}>
+                  {deleting[key] ? '...' : '[ DEL ]'}
+                </button>
               </div>
-              <button class="btn-delete" disabled={deleting[key]} onclick={() => deleteInstalledCheat(ic)}>
-                {deleting[key] ? '...' : '[ DEL ]'}
-              </button>
-            </div>
-          {/each}
-        </div>
+            {/each}
+          </div>
+        {/if}
       </section>
     {/if}
 
@@ -1098,4 +1128,86 @@
     margin: -.15rem 1.25rem .35rem;
   }
   .scan-build-error { font-size: .76rem; color: var(--error); flex: 1; }
+
+  .btn-installed-toggle {
+    background: none;
+    border: none;
+    color: inherit;
+    font: inherit;
+    font-size: .72rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    cursor: pointer;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+  }
+
+  /* ── Mobile overrides ── */
+  .back-bar {
+    padding: .4rem .75rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .btn-back {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: .78rem;
+    letter-spacing: .1em;
+    cursor: pointer;
+    padding: .3rem .5rem;
+    transition: color .12s;
+  }
+  .btn-back:hover { color: var(--accent); }
+
+  .cheat-panel.mobile .section-item {
+    min-height: 48px;
+    padding-top: .6rem;
+    padding-bottom: .6rem;
+  }
+  .cheat-panel.mobile .btn-install {
+    padding: .35rem .75rem;
+    font-size: .78rem;
+  }
+  .cheat-panel.mobile .btn-delete {
+    padding: .25rem .55rem;
+    font-size: .72rem;
+    opacity: .7;
+  }
+  .cheat-panel.mobile .scan-build-bar {
+    flex-wrap: wrap;
+    gap: .4rem;
+    padding: .65rem 1rem;
+  }
+  .cheat-panel.mobile .build-header {
+    padding: .75rem .85rem;
+  }
+  .cheat-panel.mobile {
+    height: 100vh;
+    overflow-y: auto;
+  }
+
+  .cheat-panel.mobile .game-header,
+  .cheat-panel.mobile .game-header-overlay {
+    min-height: 70px;
+  }
+  .cheat-panel.mobile .game-header-overlay {
+    padding: .65rem 1rem;
+    gap: .75rem;
+  }
+  .cheat-panel.mobile .game-art {
+    width: 48px;
+    height: 48px;
+  }
+  .cheat-panel.mobile .game-title-info h1 {
+    font-size: .95rem;
+  }
+  .cheat-panel.mobile .section-title {
+    flex-wrap: wrap;
+    gap: .35rem;
+  }
 </style>

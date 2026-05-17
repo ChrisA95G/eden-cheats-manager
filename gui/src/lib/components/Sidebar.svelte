@@ -3,8 +3,8 @@
   import { onMount } from 'svelte';
   import { games, gamesLoading, gamesError, scanGames, selectedGame } from '../stores/games.js';
 
-  /** @type {{ settings: any, adbStatus: any, platform: string, onopenSettings: function }} */
-  let { settings, adbStatus, platform, onopenSettings } = $props();
+  /** @type {{ settings: any, adbStatus: any, platform: string, isMobile?: boolean, onopenSettings: function }} */
+  let { settings, adbStatus, platform, isMobile = false, onopenSettings } = $props();
 
   let expandedGroups = $state(/** @type {Set<string>} */ (new Set()));
   let usbDevices = $state(/** @type {string[]} */ ([]));
@@ -72,7 +72,7 @@
   let activeDeviceId = $derived(settings?.activeDevice?.serial ?? '');
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:mobile={isMobile}>
   <div class="sidebar-header">
     <span class="app-brand">ECM</span>
     <span class="brand-sep">//</span>
@@ -487,4 +487,30 @@
   .game-name { font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .game-tid { font-size: .65rem; color: var(--text-muted); letter-spacing: .03em; }
   .installed-dot { color: var(--success); font-size: .55rem; flex-shrink: 0; line-height: 1; }
+
+  /* ── Mobile overrides ── */
+  .sidebar.mobile {
+    width: 100%;
+    max-width: 100%;
+    min-width: unset;
+    border-right: none;
+  }
+  .sidebar.mobile .group-header,
+  .sidebar.mobile .child-item {
+    min-height: 48px;
+    padding-top: .65rem;
+    padding-bottom: .65rem;
+  }
+  .sidebar.mobile .scan-btn {
+    padding: .65rem 1rem;
+    font-size: .85rem;
+  }
+  .sidebar.mobile .game-cover,
+  .sidebar.mobile .game-cover-placeholder {
+    width: 42px;
+    height: 42px;
+  }
+  .sidebar.mobile .game-name { font-size: .88rem; }
+  .sidebar.mobile .game-tid  { font-size: .7rem; }
+  .sidebar.mobile .conn-toggle { padding: .4rem .65rem; font-size: .8rem; }
 </style>

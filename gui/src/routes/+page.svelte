@@ -6,8 +6,7 @@
   import Sidebar from '$lib/components/Sidebar.svelte';
   import CheatPanel from '$lib/components/CheatPanel.svelte';
   import Settings from '$lib/components/Settings.svelte';
-  import DebugPanel from '$lib/components/DebugPanel.svelte';
-  import { debugLog } from '$lib/stores/debug.js';
+  import { selectedGame } from '$lib/stores/games.js';
 
   let appSettings = $state(/** @type {any} */ (null));
   let loading = $state(true);
@@ -15,18 +14,15 @@
   let adbStatus = $state(/** @type {any} */ (null));
   /** @type {'android' | 'desktop'} */
   let platform = $state('desktop');
+  let isMobile = $derived((/** @type {string} */ (platform)) === 'android');
   let storagePermission = $state(/** @type {any} */ (null));
 
   onMount(async () => {
     try {
       platform = /** @type {any} */ (await invoke('get_platform'));
-      debugLog('platform', platform);
-    } catch (e) {
-      debugLog('get_platform ERROR', String(e));
-    }
+    } catch (_) {}
     try {
       appSettings = await loadSettings();
-      debugLog('settings loaded', { targetMode: appSettings?.targetMode, onboardingDone: appSettings?.onboardingDone });
       // When running as a native Android app, force androidNative mode and
       // skip onboarding — the load path is always known.
       if (platform === 'android') {
@@ -36,20 +32,10 @@
           onboardingDone: true,
         };
         try { await saveSettings(appSettings); } catch (_) {}
-        // Dump full path diagnostic immediately
-        try {
-          const info = await invoke('android_debug_info');
-          debugLog('android_debug_info', info);
-        } catch (e) {
-          debugLog('android_debug_info ERROR', String(e));
-        }
         // Check if storage permission is already granted
         try {
           storagePermission = await invoke('check_storage_permission');
-          debugLog('storagePermission', storagePermission);
-        } catch (e) {
-          debugLog('check_storage_permission ERROR', String(e));
-        }
+        } catch (_) {}
       } else if (appSettings?.targetMode === 'android') {
         try {
           const usbDevices = await invoke('get_usb_devices', { adbPath: appSettings.adbPath });
@@ -137,6 +123,21 @@
 {:else if !appSettings?.onboardingDone}
   <Onboarding currentSettings={appSettings ?? {}} ondone={handleOnboardingDone} />
   {#if saveError}<div style="position:fixed;bottom:1rem;left:1rem;right:1rem;background:#c00;color:#fff;padding:.5rem .75rem;border-radius:4px;font-size:.8rem;z-index:999">{saveError}</div>{/if}
+{:else if isMobile}
+  {#if !$selectedGame}
+    <Sidebar settings={appSettings} {adbStatus} {platform} {isMobile} onopenSettings={() => showSettings = true} />
+  {:else}
+    <CheatPanel settings={appSettings} {platform} {isMobile} />
+  {/if}
+
+  {#if showSettings}
+    <Settings
+      settings={appSettings}
+      {platform}
+      onclose={handleSettingsClose}
+      onrerunSetup={handleRerunSetup}
+    />
+  {/if}
 {:else}
   <div class="app-layout">
     <Sidebar settings={appSettings} {adbStatus} {platform} onopenSettings={() => showSettings = true} />
@@ -153,7 +154,6 @@
   {/if}
 {/if}
 
-<DebugPanel />
 
 <style>
   :global(*) { box-sizing: border-box; margin: 0; padding: 0; }
