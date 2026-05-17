@@ -6,16 +6,51 @@
   import Sidebar from '$lib/components/Sidebar.svelte';
   import CheatPanel from '$lib/components/CheatPanel.svelte';
   import Settings from '$lib/components/Settings.svelte';
+  import DebugPanel from '$lib/components/DebugPanel.svelte';
+  import { debugLog } from '$lib/stores/debug.js';
 
   let appSettings = $state(/** @type {any} */ (null));
   let loading = $state(true);
   let showSettings = $state(false);
   let adbStatus = $state(/** @type {any} */ (null));
+  /** @type {'android' | 'desktop'} */
+  let platform = $state('desktop');
+  let storagePermission = $state(/** @type {any} */ (null));
 
   onMount(async () => {
     try {
+      platform = /** @type {any} */ (await invoke('get_platform'));
+      debugLog('platform', platform);
+    } catch (e) {
+      debugLog('get_platform ERROR', String(e));
+    }
+    try {
       appSettings = await loadSettings();
-      if (appSettings?.targetMode === 'android') {
+      debugLog('settings loaded', { targetMode: appSettings?.targetMode, onboardingDone: appSettings?.onboardingDone });
+      // When running as a native Android app, force androidNative mode and
+      // skip onboarding — the load path is always known.
+      if (platform === 'android') {
+        appSettings = {
+          ...(appSettings ?? {}),
+          targetMode: 'androidNative',
+          onboardingDone: true,
+        };
+        try { await saveSettings(appSettings); } catch (_) {}
+        // Dump full path diagnostic immediately
+        try {
+          const info = await invoke('android_debug_info');
+          debugLog('android_debug_info', info);
+        } catch (e) {
+          debugLog('android_debug_info ERROR', String(e));
+        }
+        // Check if storage permission is already granted
+        try {
+          storagePermission = await invoke('check_storage_permission');
+          debugLog('storagePermission', storagePermission);
+        } catch (e) {
+          debugLog('check_storage_permission ERROR', String(e));
+        }
+      } else if (appSettings?.targetMode === 'android') {
         try {
           const usbDevices = await invoke('get_usb_devices', { adbPath: appSettings.adbPath });
           if (usbDevices.length > 0) {
@@ -81,23 +116,44 @@
 
 {#if loading}
   <div class="loading-screen">LOADING</div>
+{:else if platform === 'android' && storagePermission && !storagePermission.granted}
+  <div class="permission-screen">
+    <div class="permission-box">
+      <div class="permission-title">// STORAGE PERMISSION REQUIRED</div>
+      <p class="permission-body">
+        Eden Cheats Manager needs access to all files to read and write cheat files in Eden's data directory.
+      </p>
+      <p class="permission-path"><code>/Android/data/dev.eden.eden_emulator/files/load/</code></p>
+      <p class="permission-body">
+        Go to: <strong>Settings → Apps → Eden Cheats Manager → Permissions → Files and media → Allow management of all files</strong>
+      </p>
+      <button class="permission-btn" onclick={async () => {
+        try { storagePermission = await invoke('check_storage_permission'); } catch (_) {}
+      }}>
+        [ CHECK AGAIN ]
+      </button>
+    </div>
+  </div>
 {:else if !appSettings?.onboardingDone}
   <Onboarding currentSettings={appSettings ?? {}} ondone={handleOnboardingDone} />
   {#if saveError}<div style="position:fixed;bottom:1rem;left:1rem;right:1rem;background:#c00;color:#fff;padding:.5rem .75rem;border-radius:4px;font-size:.8rem;z-index:999">{saveError}</div>{/if}
 {:else}
   <div class="app-layout">
-    <Sidebar settings={appSettings} {adbStatus} onopenSettings={() => showSettings = true} />
-    <CheatPanel settings={appSettings} />
+    <Sidebar settings={appSettings} {adbStatus} {platform} onopenSettings={() => showSettings = true} />
+    <CheatPanel settings={appSettings} {platform} />
   </div>
 
   {#if showSettings}
     <Settings
       settings={appSettings}
+      {platform}
       onclose={handleSettingsClose}
       onrerunSetup={handleRerunSetup}
     />
   {/if}
 {/if}
+
+<DebugPanel />
 
 <style>
   :global(*) { box-sizing: border-box; margin: 0; padding: 0; }
@@ -178,5 +234,59 @@
     height: 100vh;
     width: 100vw;
     overflow: hidden;
+  }
+
+  .permission-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    padding: 1.5rem;
+  }
+
+  .permission-box {
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 2rem;
+    max-width: 480px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .permission-title {
+    color: var(--accent);
+    font-size: 1rem;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.5rem;
+  }
+
+  .permission-body {
+    color: var(--text);
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+
+  .permission-path code {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    word-break: break-all;
+  }
+
+  .permission-btn {
+    margin-top: 0.5rem;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 0.6rem 1rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    letter-spacing: 0.1em;
+  }
+
+  .permission-btn:hover {
+    background: var(--accent-dim);
   }
 </style>

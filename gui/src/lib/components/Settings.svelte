@@ -5,8 +5,8 @@
   import { onMount, untrack } from 'svelte';
   import { saveSettings } from '../stores/settings.js';
 
-  /** @type {{ settings: any, onclose: function, onrerunSetup: function }} */
-  let { settings, onclose, onrerunSetup } = $props();
+  /** @type {{ settings: any, platform?: string, onclose: function, onrerunSetup: function }} */
+  let { settings, platform = 'desktop', onclose, onrerunSetup } = $props();
 
   // Snapshot prop — untrack prevents Svelte from warning about reactive prop reads at init
   const _s = /** @type {any} */ (untrack(() => settings ?? {}));
@@ -159,20 +159,27 @@
     </div>
 
     <div class="modal-body">
-      <!-- Mode -->
-      <fieldset>
-        <legend>Target Mode</legend>
-        <div class="mode-btns">
-          <button class="mode-btn" class:active={local.targetMode === 'pc'} onclick={() => local.targetMode = 'pc'}>
-            <span class="mode-check">{local.targetMode === 'pc' ? '[*]' : '[ ]'}</span>
-            PC / DESKTOP
-          </button>
-          <button class="mode-btn" class:active={local.targetMode === 'android'} onclick={() => local.targetMode = 'android'}>
-            <span class="mode-check">{local.targetMode === 'android' ? '[*]' : '[ ]'}</span>
-            ANDROID (ADB)
-          </button>
-        </div>
-      </fieldset>
+      <!-- Mode — hidden on native Android (mode is fixed) -->
+      {#if platform !== 'android'}
+        <fieldset>
+          <legend>Target Mode</legend>
+          <div class="mode-btns">
+            <button class="mode-btn" class:active={local.targetMode === 'pc'} onclick={() => local.targetMode = 'pc'}>
+              <span class="mode-check">{local.targetMode === 'pc' ? '[*]' : '[ ]'}</span>
+              PC / DESKTOP
+            </button>
+            <button class="mode-btn" class:active={local.targetMode === 'android'} onclick={() => local.targetMode = 'android'}>
+              <span class="mode-check">{local.targetMode === 'android' ? '[*]' : '[ ]'}</span>
+              ANDROID (ADB)
+            </button>
+          </div>
+        </fieldset>
+      {:else}
+        <fieldset>
+          <legend>Target Mode</legend>
+          <p class="hint">Running natively on Android — direct filesystem access, no ADB required.</p>
+        </fieldset>
+      {/if}
 
       <!-- PC Load Dir -->
       {#if local.targetMode === 'pc'}

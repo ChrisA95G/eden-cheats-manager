@@ -1,4 +1,5 @@
 mod adb;
+mod android_native;
 mod build_ids;
 mod cheatslips;
 mod cheats;
@@ -53,6 +54,7 @@ pub fn run() {
             settings::get_app_log_path,
             settings::get_eden_log_path_pc,
             settings::detect_eden_exe,
+            settings::get_platform,
             // adb
             adb::get_adb_status,
             adb::adb_tcpip,
@@ -83,6 +85,16 @@ pub fn run() {
             cheats::install_cheat_pc,
             cheats::list_installed_cheats_pc,
             cheats::delete_cheat_pc,
+            // android native (direct filesystem — no ADB)
+            android_native::check_storage_permission,
+            android_native::android_debug_info,
+            android_native::scan_eden_games_android_native,
+            android_native::install_cheat_android_native,
+            android_native::list_installed_cheats_android_native,
+            android_native::delete_cheat_android_native,
+            android_native::extract_build_ids_android_native,
+            android_native::detect_build_ids_android_native,
+            android_native::scan_build_id_android_native,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

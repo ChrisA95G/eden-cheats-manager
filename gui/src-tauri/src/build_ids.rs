@@ -80,6 +80,11 @@ fn find_build_ids_for_title_in_log(text: &str, title_id: &str) -> Vec<String> {
     out
 }
 
+/// Public wrapper for use by android_native module.
+pub fn find_build_ids_for_title_pub(text: &str, title_id: &str) -> Vec<String> {
+    find_build_ids_for_title_in_log(text, title_id)
+}
+
 // ── Android ───────────────────────────────────────────────────────────────────
 
 /// Detect build IDs for a specific title on an Android device.

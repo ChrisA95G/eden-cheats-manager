@@ -3,17 +3,27 @@
   import { onMount } from 'svelte';
   import { games, gamesLoading, gamesError, scanGames, selectedGame } from '../stores/games.js';
 
-  /** @type {{ settings: any, adbStatus: any, onopenSettings: function }} */
-  let { settings, adbStatus, onopenSettings } = $props();
+  /** @type {{ settings: any, adbStatus: any, platform: string, onopenSettings: function }} */
+  let { settings, adbStatus, platform, onopenSettings } = $props();
 
   let expandedGroups = $state(/** @type {Set<string>} */ (new Set()));
   let usbDevices = $state(/** @type {string[]} */ ([]));
 
-  let modeBadge = $derived(settings?.targetMode === 'pc' ? 'PC' : 'ADB');
-  let deviceStatusColor = $derived(settings?.targetMode === 'pc' ? 'ok' : (adbStatus?.connected ? 'ok' : 'warn'));
-  let deviceStatusLabel = $derived(settings?.targetMode === 'pc'
-    ? (settings?.pcLoadDir || 'No load dir set')
-    : (adbStatus?.connected ? adbStatus.deviceId : 'No device'));
+  let modeBadge = $derived(
+    settings?.targetMode === 'pc' ? 'PC' :
+    settings?.targetMode === 'androidNative' ? 'ANDROID' :
+    'ADB'
+  );
+  let deviceStatusColor = $derived(
+    settings?.targetMode === 'pc' ? 'ok' :
+    settings?.targetMode === 'androidNative' ? 'ok' :
+    (adbStatus?.connected ? 'ok' : 'warn')
+  );
+  let deviceStatusLabel = $derived(
+    settings?.targetMode === 'pc' ? (settings?.pcLoadDir || 'No load dir set') :
+    settings?.targetMode === 'androidNative' ? 'On-device' :
+    (adbStatus?.connected ? adbStatus.deviceId : 'No device')
+  );
 
   let savedConnections = $derived(settings?.savedConnections ?? []);
   let showConnPicker = $state(false);

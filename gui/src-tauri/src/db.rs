@@ -25,56 +25,70 @@ fn ensure_db_file(app: &AppHandle) -> PathBuf {
         .expect("failed to resolve app data dir");
     let data_path = data_dir.join(DB_FILENAME);
 
-    log::debug!("[db] data_dir={:?}, data_path={:?}", data_dir, data_path);
+    log::info!("[db] data_dir={:?}, data_path={:?}", data_dir, data_path);
 
-    if !data_path.exists() {
+    // Check if the cached file is valid (must be > 1 MB; a 0-byte or corrupt SQLite
+    // file is created when the first copy attempt failed and SQLite opened the path).
+    let cached_size = if data_path.exists() {
+        std::fs::metadata(&data_path)
+            .map(|m| m.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    const MIN_DB_BYTES: u64 = 1_048_576; // 1 MB
+    let needs_copy = cached_size < MIN_DB_BYTES;
+
+    if needs_copy {
+        if cached_size > 0 {
+            log::warn!("[db] cached titles.db is only {} bytes (likely corrupt), re-copying", cached_size);
+            let _ = std::fs::remove_file(&data_path);
+        }
+
         let _ = std::fs::create_dir_all(&data_dir);
 
         let resource_dir = app
             .path()
             .resource_dir()
-            .expect("failed to resolve resource dir");
-        log::debug!("[db] resource_dir={:?}", resource_dir);
+            .unwrap_or_default();
+        log::info!("[db] resource_dir={:?}", resource_dir);
 
-        // Try multiple locations for titles.db
+        // Candidate paths — external storage is the reliable fallback on Android.
         let candidates = vec![
-            resource_dir.join(DB_FILENAME),                          // bundled resource
-            resource_dir.join("../../").join(DB_FILENAME),           // project root in dev
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join(DB_FILENAME),                                   // CWD
+            resource_dir.join(DB_FILENAME),
+            resource_dir.join("../../").join(DB_FILENAME),
+            std::path::PathBuf::from("/storage/emulated/0").join(DB_FILENAME),
+            std::env::current_dir().unwrap_or_default().join(DB_FILENAME),
             std::env::current_dir()
                 .unwrap_or_default()
                 .join("../../")
-                .join(DB_FILENAME),                                   // project root from src-tauri CWD
+                .join(DB_FILENAME),
         ];
 
         let mut found = false;
         for candidate in &candidates {
             let canonical = std::fs::canonicalize(candidate).unwrap_or_else(|_| candidate.clone());
-            log::debug!("[db] trying {:?}", canonical);
-            if canonical.exists() {
+            log::info!("[db] trying {:?}", canonical);
+            let src_size = std::fs::metadata(&canonical).map(|m| m.len()).unwrap_or(0);
+            if src_size >= MIN_DB_BYTES {
                 match std::fs::copy(&canonical, &data_path) {
                     Ok(_) => {
-                        log::info!("[db] copied titles.db ({:.1} MB) from {:?} to {:?}",
-                            std::fs::metadata(&data_path).map(|m| m.len() as f64 / 1_048_576.0).unwrap_or(0.0),
-                            canonical, data_path);
+                        log::info!("[db] copied titles.db ({:.1} MB) from {:?}",
+                            src_size as f64 / 1_048_576.0, canonical);
                         found = true;
                         break;
                     }
-                    Err(e) => log::warn!("[db] copy failed: {}", e),
+                    Err(e) => log::warn!("[db] copy failed from {:?}: {}", canonical, e),
                 }
             }
         }
 
         if !found {
-            log::warn!("[db] WARNING: titles.db not found in any of the searched locations");
+            log::warn!("[db] titles.db not found in any candidate location (dev: push via `adb push titles.db /storage/emulated/0/titles.db`)");
         }
     } else {
-        let size = std::fs::metadata(&data_path)
-            .map(|m| m.len() as f64 / 1_048_576.0)
-            .unwrap_or(0.0);
-        log::debug!("[db] titles.db already cached at {:?} ({:.1} MB)", data_path, size);
+        log::info!("[db] titles.db cached at {:?} ({:.1} MB)", data_path, cached_size as f64 / 1_048_576.0);
     }
 
     if !data_path.exists() {

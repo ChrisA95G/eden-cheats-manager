@@ -2,7 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { selectedGame } from '../stores/games.js';
 
-  let { settings } = $props();
+  let { settings, platform = 'desktop' } = $props();
 
   // Available cheats loaded from local DB
   let gameInfo = $state(/** @type {any} */ (null));
@@ -110,7 +110,10 @@
     detectingBuildIds = true;
     try {
       let result;
-      if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'androidNative') {
+        result = await invoke('detect_build_ids_android_native', { titleId: game.titleId });
+        result = result?.buildIds ?? [];
+      } else if (settings.targetMode === 'android') {
         result = await invoke('detect_build_ids_android', {
           adbPath: settings.adbPath,
           titleId: game.titleId,
@@ -137,7 +140,11 @@
     scanBuildIdError = '';
     try {
       let bid;
-      if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'androidNative') {
+        bid = await invoke('scan_build_id_android_native', {
+          titleId: $selectedGame.titleId,
+        });
+      } else if (settings.targetMode === 'android') {
         bid = await invoke('scan_build_id_android', {
           adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
@@ -166,7 +173,9 @@
     installedLoadError = '';
     try {
       let result;
-      if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'androidNative') {
+        result = await invoke('list_installed_cheats_android_native', { titleId: game.titleId });
+      } else if (settings.targetMode === 'android') {
         result = await invoke('list_installed_cheats_android', { adbPath: settings.adbPath, titleId: game.titleId });
       } else {
         result = await invoke('list_installed_cheats_pc', { loadDir: settings.pcLoadDir, titleId: game.titleId });
@@ -231,7 +240,14 @@
     installMsg[key] = '';
     try {
       const cheatName = toCheatName(section.name) || `cheat_${buildId}`;
-      if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'androidNative') {
+        await invoke('install_cheat_android_native', {
+          titleId: $selectedGame.titleId,
+          cheatName,
+          buildId,
+          content: section.content,
+        });
+      } else if (settings.targetMode === 'android') {
         await invoke('install_cheat_android', {
           adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
@@ -345,7 +361,13 @@
     const key = `del_${ic.cheatName}__${ic.buildId}`;
     deleting[key] = true;
     try {
-      if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'androidNative') {
+        await invoke('delete_cheat_android_native', {
+          titleId: $selectedGame.titleId,
+          cheatName: ic.cheatName,
+          buildId: ic.buildId,
+        });
+      } else if (settings.targetMode === 'android') {
         await invoke('delete_cheat_android', {
           adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
@@ -431,6 +453,8 @@
     </div>
     {#if settings.targetMode === 'android'}
       <p class="scan-build-hint">Device screen must be unlocked and on for scanning to work.</p>
+    {:else if settings.targetMode === 'androidNative'}
+      <p class="scan-build-hint">Launch the game in Eden, then click Scan. The app reads the build ID from Eden's log directly.</p>
     {:else}
       <p class="scan-build-hint">Eden launches automatically, reads the build ID, then closes. Set the Eden executable path in Settings if not detected.</p>
     {/if}

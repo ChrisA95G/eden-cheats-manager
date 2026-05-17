@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { invoke } from '@tauri-apps/api/core';
+import { debugLog } from './debug.js';
 
 /**
  * @typedef {Object} TitleEntry
@@ -37,6 +38,7 @@ export const gamesError = writable('');
  * @param {string} [settings.pcLoadDir]
  */
 export async function scanGames(settings) {
+  debugLog('scanGames called', { targetMode: settings?.targetMode });
   gamesLoading.set(true);
   gamesError.set('');
   try {
@@ -51,13 +53,18 @@ export async function scanGames(settings) {
     }
     /** @type {GameGroup[]} */
     let list;
-    if (settings.targetMode === 'android') {
+    if (settings.targetMode === 'androidNative') {
+      debugLog('invoking scan_eden_games_android_native');
+      list = await invoke('scan_eden_games_android_native');
+      debugLog('scan result', { count: list.length });
+    } else if (settings.targetMode === 'android') {
       list = await invoke('scan_eden_games_android', { adbPath: settings.adbPath });
     } else {
       list = await invoke('scan_eden_games_pc', { loadDir: settings.pcLoadDir });
     }
     games.set(list);
   } catch (e) {
+    debugLog('scanGames ERROR', String(e));
     gamesError.set(String(e));
   } finally {
     gamesLoading.set(false);

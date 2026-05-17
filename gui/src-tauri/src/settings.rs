@@ -11,6 +11,8 @@ pub enum TargetMode {
     Pc,
     #[serde(alias = "Android", alias = "ANDROID")]
     Android,
+    #[serde(alias = "AndroidNative", alias = "ANDROID_NATIVE")]
+    AndroidNative,
 }
 
 impl Default for TargetMode {
@@ -177,6 +179,16 @@ pub fn detect_eden_exe() -> String {
         }
     }
     String::new()
+}
+
+/// Return the current compile-time platform: "android" or "desktop".
+/// The frontend uses this to auto-select androidNative mode.
+#[tauri::command]
+pub fn get_platform() -> &'static str {
+    #[cfg(target_os = "android")]
+    { "android" }
+    #[cfg(not(target_os = "android"))]
+    { "desktop" }
 }
 
 /// Return the platform-default Eden PC load directory (best-effort).

@@ -7,6 +7,21 @@ use tauri::{AppHandle, Manager};
 const REMOTE_CONFIG: &str =
     "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
 
+/// Public wrapper for use by android_native module.
+pub fn build_groups_pub(rows: Vec<db::TitleRow>, installed_ids: &HashSet<String>) -> Vec<GameGroup> {
+    build_groups(rows, installed_ids)
+}
+
+/// Public wrapper for use by android_native module.
+pub fn content_uri_to_physical_pub(uri: &str) -> Option<String> {
+    content_uri_to_physical(uri)
+}
+
+/// Public wrapper for use by android_native module.
+pub fn extract_update_tid_from_filename_pub(filename: &str) -> Option<String> {
+    extract_update_tid_from_filename(filename)
+}
+
 /// Convert a content:// URI used by Eden's config to a physical /storage/… path.
 /// e.g. content://…/tree/4A21-0000%3ARoms%2FSwitch%2FRoms → /storage/4A21-0000/Roms/Switch/Roms
 pub(crate) fn content_uri_to_physical(uri: &str) -> Option<String> {
