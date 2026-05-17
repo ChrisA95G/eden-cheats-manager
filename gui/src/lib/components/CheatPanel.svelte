@@ -136,10 +136,19 @@
     scanningBuildId = true;
     scanBuildIdError = '';
     try {
-      const bid = await invoke('scan_build_id_android', {
-        adbPath: settings.adbPath,
-        titleId: $selectedGame.titleId,
-      });
+      let bid;
+      if (settings.targetMode === 'android') {
+        bid = await invoke('scan_build_id_android', {
+          adbPath: settings.adbPath,
+          titleId: $selectedGame.titleId,
+        });
+      } else {
+        bid = await invoke('scan_build_id_pc', {
+          loadDir: settings.pcLoadDir,
+          titleId: $selectedGame.titleId,
+          edenExePath: settings.edenExePath ?? '',
+        });
+      }
       const upper = bid.toUpperCase();
       if (!detectedBuildIds.includes(upper)) {
         detectedBuildIds = [...detectedBuildIds, upper];
@@ -408,20 +417,22 @@
       </div>
     </div>
 
+    <div class="scan-build-bar">
+      <button
+        class="btn-scan-build"
+        disabled={scanningBuildId || detectingBuildIds}
+        onclick={scanBuildId}
+      >
+        {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
+      </button>
+      {#if scanBuildIdError}
+        <span class="scan-build-error">{scanBuildIdError}</span>
+      {/if}
+    </div>
     {#if settings.targetMode === 'android'}
-      <div class="scan-build-bar">
-        <button
-          class="btn-scan-build"
-          disabled={scanningBuildId || detectingBuildIds}
-          onclick={scanBuildId}
-        >
-          {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
-        </button>
-        {#if scanBuildIdError}
-          <span class="scan-build-error">{scanBuildIdError}</span>
-        {/if}
-      </div>
       <p class="scan-build-hint">Device screen must be unlocked and on for scanning to work.</p>
+    {:else}
+      <p class="scan-build-hint">Eden launches automatically, reads the build ID, then closes. Set the Eden executable path in Settings if not detected.</p>
     {/if}
 
     {#if cheatsError}

@@ -1,6 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { onMount, untrack } from 'svelte';
   import { saveSettings } from '../stores/settings.js';
 
@@ -13,8 +14,11 @@
   let saving = $state(false);
   let saved = $state(false);
   let detectedDir = $state('');
+  let detectedEdenExe = $state('');
   let adbStatus = $state(/** @type {any} */ (null));
   let checkingAdb = $state(false);
+  let appLogPath = $state('');
+  let edenLogPath = $state('');
 
   // New connection form
   let newConnLabel = $state('');
@@ -25,15 +29,37 @@
   let editing = $state(/** @type {{ idx: number, field: string, value: string } | null} */ (null));
 
   onMount(async () => {
-    try {
-      detectedDir = await invoke('detect_pc_load_dir') ?? '';
-    } catch (_) {}
+    try { detectedDir = await invoke('detect_pc_load_dir') ?? ''; } catch (_) {}
+    try { detectedEdenExe = await invoke('detect_eden_exe') ?? ''; } catch (_) {}
+    try { appLogPath = await invoke('get_app_log_path') ?? ''; } catch (_) {}
     if (local.targetMode === 'android') checkAdb();
+    if (local.targetMode === 'pc' && local.pcLoadDir) refreshEdenLogPath(local.pcLoadDir);
   });
+
+  /** @param {string} loadDir */
+  async function refreshEdenLogPath(loadDir) {
+    try { edenLogPath = await invoke('get_eden_log_path_pc', { loadDir }) ?? ''; } catch (_) { edenLogPath = ''; }
+  }
+
+  async function openAppLog() {
+    if (appLogPath) await revealItemInDir(appLogPath);
+  }
+
+  async function openEdenLog() {
+    if (edenLogPath) await revealItemInDir(edenLogPath);
+  }
 
   async function browseLoadDir() {
     const selected = await openDialog({ directory: true, title: 'Select Eden load directory' });
-    if (selected) local.pcLoadDir = selected;
+    if (selected) {
+      local.pcLoadDir = selected;
+      refreshEdenLogPath(selected);
+    }
+  }
+
+  async function browseEdenExe() {
+    const selected = await openDialog({ directory: false, title: 'Select Eden executable' });
+    if (selected) local.edenExePath = selected;
   }
 
   async function checkAdb() {
@@ -163,6 +189,21 @@
             </div>
           </label>
         </fieldset>
+
+        <fieldset>
+          <legend>Eden Executable</legend>
+          {#if detectedEdenExe}
+            <p class="hint">Auto-detected: <code>{detectedEdenExe}</code></p>
+          {/if}
+          <label>
+            Path <span class="optional">(blank = auto-detect from PATH)</span>
+            <div class="path-row">
+              <input bind:value={local.edenExePath} placeholder={detectedEdenExe || '/usr/bin/eden'} />
+              <button class="btn-browse" onclick={browseEdenExe} title="Browse for Eden executable">[ … ]</button>
+            </div>
+          </label>
+          <p class="hint">Required for <strong>Scan Build ID</strong> — used to launch the game automatically.</p>
+        </fieldset>
       {/if}
 
       <!-- ADB -->
@@ -278,6 +319,28 @@
           Token
           <input type="password" bind:value={local.apiToken} placeholder="Your API token" />
         </label>
+      </fieldset>
+
+      <!-- Logs -->
+      <fieldset>
+        <legend>Logs</legend>
+        <div class="log-row">
+          <div class="log-info">
+            <span class="log-label">App Log</span>
+            <code class="log-path">{appLogPath || '…'}</code>
+          </div>
+          <button class="btn-secondary sm" disabled={!appLogPath} onclick={openAppLog}>[ OPEN ]</button>
+        </div>
+        {#if local.targetMode === 'pc'}
+          <div class="log-row">
+            <div class="log-info">
+              <span class="log-label">Eden Log</span>
+              <code class="log-path">{edenLogPath || '…'}</code>
+            </div>
+            <button class="btn-secondary sm" disabled={!edenLogPath} onclick={openEdenLog}>[ OPEN ]</button>
+          </div>
+          <p class="hint">Eden log is used for build ID scanning. Launch a game once to create it.</p>
+        {/if}
       </fieldset>
 
       <!-- Re-run onboarding -->
@@ -503,4 +566,24 @@
   .add-label { font-size: .62rem; color: var(--text-dim); margin: 0 0 .3rem; text-transform: uppercase; letter-spacing: .1em; }
   .conn-add-fields { display: flex; gap: .3rem; margin-bottom: .35rem; }
   .conn-add-fields input { flex: 1; padding: .3rem .5rem; font-size: .75rem; }
+
+  .log-row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: .35rem;
+  }
+  .log-info { display: flex; flex-direction: column; flex: 1; gap: .15rem; min-width: 0; }
+  .log-label { font-size: .62rem; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); }
+  .log-path {
+    font-size: .65rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+    background: none;
+    border: none;
+    padding: 0;
+  }
 </style>

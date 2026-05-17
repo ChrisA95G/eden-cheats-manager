@@ -212,9 +212,13 @@ Querying NSO patch existence for build_id=92C78BB3DCBBC3F7..., name=main
 
 The **first 16 characters** (`92C78BB3DCBBC3F7`) are the Build ID. Cheats are tied to a specific game version — a game update changes the Build ID, which means existing cheats stop working until new codes are written for the updated version.
 
-### Scan Build ID (Android)
+### Scan Build ID
 
-If the Build ID isn't detected automatically from Eden's existing logs, use **[ SCAN BUILD ID ]**. The app will:
+If the Build ID isn't detected automatically from Eden's existing logs, use **[ SCAN BUILD ID ]**.
+
+**PC mode:** Click Scan, then launch the game in Eden. The app watches Eden's log file for the build ID entry and returns it automatically (up to 90 s). No further action needed — you can launch the game before or after clicking Scan.
+
+**Android mode:** The app will:
 
 1. Find the ROM file on your device
 2. Force-stop Eden for a clean state
@@ -223,14 +227,14 @@ If the Build ID isn't detected automatically from Eden's existing logs, use **[ 
 5. Read the Build ID from Eden's log
 6. Force-stop Eden and return the result
 
-> The device screen must be **unlocked and on** for this to work. It takes up to 90 seconds depending on the game.
+> The device screen must be **unlocked and on** for Android scanning to work. It takes up to 90 seconds depending on the game.
 
 ---
 
 ## 8. Troubleshooting
 
 **Build ID not detected**
-> Launch the game in Eden at least once to generate a log entry, then click Detect Build IDs or Scan Build ID.
+> Launch the game in Eden at least once to generate a log entry, then click **Detect Build IDs** or **Scan Build ID**. On PC, Scan watches the Eden log file in real time — click Scan, then launch the game.
 
 **"No device connected" when scanning**
 > Make sure USB Debugging is enabled, the cable is plugged in, and you tapped **Allow** on the "Allow USB debugging?" prompt on your device.
@@ -269,8 +273,12 @@ npm run tauri build
 | What | Where |
 |------|-------|
 | App settings & cached DB | Platform app data directory |
+| ECM app log | Platform app log directory (open via **Settings → Logs**) |
 | Android cheat storage | `/Android/data/dev.eden.eden_emulator/files/load/` |
-| Eden logs (Android) | `/Android/data/dev.eden.eden_emulator/files/log/` |
+| Eden logs (Android) | `/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt` |
+| Eden logs (Linux) | `~/.local/share/eden/log/eden_log.txt` |
+| Eden logs (Windows) | `%APPDATA%\eden\log\eden_log.txt` |
+| Eden logs (macOS) | `~/Library/Application Support/eden/log/eden_log.txt` |
 
 ---
 

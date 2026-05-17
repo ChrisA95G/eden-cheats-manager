@@ -18,11 +18,19 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // ── Logging setup ───────────────────────────────────────────
-            // Log to terminal and to a rotating log file in the app log dir.
+            // Log to terminal and to a size-capped rotating log file.
+            // If the log exceeds 5 MB, rotate it to .old before opening.
             let log_dir = app.path().app_log_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             std::fs::create_dir_all(&log_dir).ok();
             let log_file = log_dir.join("eden-cheats-manager.log");
+            const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
+            if log_file.exists() {
+                if std::fs::metadata(&log_file).map(|m| m.len()).unwrap_or(0) > MAX_LOG_BYTES {
+                    let old = log_dir.join("eden-cheats-manager.log.old");
+                    let _ = std::fs::rename(&log_file, &old);
+                }
+            }
             let file = OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -42,6 +50,9 @@ pub fn run() {
             settings::get_settings,
             settings::save_settings,
             settings::detect_pc_load_dir,
+            settings::get_app_log_path,
+            settings::get_eden_log_path_pc,
+            settings::detect_eden_exe,
             // adb
             adb::get_adb_status,
             adb::adb_tcpip,
@@ -54,6 +65,7 @@ pub fn run() {
             build_ids::detect_build_ids_android,
             build_ids::detect_build_ids_pc,
             build_ids::scan_build_id_android,
+            build_ids::scan_build_id_pc,
             adb::get_usb_devices,
             // local cheats lookup + custom cheats
             cheatslips::search_cheats,

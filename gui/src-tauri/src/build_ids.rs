@@ -4,6 +4,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
+#[allow(unused_imports)]
+use dirs_next;
 
 // Looser regex used for contextual log window: no `name=main` requirement.
 static LOG_BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();
@@ -263,6 +265,336 @@ pub fn detect_build_ids_pc(
     ids.sort();
     log::info!("[build_ids] detect_pc title={title_id} -> {:?}", ids);
     Ok(ids)
+}
+
+// ── PC helpers ────────────────────────────────────────────────────────────────
+
+/// Platform-specific path to Eden's Qt config file.
+///
+/// Returns the first candidate that exists on disk, logging every path tried.
+/// Multiple candidates per platform handle Qt version differences and installs
+/// that haven't been verified on real hardware yet.
+fn get_eden_config_path() -> Option<PathBuf> {
+    let candidates: Vec<PathBuf> = if cfg!(target_os = "linux") {
+        let home = dirs_next::home_dir().unwrap_or_default();
+        vec![
+            home.join(".config/eden/qt-config.ini"),           // verified
+            home.join(".local/share/eden/config/config.ini"),  // fallback (older builds?)
+        ]
+    } else if cfg!(target_os = "windows") {
+        let appdata = std::env::var("APPDATA").unwrap_or_default();
+        let local = std::env::var("LOCALAPPDATA").unwrap_or_default();
+        vec![
+            PathBuf::from(&appdata).join("eden\\qt-config.ini"),
+            PathBuf::from(&local).join("eden\\qt-config.ini"),
+            PathBuf::from(&appdata).join("eden\\config\\qt-config.ini"),
+        ]
+    } else if cfg!(target_os = "macos") {
+        let home = dirs_next::home_dir().unwrap_or_default();
+        vec![
+            // Qt on macOS with IniFormat may use XDG-style ~/.config or Apple-style Library
+            home.join("Library/Application Support/eden/qt-config.ini"),
+            home.join(".config/eden/qt-config.ini"),
+        ]
+    } else {
+        vec![]
+    };
+
+    for p in &candidates {
+        let exists = p.exists();
+        log::debug!("[build_ids] get_eden_config_path candidate={} exists={exists}", p.display());
+        if exists {
+            log::info!("[build_ids] get_eden_config_path -> {}", p.display());
+            return Some(p.clone());
+        }
+    }
+    log::warn!("[build_ids] get_eden_config_path: no config found (tried {} candidates)", candidates.len());
+    None
+}
+
+/// Recursively search `dir` up to `depth` levels for an NSP/XCI whose filename
+/// contains `[{title_id_lower}]`.
+fn search_roms_in_dir(dir: &std::path::Path, title_id_lower: &str, depth: u32) -> Option<PathBuf> {
+    if !dir.is_dir() {
+        log::debug!("[build_ids] search_roms_in_dir: skip (not a dir) {}", dir.display());
+        return None;
+    }
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(e) => {
+            log::warn!("[build_ids] search_roms_in_dir: read_dir({}) failed: {e}", dir.display());
+            return None;
+        }
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        if path.is_file() {
+            let fname = path.file_name()
+                .map(|f| f.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+            if fname.ends_with(".nsp") || fname.ends_with(".xci") {
+                log::debug!("[build_ids] search_roms_in_dir: candidate {fname}");
+                if fname.contains(&format!("[{}]", title_id_lower)) {
+                    return Some(path);
+                }
+            }
+        } else if path.is_dir() && depth > 0 {
+            if let Some(found) = search_roms_in_dir(&path, title_id_lower, depth - 1) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// Search Eden's configured game directories on PC for a ROM file whose
+/// filename contains `[{title_id}]`.
+fn find_rom_path_pc(title_id: &str) -> Option<PathBuf> {
+    let config_path = get_eden_config_path()?;
+    log::debug!("[build_ids] find_rom_pc: config exists={}", config_path.exists());
+
+    let config = match std::fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("[build_ids] find_rom_pc: cannot read config.ini ({}): {e}", config_path.display());
+            return None;
+        }
+    };
+
+    let tid_lower = title_id.to_lowercase();
+    let mut search_dirs: Vec<PathBuf> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    // Virtual sentinel values Eden uses for NAND/SDMC — not real filesystem paths.
+    const VIRTUAL: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
+
+    for line in config.lines() {
+        // qt-config.ini game dirs: `Paths\gamedirs\N\path=<value>`
+        if !line.contains("gamedirs") || !line.contains("\\path=") {
+            continue;
+        }
+        log::debug!("[build_ids] find_rom_pc: path line: {line}");
+        let raw = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
+        if raw.is_empty() {
+            log::debug!("[build_ids] find_rom_pc: empty raw value, skipping");
+            continue;
+        }
+        if VIRTUAL.contains(&raw) {
+            log::debug!("[build_ids] find_rom_pc: virtual entry '{raw}', skipping");
+            continue;
+        }
+        let p = PathBuf::from(raw);
+        log::debug!(
+            "[build_ids] find_rom_pc: game dir={} exists={}",
+            p.display(), p.exists()
+        );
+
+        // Add parent dir first, then the game dir itself — mirrors find_rom_path_android.
+        // This lets us find ROMs that sit next to (not inside) a configured game dir.
+        if let Some(parent) = p.parent() {
+            let parent_key = parent.to_string_lossy().to_string();
+            if seen.insert(parent_key) {
+                log::debug!("[build_ids] find_rom_pc: queuing parent={}", parent.display());
+                search_dirs.push(parent.to_path_buf());
+            }
+        }
+
+        let key = p.to_string_lossy().to_string();
+        if seen.insert(key) {
+            search_dirs.push(p);
+        }
+    }
+
+    log::info!(
+        "[build_ids] find_rom_pc: {} search dirs for [{}]",
+        search_dirs.len(), title_id
+    );
+    for dir in &search_dirs {
+        log::debug!("[build_ids] find_rom_pc: searching {} (exists={})", dir.display(), dir.exists());
+        if let Some(found) = search_roms_in_dir(dir, &tid_lower, 2) {
+            log::info!("[build_ids] find_rom_pc: found {}", found.display());
+            return Some(found);
+        }
+    }
+
+    log::warn!("[build_ids] find_rom_pc: no ROM found for [{title_id}] in {} dirs", search_dirs.len());
+    None
+}
+
+// ── PC: Scan Build ID (Auto-launch + Log Poll) ────────────────────────────────
+
+/// Resolve the Eden executable: use `eden_exe_path` if set, otherwise try PATH.
+fn resolve_eden_exe(eden_exe_path: &str) -> Option<String> {
+    if !eden_exe_path.is_empty() {
+        return Some(eden_exe_path.to_string());
+    }
+    #[cfg(unix)]
+    {
+        if let Ok(out) = std::process::Command::new("which").arg("eden").output() {
+            if out.status.success() {
+                let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !p.is_empty() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Ok(out) = std::process::Command::new("where").arg("eden").output() {
+            if out.status.success() {
+                let p = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !p.is_empty() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Launch Eden with the game's ROM, poll the log file for a `build_id=HEX, name=main`
+/// line, kill Eden once found (or on timeout), and return the 16-char build ID.
+#[tauri::command]
+pub async fn scan_build_id_pc(
+    load_dir: String,
+    title_id: String,
+    eden_exe_path: String,
+) -> Result<String, String> {
+    log::info!("[build_ids] scan_build_id_pc title={title_id} load_dir={load_dir}");
+
+    // 1. Resolve Eden executable.
+    let eden_exe = resolve_eden_exe(&eden_exe_path).ok_or_else(|| {
+        "Eden executable not found on PATH. Set the Eden executable path in Settings.".to_string()
+    })?;
+    log::info!("[build_ids] scan_build_id_pc eden_exe={eden_exe}");
+
+    // 2. Find ROM in Eden's configured game directories.
+    let rom_path = find_rom_path_pc(&title_id).ok_or_else(|| {
+        format!(
+            "ROM not found for {title_id}. \
+             Make sure the game folder is added in Eden's settings."
+        )
+    })?;
+    log::info!("[build_ids] scan_build_id_pc rom={}", rom_path.display());
+
+    // 3. Record log baseline before launching so we only read new lines.
+    let load_path = PathBuf::from(&load_dir);
+    let base = load_path.parent().unwrap_or(&load_path);
+    let log_candidates = [
+        base.join("log/eden_log.txt"),
+        base.join("log/eden_log.txt.old.txt"),
+        base.join("eden_log.txt"),
+        load_path.join("../log/eden_log.txt"),
+        load_path.join("../log/eden_log.txt.old.txt"),
+    ];
+    let mut last_knowns: Vec<u64> = log_candidates
+        .iter()
+        .map(|p| {
+            std::fs::read_to_string(p)
+                .map(|s| s.lines().count() as u64)
+                .unwrap_or(0)
+        })
+        .collect();
+
+    // 4. Spawn Eden with the ROM path.
+    let mut child = std::process::Command::new(&eden_exe)
+        .arg(rom_path.to_string_lossy().as_ref())
+        .spawn()
+        .map_err(|e| format!("Failed to launch Eden ({eden_exe}): {e}"))?;
+    log::info!("[build_ids] scan_build_id_pc: launched Eden pid={}", child.id());
+
+    // 5. Poll the log for the build ID.
+    let loader_re = loader_build_id_re();
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(SCAN_TIMEOUT_SECS);
+    let mut poll_n = 0u32;
+    let mut found: Option<String> = None;
+
+    'poll: loop {
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+
+        tokio::time::sleep(std::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
+        poll_n += 1;
+
+        for (i, log_path) in log_candidates.iter().enumerate() {
+            let Ok(text) = std::fs::read_to_string(log_path) else {
+                continue;
+            };
+
+            let lines: Vec<&str> = text.lines().collect();
+            let total = lines.len() as u64;
+            let from = if total < last_knowns[i] { 0 } else { last_knowns[i] as usize };
+            let new_lines = &lines[from..];
+
+            log::debug!(
+                "[build_ids] scan_pc poll#{poll_n} {} from={from} new={}",
+                log_path.display(),
+                new_lines.len()
+            );
+
+            // Pass 1 — strict NSO-loader match.
+            for line in new_lines {
+                if let Some(cap) = loader_re.captures(line) {
+                    let full = &cap[1];
+                    found = Some(full[..16.min(full.len())].to_uppercase());
+                    log::info!(
+                        "[build_ids] scan_pc poll#{poll_n} found via name=main: {}",
+                        found.as_deref().unwrap_or("")
+                    );
+                    break 'poll;
+                }
+            }
+
+            // Pass 2 — title-context fallback.
+            let new_text = new_lines.join("\n");
+            if let Some(bid) =
+                find_build_ids_for_title_in_log(&new_text, &title_id).into_iter().next()
+            {
+                log::info!("[build_ids] scan_pc poll#{poll_n} found via title-context: {bid}");
+                found = Some(bid);
+                break 'poll;
+            }
+
+            last_knowns[i] = total;
+        }
+    }
+
+    // 6. Kill Eden.
+    //    AppImage launchers spawn the real binary as a child process, so child.kill()
+    //    alone only kills the wrapper and leaves Eden running.  pkill -P {pid} sends
+    //    SIGTERM to all direct children of the launcher by PPID — reliable regardless
+    //    of process group setup.  child.kill() + wait() then reaps the launcher itself.
+    let launcher_pid = child.id().to_string();
+    #[cfg(unix)]
+    {
+        log::info!("[build_ids] scan_build_id_pc: pkill -KILL -P {launcher_pid} (killing AppImage children)");
+        let st = std::process::Command::new("pkill")
+            .args(["-KILL", "-P", &launcher_pid])
+            .status();
+        log::debug!("[build_ids] scan_build_id_pc: pkill status={st:?}");
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    log::info!("[build_ids] scan_build_id_pc: Eden stopped");
+
+    match found {
+        Some(bid) => {
+            log::info!("[build_ids] scan_build_id_pc title={title_id} -> {bid}");
+            Ok(bid)
+        }
+        None => Err(format!(
+            "Build ID not found within {SCAN_TIMEOUT_SECS}s. \
+             The game may still be loading — try scanning again."
+        )),
+    }
 }
 
 // ── Scan Build ID (Launch + Log Poll) ───────────────────────────────────────
