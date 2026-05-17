@@ -871,6 +871,7 @@ version = "0.1.0"
 dependencies = [
  "dirs-next",
  "hex",
+ "jni",
  "log",
  "regex",
  "reqwest 0.12.28",
@@ -2811,7 +2812,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

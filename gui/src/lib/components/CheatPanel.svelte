@@ -473,7 +473,7 @@
     {#if settings.targetMode === 'android'}
       <p class="scan-build-hint">Device screen must be unlocked and on for scanning to work.</p>
     {:else if settings.targetMode === 'androidNative'}
-      <p class="scan-build-hint">Launch the game in Eden, then click Scan. The app reads the build ID from Eden's log directly.</p>
+      <p class="scan-build-hint">Eden launches, loads the game, and the build ID is read from the log. When done, tap the notification to return here. Eden stays suspended in the background — swipe it away from recents if you want to close it.</p>
     {:else}
       <p class="scan-build-hint">Eden launches automatically, reads the build ID, then closes. Set the Eden executable path in Settings if not detected.</p>
     {/if}

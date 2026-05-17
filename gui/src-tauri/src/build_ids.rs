@@ -659,7 +659,7 @@ fn percent_encode_doc_id(s: &str) -> String {
 /// `GameMetadata.getIsValid()` opens files through Android's ContentResolver using the
 /// content:// URI.  Raw `file:///storage/<sdcard>/…` paths fail on external SD cards
 /// because the FUSE layer requires SAF / ContentResolver access.
-fn physical_to_content_uri(physical_path: &str, tree_entries: &[(String, String)]) -> Option<String> {
+pub(crate) fn physical_to_content_uri(physical_path: &str, tree_entries: &[(String, String)]) -> Option<String> {
     // /storage/primary is an alias for /storage/emulated/0 on many devices.
     let normalise = |p: &str| -> String {
         if p.starts_with("/storage/primary") {
