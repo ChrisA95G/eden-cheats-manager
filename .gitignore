@@ -8,6 +8,8 @@ cheats/
 node_modules/
 target/
 .vscode/
+.idea/
+*.png
 CLAUDE.md
 .agents
 .claude

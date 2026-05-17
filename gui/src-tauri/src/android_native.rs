@@ -7,10 +7,24 @@ use crate::adb::parse_build_ids;
 use crate::cheats::InstalledCheat;
 use crate::db;
 use crate::games::GameGroup;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::process::Command;
+use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
+
+const EDEN_PKG: &str = "dev.eden.eden_emulator";
+const EDEN_MAIN_ACTIVITY: &str = "org.yuzu.yuzu_emu.ui.main.MainActivity";
+const AM: &str = "/system/bin/am";
+
+static LOADER_RE: OnceLock<Regex> = OnceLock::new();
+fn loader_re() -> &'static Regex {
+    LOADER_RE.get_or_init(|| {
+        Regex::new(r"build_id=([A-Fa-f0-9]{16,64}),\s*name=main").unwrap()
+    })
+}
 
 pub(crate) const ANDROID_LOAD_DIR: &str =
     "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/load";
@@ -287,43 +301,362 @@ pub fn detect_build_ids_android_native(title_id: String) -> Result<DetectedBuild
     Ok(DetectedBuildIds { title_id, build_ids })
 }
 
-/// Poll Eden's log file for a new build_id entry for the given title, waiting
-/// up to `timeout_secs` seconds. Returns the first new build ID found.
+/// Launch Eden with the given game, poll the log for a new build ID, then
+/// force-stop Eden and return to this app. Mirrors `scan_build_id_android`
+/// (the ADB version) but runs entirely on-device with no ADB dependency.
 #[tauri::command]
-pub async fn scan_build_id_android_native(
-    title_id: String,
-    timeout_secs: Option<u64>,
-) -> Result<String, String> {
-    let timeout = std::time::Duration::from_secs(timeout_secs.unwrap_or(90));
-    let start = std::time::Instant::now();
-    let log_path = PathBuf::from(ANDROID_LOG_PATH);
+pub async fn scan_build_id_android_native(title_id: String) -> Result<String, String> {
+    const SCAN_TIMEOUT: u64 = 90;
+    const POLL_INTERVAL_MS: u64 = 2000;
+    const KEYS_READY_TIMEOUT: u64 = 25;
 
-    // Record build IDs already in the log before we start watching
-    let initial: HashSet<String> = if let Ok(text) = std::fs::read_to_string(&log_path) {
-        crate::build_ids::find_build_ids_for_title_pub(&text, &title_id)
-            .into_iter()
-            .collect()
+    log::info!("[build_ids::native] scan_build_id title={title_id}");
+
+    // 1. Find the ROM's URI (content:// for SD-card games, file:// for internal).
+    let rom_uri = find_rom_path_native(&title_id).ok_or_else(|| {
+        format!(
+            "ROM not found for {title_id}. \
+             Make sure it is in a directory configured in Eden's settings."
+        )
+    })?;
+    log::info!("[build_ids::native] rom_uri={rom_uri}");
+
+    // 2. Start a foreground service so that Android 12+ background activity launch
+    //    restrictions don't block our returnToApp() call later.
+    if let Err(e) = start_scan_service() {
+        log::warn!("[build_ids::native] start_scan_service failed (non-fatal): {e}");
     } else {
-        HashSet::new()
-    };
+        log::info!("[build_ids::native] scan service started");
+    }
 
-    log::info!("[build_ids::native] watching log for title={title_id}, {} initial IDs", initial.len());
+    // 3. Force-stop Eden for a clean process state.
+    //    May fail on stock Android (requires FORCE_STOP_PACKAGES), ignored either way.
+    let _ = Command::new(AM).args(["force-stop", EDEN_PKG]).output();
+    log::info!("[build_ids::native] force-stop sent");
 
-    loop {
-        if start.elapsed() >= timeout {
-            return Err(format!(
-                "Timed out after {}s waiting for build ID. Make sure the game is launching in Eden.",
-                timeout.as_secs()
-            ));
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        if let Ok(text) = std::fs::read_to_string(&log_path) {
-            let current = crate::build_ids::find_build_ids_for_title_pub(&text, &title_id);
-            for bid in &current {
-                if !initial.contains(bid) {
-                    log::info!("[build_ids::native] new build ID found: {bid}");
-                    return Ok(bid.clone());
+    // 4. Warm up MainActivity so NativeLibrary.reloadKeys() runs before we launch
+    //    the game.  Without this, EmulationActivity returns "No bootable game found".
+    let main_component = format!("{EDEN_PKG}/{EDEN_MAIN_ACTIVITY}");
+    Command::new(AM)
+        .args(["start", "-W", "-n", &main_component])
+        .output()
+        .map_err(|e| format!("Failed to launch Eden: {e}"))?;
+    log::info!("[build_ids::native] MainActivity launched");
+
+    // 4. Wait for Eden's library scan / key loading to finish writing to the log.
+    poll_for_keys_ready_native(KEYS_READY_TIMEOUT).await;
+    log::info!("[build_ids::native] warmup complete");
+
+    // 5. Record log baseline before the game launch.
+    let start_line = get_local_line_count(ANDROID_LOG_PATH).unwrap_or(0);
+    log::info!("[build_ids::native] baseline={start_line} lines");
+
+    // 6. Launch EmulationActivity via JNI → MainActivity.launchIntent().
+    //    `am start -d URI` (subprocess) always exits 255 from an app process because
+    //    ActivityManagerService does URI permission checks that reject non-shell callers.
+    //    Calling startActivity() directly from the Activity object bypasses this.
+    launch_uri_from_activity(&rom_uri)
+        .map_err(|e| {
+            let _ = Command::new(AM).args(["force-stop", EDEN_PKG]).output();
+            e
+        })?;
+    log::info!("[build_ids::native] EmulationActivity launch dispatched");
+
+    // 7. Poll the log for a new build ID.
+    let title_id_poll = title_id.clone();
+    let found = tokio::time::timeout(
+        std::time::Duration::from_secs(SCAN_TIMEOUT),
+        async move {
+            let mut last_known = start_line;
+            let mut poll_n = 0u32;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
+                poll_n += 1;
+
+                let Ok(text) = std::fs::read_to_string(ANDROID_LOG_PATH) else {
+                    continue;
+                };
+                let current = text.lines().count() as u64;
+                let read_from = if current < last_known { 0 } else { last_known } as usize;
+                let new_lines: Vec<&str> = text.lines().skip(read_from).collect();
+
+                log::info!(
+                    "[build_ids::native] poll#{poll_n} read_from={read_from} \
+                     current={current} new_lines={}",
+                    new_lines.len()
+                );
+
+                // Primary: strict NSO-loader match — only fires during real emulation.
+                for line in &new_lines {
+                    if let Some(cap) = loader_re().captures(line) {
+                        let full = &cap[1];
+                        let bid = full[..16.min(full.len())].to_uppercase();
+                        log::info!("[build_ids::native] found via name=main: {bid}");
+                        return Some(bid);
+                    }
                 }
+
+                // Fallback: title-context window (after half timeout).
+                let elapsed_ms = poll_n as u64 * POLL_INTERVAL_MS;
+                if elapsed_ms >= SCAN_TIMEOUT * 500 {
+                    let chunk = new_lines.join("\n");
+                    if let Some(bid) = crate::build_ids::find_build_ids_for_title_pub(&chunk, &title_id_poll).into_iter().next() {
+                        log::info!("[build_ids::native] found via title fallback: {bid}");
+                        return Some(bid);
+                    }
+                }
+
+                last_known = current;
+            }
+        },
+    )
+    .await
+    .unwrap_or(None);
+
+    // 8. Return our app to the foreground (Eden goes background), then kill Eden.
+    //    `am force-stop` requires FORCE_STOP_PACKAGES (system permission) — unavailable
+    //    to regular apps.  Instead: bring ourselves to front via JNI startActivity(),
+    //    then retry killBackgroundProcesses() with fixed delays.
+    //    Android only moves Eden to CACHED oom_adj (killable) after the foreground
+    //    transition + oom_adj recalculation — this can take 1-3 s.
+    //    NOTE: /proc/<pid>/cmdline is blocked by SELinux for other-app processes on
+    //    Android 10+, so process-existence checks always return false; we use fixed
+    //    retries instead.
+    // Post the full-screen intent notification and set the onResume kill flag.
+    // Eden will be killed in MainActivity.onResume() — guaranteed to fire after
+    // the user taps the notification and our activity comes to the foreground,
+    // at which point Eden is definitively background and killBackgroundProcesses works.
+    let _ = return_to_foreground();
+    let _ = stop_scan_service();
+
+    match found {
+        Some(bid) => {
+            log::info!("[build_ids::native] scan complete title={title_id} -> {bid}");
+            Ok(bid)
+        }
+        None => Err(format!(
+            "Build ID not found within {SCAN_TIMEOUT}s. \
+             The game may still be loading — try 'Detect' after launching it manually."
+        )),
+    }
+}
+
+/// Search Eden's configured game directories (read from config.ini) for a ROM
+/// file whose filename contains `[{title_id}]`. Returns a content:// URI for
+/// SD-card games (required by Eden's ContentResolver) or file:// for internal
+/// storage. The URI is passed to Eden via JNI startActivity(), which can handle
+/// content:// URIs that `am start -d` (subprocess) cannot.
+fn find_rom_path_native(title_id: &str) -> Option<String> {
+    let config = std::fs::read_to_string(ANDROID_CONFIG_PATH).ok()?;
+    let tid_lower = title_id.to_lowercase();
+
+    let mut tree_entries: Vec<(String, String)> = Vec::new();
+    let mut search_dirs: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for line in config.lines() {
+        if !line.contains("\\path=") {
+            continue;
+        }
+        let raw_uri = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
+        if let Some(physical) = crate::games::content_uri_to_physical_pub(raw_uri) {
+            if let Some(parent) = std::path::Path::new(&physical).parent() {
+                let p = parent.to_string_lossy().to_string();
+                if seen.insert(p.clone()) {
+                    search_dirs.push(p);
+                }
+            }
+            if seen.insert(physical.clone()) {
+                search_dirs.push(physical.clone());
+            }
+            tree_entries.push((raw_uri.to_string(), physical));
+        }
+    }
+
+    for dir in &search_dirs {
+        if let Some(physical) = search_dir_for_rom(dir, &tid_lower, 2) {
+            if let Some(uri) = crate::build_ids::physical_to_content_uri(&physical, &tree_entries) {
+                return Some(uri);
+            }
+            return Some(format!("file://{}", physical));
+        }
+    }
+    None
+}
+
+// JNI_OnLoad is called by the JVM when it loads libgui_lib.so (triggered by
+// `System.loadLibrary("gui_lib")` in Rust.kt, before any Tauri command runs).
+// We capture two things here because non-UI Tokio threads have a different
+// class loader and cannot use find_class() to find app-level classes.
+#[cfg(target_os = "android")]
+static JVM_PTR: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+// GlobalRef to MainActivity class — captured while we're on the UI thread
+// where the correct class loader is active.  Reused on Tokio threads.
+#[cfg(target_os = "android")]
+static MAIN_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
+
+#[cfg(target_os = "android")]
+#[no_mangle]
+pub unsafe extern "C" fn JNI_OnLoad(
+    vm: *mut jni::sys::JavaVM,
+    _reserved: *mut std::ffi::c_void,
+) -> jni::sys::jint {
+    let _ = JVM_PTR.set(vm as usize);
+    // get_env() works here because JNI_OnLoad is called on an already-attached
+    // Java thread; find_class works because the app class loader is active.
+    'capture: {
+        let Ok(vm_ref) = (unsafe { jni::JavaVM::from_raw(vm) }) else { break 'capture };
+        let Ok(mut env) = vm_ref.get_env() else { break 'capture };
+        let Ok(cls) = env.find_class("dev/eden/cheats_manager/MainActivity") else { break 'capture };
+        let Ok(global) = env.new_global_ref(cls) else { break 'capture };
+        let _ = MAIN_CLASS.set(global);
+    }
+    jni::sys::JNI_VERSION_1_6
+}
+
+/// Attach to the JVM, resolve the cached MainActivity class, and run `f`.
+/// Keeps lifetimes correct by scoping env/jcls inside the call.
+#[cfg(target_os = "android")]
+fn with_main_class<F, T>(f: F) -> Result<T, String>
+where
+    F: FnOnce(&mut jni::JNIEnv, &jni::objects::JClass) -> Result<T, String>,
+{
+    use jni::{objects::JClass, JavaVM};
+    let ptr = JVM_PTR
+        .get()
+        .copied()
+        .ok_or_else(|| "JVM not captured (JNI_OnLoad not called)".to_string())?
+        as *mut jni::sys::JavaVM;
+    let vm = unsafe { JavaVM::from_raw(ptr) }.map_err(|e| format!("JVM: {e}"))?;
+    let mut env = vm
+        .attach_current_thread()
+        .map_err(|e| format!("JNI attach: {e}"))?;
+    let cls_global = MAIN_CLASS
+        .get()
+        .ok_or_else(|| "MainActivity class not captured".to_string())?;
+    let jcls = unsafe { JClass::from_raw(cls_global.as_raw()) };
+    f(&mut env, &jcls)
+}
+
+/// Call `MainActivity.launchIntent(uri)` via JNI so that `startActivity()` runs
+/// from the app's own Activity context — bypassing the permission restrictions
+/// that block `am start -d URI` when called from a forked subprocess.
+#[cfg(target_os = "android")]
+fn launch_uri_from_activity(uri: &str) -> Result<(), String> {
+    use jni::objects::{JObject, JValue};
+    with_main_class(|env, jcls| {
+        let uri_j = env.new_string(uri).map_err(|e| format!("JNI string: {e}"))?;
+        env.call_static_method(
+            jcls,
+            "launchIntent",
+            "(Ljava/lang/String;)V",
+            &[JValue::Object(&JObject::from(uri_j))],
+        )
+        .map_err(|e| format!("JNI launchIntent: {e}"))?;
+        Ok(())
+    })
+}
+
+/// Bring our app to the foreground, pushing Eden to background.
+#[cfg(target_os = "android")]
+fn return_to_foreground() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "returnToApp", "()V", &[])
+            .map_err(|e| format!("JNI returnToApp: {e}"))?;
+        Ok(())
+    })
+}
+
+
+/// Start ScanForegroundService — puts our app into foreground-service state so that
+/// Android 12+ background activity launch restrictions don't apply when we call
+/// returnToApp() later.
+#[cfg(target_os = "android")]
+fn start_scan_service() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "startScanService", "()V", &[])
+            .map_err(|e| format!("JNI startScanService: {e}"))?;
+        Ok(())
+    })
+}
+
+/// Stop ScanForegroundService once our app is back in the foreground.
+#[cfg(target_os = "android")]
+fn stop_scan_service() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "stopScanService", "()V", &[])
+            .map_err(|e| format!("JNI stopScanService: {e}"))?;
+        Ok(())
+    })
+}
+
+#[cfg(not(target_os = "android"))]
+fn launch_uri_from_activity(_uri: &str) -> Result<(), String> {
+    Err("launch_uri_from_activity is Android-only".to_string())
+}
+#[cfg(not(target_os = "android"))]
+fn return_to_foreground() -> Result<(), String> { Ok(()) }
+#[cfg(not(target_os = "android"))]
+fn start_scan_service() -> Result<(), String> { Ok(()) }
+#[cfg(not(target_os = "android"))]
+fn stop_scan_service() -> Result<(), String> { Ok(()) }
+
+/// Recursively search `dir` up to `depth` levels for an NSP/XCI file whose
+/// name contains `[{tid_lower}]`. Returns the physical path on success.
+fn search_dir_for_rom(dir: &str, tid_lower: &str, depth: u32) -> Option<String> {
+    let needle = format!("[{}]", tid_lower);
+    for entry in std::fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() && depth > 0 {
+            if let Some(found) = search_dir_for_rom(&path.to_string_lossy(), tid_lower, depth - 1) {
+                return Some(found);
+            }
+        } else if path.is_file() {
+            let fname = path.file_name()?.to_string_lossy().to_lowercase();
+            if fname.contains(&needle) {
+                let ext = path.extension()?.to_string_lossy().to_lowercase();
+                if ext == "nsp" || ext == "xci" {
+                    return Some(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Count lines in a local file. Used to establish a log baseline.
+fn get_local_line_count(path: &str) -> Option<u64> {
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|t| t.lines().count() as u64)
+}
+
+/// Poll the log line-count until it is stable (no growth for 2 s) or the
+/// hard timeout elapses. Mirrors `poll_for_keys_ready` in build_ids.rs.
+async fn poll_for_keys_ready_native(timeout_secs: u64) {
+    const POLL_MS: u64 = 500;
+    const STABLE_POLLS: u32 = 4;
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(timeout_secs);
+    let mut prev: Option<u64> = None;
+    let mut stable = 0u32;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(POLL_MS)).await;
+        let cur = get_local_line_count(ANDROID_LOG_PATH);
+        match (prev, cur) {
+            (Some(p), Some(c)) if c == p => {
+                stable += 1;
+                if stable >= STABLE_POLLS {
+                    return;
+                }
+            }
+            _ => {
+                stable = 0;
+                prev = cur;
             }
         }
     }
