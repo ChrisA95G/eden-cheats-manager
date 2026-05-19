@@ -2,7 +2,7 @@
 
 A desktop app for managing cheat codes on the [Eden](https://github.com/eden-emulator) Nintendo Switch emulator — no terminal, no hex folders, no manual file pushing.
 
-> **Supports:** Android devices (via ADB) · PC installs (Windows / Linux / macOS)
+> **Supports:** Android (native APK) · Android devices via ADB · PC installs (Windows / Linux / macOS)
 
 ![Eden Cheats Manager — main view](docs/images/main.png)
 
@@ -43,9 +43,12 @@ Go to the [Releases](../../releases) page and download the file for your operati
 | macOS (Apple Silicon) | `eden-cheats-manager_x.x.x_aarch64.dmg` |
 | macOS (Intel) | `eden-cheats-manager_x.x.x_x64.dmg` |
 | Linux | `eden-cheats-manager_x.x.x_amd64.AppImage` |
+| Android | `eden-cheats-manager.apk` |
 
-Run the installer, launch the app, and continue to the next section.
+Run the installer (or sideload the APK on Android — enable "Install from unknown sources" in your device settings), launch the app, and continue to the next section.
 
+> **Android APK (on-device)?** If you installed the APK directly on the Android device running Eden, skip to [First launch](#3-first-launch--setup-wizard) — no ADB or PC required.
+>
 > **PC mode only?** If you're using Eden on PC (not Android), skip to [First launch](#3-first-launch--setup-wizard).
 
 ---
@@ -108,7 +111,8 @@ On first launch, a setup wizard walks you through the basics.
 
 **Step 1 — Choose your mode:**
 - **PC / Desktop** — Eden is installed on this computer. The app reads and writes cheat files directly.
-- **Android (ADB)** — Eden is running on an Android device. The app communicates over ADB.
+- **Android (ADB)** — Eden is running on an Android device. The app communicates over ADB from a desktop/laptop.
+- **Android (on-device)** — the app is installed as an APK on the same Android device running Eden. No ADB or PC needed. This mode is selected automatically when running the APK.
 
 **Step 2 (Android only) — ADB path:**
 Leave blank if `adb` is on your system PATH, or browse to the `adb` / `adb.exe` binary.
@@ -216,9 +220,11 @@ The **first 16 characters** (`92C78BB3DCBBC3F7`) are the Build ID. Cheats are ti
 
 If the Build ID isn't detected automatically from Eden's existing logs, use **[ SCAN BUILD ID ]**.
 
-**PC mode:** Click Scan, then launch the game in Eden. The app watches Eden's log file for the build ID entry and returns it automatically (up to 90 s). No further action needed — you can launch the game before or after clicking Scan.
+**PC mode:** Click Scan, then launch the game in Eden. The app watches Eden's log file for the build ID entry and returns it automatically (within a few seconds of the game loading). No further action needed — you can launch the game before or after clicking Scan.
 
-**Android mode:** The app will:
+If the ROM isn't found automatically, a **[ SET ROM PATH ]** button appears in the cheat panel. Click it to browse directly to the game file — the path is cached so future scans find it instantly.
+
+**Android (ADB) mode:** The app will:
 
 1. Find the ROM file on your device
 2. Force-stop Eden for a clean state
@@ -227,7 +233,11 @@ If the Build ID isn't detected automatically from Eden's existing logs, use **[ 
 5. Read the Build ID from Eden's log
 6. Force-stop Eden and return the result
 
-> The device screen must be **unlocked and on** for Android scanning to work. It takes up to 90 seconds depending on the game.
+> The device screen must be **unlocked and on** for Android (ADB) scanning to work.
+
+**Android (on-device) mode:** Click Scan. The app launches Eden and the game automatically, reads the Build ID from Eden's log, then sends a notification when done. Tap the notification to return to Eden Cheats Manager. Eden stays suspended in the background — swipe it away from recents if you want to close it.
+
+> On-device scanning completes in a few seconds once the game starts loading.
 
 ---
 
@@ -240,8 +250,8 @@ If the Build ID isn't detected automatically from Eden's existing logs, use **[ 
 > Make sure USB Debugging is enabled, the cable is plugged in, and you tapped **Allow** on the "Allow USB debugging?" prompt on your device.
 
 **Scan Build ID fails or times out**
-> - Device screen must be unlocked and on
-> - The game must be in a directory configured in Eden's settings
+> - Device screen must be unlocked and on (Android)
+> - The game must be in a directory configured in Eden's settings, or use **[ SET ROM PATH ]** (PC) to point to the ROM file directly
 > - If the game is on an SD card, Eden must have storage access permission for that card
 
 **Cheat doesn't appear in Eden after installing**
