@@ -157,6 +157,7 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
 
     let groups = crate::games::build_groups_pub(all_rows, &installed_ids);
     log::info!("[games::native] {} groups built", groups.len());
+    crate::games::save_game_cache_pub(&app, "android", &groups);
     Ok(groups)
 }
 
@@ -305,18 +306,24 @@ pub fn detect_build_ids_android_native(title_id: String) -> Result<DetectedBuild
 /// force-stop Eden and return to this app. Mirrors `scan_build_id_android`
 /// (the ADB version) but runs entirely on-device with no ADB dependency.
 #[tauri::command]
-pub async fn scan_build_id_android_native(title_id: String) -> Result<String, String> {
-    const SCAN_TIMEOUT: u64 = 90;
+pub async fn scan_build_id_android_native(title_id: String, base_title_id: String, game_name: String) -> Result<String, String> {
+    const SCAN_TIMEOUT: u64 = 5;
     const POLL_INTERVAL_MS: u64 = 2000;
     const KEYS_READY_TIMEOUT: u64 = 25;
 
-    log::info!("[build_ids::native] scan_build_id title={title_id}");
+    log::info!("[build_ids::native] scan_build_id title={title_id} base={base_title_id}");
+
+    // Use base_title_id for ROM lookup — update/DLC NSPs can't be launched directly.
+    let lookup_id = if !base_title_id.is_empty() { base_title_id.as_str() } else { title_id.as_str() };
+    // Disable fuzzy name matching when searching by base_title_id to avoid finding Update NSPs.
+    let lookup_name = if lookup_id != title_id.as_str() { "" } else { game_name.as_str() };
+    log::info!("[build_ids::native] lookup_id={lookup_id} lookup_name={lookup_name:?}");
 
     // 1. Find the ROM's URI (content:// for SD-card games, file:// for internal).
-    let rom_uri = find_rom_path_native(&title_id).ok_or_else(|| {
+    let rom_uri = find_rom_path_native(lookup_id, lookup_name).ok_or_else(|| {
         format!(
-            "ROM not found for {title_id}. \
-             Make sure it is in a directory configured in Eden's settings."
+            "ROM not found for [{lookup_id}]. \
+             Make sure the base game ROM is in a directory configured in Eden's settings."
         )
     })?;
     log::info!("[build_ids::native] rom_uri={rom_uri}");
@@ -413,19 +420,17 @@ pub async fn scan_build_id_android_native(title_id: String) -> Result<String, St
     .await
     .unwrap_or(None);
 
-    // 8. Return our app to the foreground (Eden goes background), then kill Eden.
-    //    `am force-stop` requires FORCE_STOP_PACKAGES (system permission) — unavailable
-    //    to regular apps.  Instead: bring ourselves to front via JNI startActivity(),
-    //    then retry killBackgroundProcesses() with fixed delays.
-    //    Android only moves Eden to CACHED oom_adj (killable) after the foreground
-    //    transition + oom_adj recalculation — this can take 1-3 s.
-    //    NOTE: /proc/<pid>/cmdline is blocked by SELinux for other-app processes on
-    //    Android 10+, so process-existence checks always return false; we use fixed
-    //    retries instead.
-    // Post the full-screen intent notification and set the onResume kill flag.
-    // Eden will be killed in MainActivity.onResume() — guaranteed to fire after
-    // the user taps the notification and our activity comes to the foreground,
-    // at which point Eden is definitively background and killBackgroundProcesses works.
+    // 8. Stop Eden.
+    //    First try `am force-stop` — succeeds on rooted/OEM devices that grant
+    //    FORCE_STOP_PACKAGES; silently fails on stock Android (SecurityException inside am).
+    //    Then bring our app back to the foreground so onResume() can attempt
+    //    killBackgroundProcesses() as a secondary fallback (only kills cached processes,
+    //    not apps holding a foreground service, but handles the rooted case too).
+    let force_stop = Command::new(AM).args(["force-stop", EDEN_PKG]).output();
+    log::info!(
+        "[build_ids::native] am force-stop result: {:?}",
+        force_stop.as_ref().map(|o| o.status)
+    );
     let _ = return_to_foreground();
     let _ = stop_scan_service();
 
@@ -446,9 +451,10 @@ pub async fn scan_build_id_android_native(title_id: String) -> Result<String, St
 /// SD-card games (required by Eden's ContentResolver) or file:// for internal
 /// storage. The URI is passed to Eden via JNI startActivity(), which can handle
 /// content:// URIs that `am start -d` (subprocess) cannot.
-fn find_rom_path_native(title_id: &str) -> Option<String> {
+fn find_rom_path_native(title_id: &str, game_name: &str) -> Option<String> {
     let config = std::fs::read_to_string(ANDROID_CONFIG_PATH).ok()?;
     let tid_lower = title_id.to_lowercase();
+    let name_norm = crate::rom_cache::normalize(game_name);
 
     let mut tree_entries: Vec<(String, String)> = Vec::new();
     let mut search_dirs: Vec<String> = Vec::new();
@@ -474,7 +480,7 @@ fn find_rom_path_native(title_id: &str) -> Option<String> {
     }
 
     for dir in &search_dirs {
-        if let Some(physical) = search_dir_for_rom(dir, &tid_lower, 2) {
+        if let Some(physical) = search_dir_for_rom(dir, &tid_lower, &name_norm, 2) {
             if let Some(uri) = crate::build_ids::physical_to_content_uri(&physical, &tree_entries) {
                 return Some(uri);
             }
@@ -603,22 +609,28 @@ fn start_scan_service() -> Result<(), String> { Ok(()) }
 fn stop_scan_service() -> Result<(), String> { Ok(()) }
 
 /// Recursively search `dir` up to `depth` levels for an NSP/XCI file whose
-/// name contains `[{tid_lower}]`. Returns the physical path on success.
-fn search_dir_for_rom(dir: &str, tid_lower: &str, depth: u32) -> Option<String> {
+/// name contains `[{tid_lower}]` or fuzzy-matches `name_norm`. Returns the physical path on success.
+fn search_dir_for_rom(dir: &str, tid_lower: &str, name_norm: &str, depth: u32) -> Option<String> {
     let needle = format!("[{}]", tid_lower);
     for entry in std::fs::read_dir(dir).ok()?.flatten() {
         let path = entry.path();
         if path.is_dir() && depth > 0 {
-            if let Some(found) = search_dir_for_rom(&path.to_string_lossy(), tid_lower, depth - 1) {
+            if let Some(found) = search_dir_for_rom(&path.to_string_lossy(), tid_lower, name_norm, depth - 1) {
                 return Some(found);
             }
         } else if path.is_file() {
             let fname = path.file_name()?.to_string_lossy().to_lowercase();
-            if fname.contains(&needle) {
-                let ext = path.extension()?.to_string_lossy().to_lowercase();
-                if ext == "nsp" || ext == "xci" {
-                    return Some(path.to_string_lossy().to_string());
+            let ext = path.extension()?.to_string_lossy().to_lowercase();
+            if ext != "nsp" && ext != "xci" { continue; }
+            let by_tid = fname.contains(&needle);
+            let by_name = !name_norm.is_empty()
+                && crate::rom_cache::normalize(&fname).contains(name_norm)
+                && !crate::build_ids::is_non_base_filename(&fname);
+            if by_tid || by_name {
+                if by_name && !by_tid {
+                    log::info!("[build_ids::native] fuzzy match '{fname}' for name_norm='{name_norm}'");
                 }
+                return Some(path.to_string_lossy().to_string());
             }
         }
     }

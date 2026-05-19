@@ -1,7 +1,7 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
-  import { games, gamesLoading, gamesError, scanGames, selectedGame } from '../stores/games.js';
+  import { games, gamesLoading, gamesError, scanGames, loadCachedGamesThenRescan, selectedGame } from '../stores/games.js';
 
   /** @type {{ settings: any, adbStatus: any, platform: string, isMobile?: boolean, onopenSettings: function }} */
   let { settings, adbStatus, platform, isMobile = false, onopenSettings } = $props();
@@ -35,6 +35,9 @@
         usbDevices = await invoke('get_usb_devices', { adbPath: settings.adbPath });
       } catch (_) {}
     }
+    // Show cached games instantly for all modes, rescan in background for changes.
+    // ADB rescan may fail silently if no device is connected.
+    loadCachedGamesThenRescan(settings);
   });
 
   function selectGame(/** @type {import('../stores/games.js').TitleEntry} */ entry) {
