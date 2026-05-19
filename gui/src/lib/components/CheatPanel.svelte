@@ -1,5 +1,6 @@
 <script>
   import { invoke } from '@tauri-apps/api/core';
+  import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { selectedGame } from '../stores/games.js';
 
   let { settings, platform = 'desktop', isMobile = false } = $props();
@@ -30,6 +31,7 @@
   // Scan Build ID state
   let scanningBuildId = $state(false);
   let scanBuildIdError = $state('');
+  let settingRomPath = $state(false);
 
   // Fetch from API state
   let fetchingOnline = $state(false);
@@ -156,16 +158,22 @@
       if (settings.targetMode === 'androidNative') {
         bid = await invoke('scan_build_id_android_native', {
           titleId: $selectedGame.titleId,
+          baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
+          gameName: $selectedGame.name ?? '',
         });
       } else if (settings.targetMode === 'android') {
         bid = await invoke('scan_build_id_android', {
           adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
+          baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
+          gameName: $selectedGame.name ?? '',
         });
       } else {
         bid = await invoke('scan_build_id_pc', {
           loadDir: settings.pcLoadDir,
           titleId: $selectedGame.titleId,
+          baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
+          gameName: $selectedGame.name ?? '',
           edenExePath: settings.edenExePath ?? '',
         });
       }
@@ -177,6 +185,35 @@
       scanBuildIdError = String(e);
     } finally {
       scanningBuildId = false;
+    }
+  }
+
+  async function setRomPath() {
+    if (!$selectedGame) return;
+    settingRomPath = true;
+    try {
+      let defaultPath;
+      try {
+        const dirs = /** @type {string[]} */ (await invoke('get_eden_game_dirs_pc'));
+        if (dirs.length > 0) defaultPath = dirs[0];
+      } catch (_) {}
+      const selected = await openDialog({
+        title: `Select ROM for ${$selectedGame.name}`,
+        filters: [{ name: 'Switch ROM', extensions: ['nsp', 'xci'] }],
+        multiple: false,
+        defaultPath,
+      });
+      if (selected) {
+        const path = typeof selected === 'string' ? selected : selected.path;
+        await invoke('set_rom_path_manual', {
+          titleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
+          path,
+        });
+      }
+    } catch (e) {
+      console.error('set ROM path failed:', e);
+    } finally {
+      settingRomPath = false;
     }
   }
 
@@ -466,6 +503,16 @@
       >
         {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
       </button>
+      {#if settings.targetMode === 'pc'}
+        <button
+          class="btn-set-rom"
+          disabled={settingRomPath}
+          onclick={setRomPath}
+          title="Manually set the ROM file path for this game"
+        >
+          {settingRomPath ? '...' : '[ SET ROM PATH ]'}
+        </button>
+      {/if}
       {#if scanBuildIdError}
         <span class="scan-build-error">{scanBuildIdError}</span>
       {/if}
@@ -475,7 +522,7 @@
     {:else if settings.targetMode === 'androidNative'}
       <p class="scan-build-hint">Eden launches, loads the game, and the build ID is read from the log. When done, tap the notification to return here. Eden stays suspended in the background — swipe it away from recents if you want to close it.</p>
     {:else}
-      <p class="scan-build-hint">Eden launches automatically, reads the build ID, then closes. Set the Eden executable path in Settings if not detected.</p>
+      <p class="scan-build-hint">Eden launches automatically, reads the build ID, then closes. Set the Eden executable path in Settings if not detected. Use [ SET ROM PATH ] if the game ROM is not auto-detected.</p>
     {/if}
 
     {#if cheatsError}
@@ -1122,6 +1169,23 @@
     box-shadow: 0 0 5px var(--accent-glow);
   }
   .btn-scan-build:disabled { opacity: .4; cursor: default; }
+  .btn-set-rom {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: .75rem;
+    padding: .25rem .75rem;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: .08em;
+    transition: color .12s, border-color .12s;
+    white-space: nowrap;
+  }
+  .btn-set-rom:not(:disabled):hover {
+    border-color: var(--text-dim);
+    color: var(--text-dim);
+  }
+  .btn-set-rom:disabled { opacity: .4; cursor: default; }
   .scan-build-hint {
     font-size: .7rem;
     color: var(--text-dim);

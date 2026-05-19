@@ -26,6 +26,30 @@ fn loader_build_id_re() -> &'static Regex {
     })
 }
 
+// ── ROM helpers ───────────────────────────────────────────────────────────────
+
+/// Returns true if `fname_lower` looks like an update or DLC NSP that cannot
+/// be launched by Eden as a base game.
+/// Used to reject fuzzy name matches that would return the wrong file.
+pub(crate) fn is_non_base_filename(fname_lower: &str) -> bool {
+    if fname_lower.contains("update") || fname_lower.contains("[dlc]") {
+        return true;
+    }
+    // Reject any [TITLEID] bracket whose id does NOT end in "000" (base games end in "000").
+    let b = fname_lower.as_bytes();
+    let mut i = 0;
+    while i + 17 < b.len() {
+        if b[i] == b'[' && b[i + 17] == b']' {
+            let candidate = &fname_lower[i + 1..i + 17];
+            if candidate.bytes().all(|c| c.is_ascii_hexdigit()) && !candidate.ends_with("000") {
+                return true;
+            }
+        }
+        i += 1;
+    }
+    false
+}
+
 // ── Log helpers ───────────────────────────────────────────────────────────────
 
 /// Search `text` for build IDs that appear near (within a 35-line window of)
@@ -279,6 +303,10 @@ pub fn detect_build_ids_pc(
 /// Returns the first candidate that exists on disk, logging every path tried.
 /// Multiple candidates per platform handle Qt version differences and installs
 /// that haven't been verified on real hardware yet.
+pub fn get_eden_config_path_pub() -> Option<PathBuf> {
+    get_eden_config_path()
+}
+
 fn get_eden_config_path() -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = if cfg!(target_os = "linux") {
         let home = dirs_next::home_dir().unwrap_or_default();
@@ -319,7 +347,7 @@ fn get_eden_config_path() -> Option<PathBuf> {
 
 /// Recursively search `dir` up to `depth` levels for an NSP/XCI whose filename
 /// contains `[{title_id_lower}]`.
-fn search_roms_in_dir(dir: &std::path::Path, title_id_lower: &str, depth: u32) -> Option<PathBuf> {
+fn search_roms_in_dir(dir: &std::path::Path, title_id_lower: &str, name_norm: &str, depth: u32) -> Option<PathBuf> {
     if !dir.is_dir() {
         log::debug!("[build_ids] search_roms_in_dir: skip (not a dir) {}", dir.display());
         return None;
@@ -339,12 +367,19 @@ fn search_roms_in_dir(dir: &std::path::Path, title_id_lower: &str, depth: u32) -
                 .unwrap_or_default();
             if fname.ends_with(".nsp") || fname.ends_with(".xci") {
                 log::debug!("[build_ids] search_roms_in_dir: candidate {fname}");
-                if fname.contains(&format!("[{}]", title_id_lower)) {
+                let by_tid = fname.contains(&format!("[{}]", title_id_lower));
+                let by_name = !name_norm.is_empty()
+                    && crate::rom_cache::normalize(&fname).contains(name_norm)
+                    && !is_non_base_filename(&fname);
+                if by_tid || by_name {
+                    if by_name && !by_tid {
+                        log::info!("[build_ids] search_roms_in_dir: fuzzy match '{fname}' for name_norm='{name_norm}'");
+                    }
                     return Some(path);
                 }
             }
         } else if path.is_dir() && depth > 0 {
-            if let Some(found) = search_roms_in_dir(&path, title_id_lower, depth - 1) {
+            if let Some(found) = search_roms_in_dir(&path, title_id_lower, name_norm, depth - 1) {
                 return Some(found);
             }
         }
@@ -354,7 +389,7 @@ fn search_roms_in_dir(dir: &std::path::Path, title_id_lower: &str, depth: u32) -
 
 /// Search Eden's configured game directories on PC for a ROM file whose
 /// filename contains `[{title_id}]`.
-fn find_rom_path_pc(title_id: &str) -> Option<PathBuf> {
+fn find_rom_path_pc(title_id: &str, game_name: &str) -> Option<PathBuf> {
     let config_path = get_eden_config_path()?;
     log::debug!("[build_ids] find_rom_pc: config exists={}", config_path.exists());
 
@@ -365,6 +400,7 @@ fn find_rom_path_pc(title_id: &str) -> Option<PathBuf> {
             return None;
         }
     };
+    let name_norm = crate::rom_cache::normalize(game_name);
 
     let tid_lower = title_id.to_lowercase();
     let mut search_dirs: Vec<PathBuf> = Vec::new();
@@ -416,7 +452,7 @@ fn find_rom_path_pc(title_id: &str) -> Option<PathBuf> {
     );
     for dir in &search_dirs {
         log::debug!("[build_ids] find_rom_pc: searching {} (exists={})", dir.display(), dir.exists());
-        if let Some(found) = search_roms_in_dir(dir, &tid_lower, 2) {
+        if let Some(found) = search_roms_in_dir(dir, &tid_lower, &name_norm, 2) {
             log::info!("[build_ids] find_rom_pc: found {}", found.display());
             return Some(found);
         }
@@ -467,11 +503,14 @@ fn resolve_eden_exe(eden_exe_path: &str) -> Option<String> {
 /// line, kill Eden once found (or on timeout), and return the 16-char build ID.
 #[tauri::command]
 pub async fn scan_build_id_pc(
+    app: tauri::AppHandle,
     load_dir: String,
     title_id: String,
+    base_title_id: String,
+    game_name: String,
     eden_exe_path: String,
 ) -> Result<String, String> {
-    log::info!("[build_ids] scan_build_id_pc title={title_id} load_dir={load_dir}");
+    log::info!("[build_ids] scan_build_id_pc title={title_id} base={base_title_id} load_dir={load_dir}");
 
     // 1. Resolve Eden executable.
     let eden_exe = resolve_eden_exe(&eden_exe_path).ok_or_else(|| {
@@ -479,13 +518,33 @@ pub async fn scan_build_id_pc(
     })?;
     log::info!("[build_ids] scan_build_id_pc eden_exe={eden_exe}");
 
-    // 2. Find ROM in Eden's configured game directories.
-    let rom_path = find_rom_path_pc(&title_id).ok_or_else(|| {
-        format!(
-            "ROM not found for {title_id}. \
-             Make sure the game folder is added in Eden's settings."
-        )
-    })?;
+    // 2. Find ROM: check cache first (by base_title_id then title_id), then scan dirs.
+    let lookup_id = if !base_title_id.is_empty() { &base_title_id } else { &title_id };
+    let mut cache = crate::rom_cache::load_cache(&app);
+    let rom_path: PathBuf = if let Some(entry) = cache.get(lookup_id).or_else(|| cache.get(&title_id)) {
+        let p = PathBuf::from(&entry.path);
+        if p.exists() {
+            log::info!("[build_ids] scan_build_id_pc rom from cache: {}", p.display());
+            p
+        } else {
+            log::warn!("[build_ids] cached path missing, falling back to scan: {}", p.display());
+            find_rom_path_pc(lookup_id, &game_name).ok_or_else(|| format!(
+                "ROM not found for {lookup_id}. Add the game folder in Eden Settings \
+                 or use \"Set ROM path\" to point to it directly."
+            ))?
+        }
+    } else {
+        let found = find_rom_path_pc(lookup_id, &game_name).ok_or_else(|| format!(
+            "ROM not found for {lookup_id}. Add the game folder in Eden Settings \
+             or use \"Set ROM path\" to point to it directly."
+        ))?;
+        cache.insert(lookup_id.to_string(), crate::rom_cache::RomCacheEntry {
+            path: found.to_string_lossy().to_string(),
+            manual: false,
+        });
+        crate::rom_cache::save_cache(&app, &cache);
+        found
+    };
     log::info!("[build_ids] scan_build_id_pc rom={}", rom_path.display());
 
     // 3. Record log baseline before launching so we only read new lines.
@@ -611,9 +670,9 @@ const EDEN_ACTIVITY: &str = "org.yuzu.yuzu_emu.activities.EmulationActivity";
 const EDEN_LOG_PATH: &str =
     "/sdcard/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt";
 /// How long to poll the log file before giving up.
-/// Games with shader compilation can take 60 s or more to boot past the point
-/// where Eden writes the build_id line.
-const SCAN_TIMEOUT_SECS: u64 = 90;
+/// The build_id line appears as soon as the NSO loader runs (very early in boot),
+/// well before shader compilation — 5 s is enough.
+const SCAN_TIMEOUT_SECS: u64 = 5;
 /// Interval between log-file polls.
 const POLL_INTERVAL_SECS: u64 = 2;
 /// How long to wait (max) for the MainActivity library scan to settle before
@@ -670,32 +729,62 @@ pub(crate) fn physical_to_content_uri(physical_path: &str, tree_entries: &[(Stri
     };
     let norm_file = normalise(physical_path);
 
+    log::debug!(
+        "[build_ids] physical_to_content_uri: file={physical_path} tree_entries={}",
+        tree_entries.len()
+    );
     for (raw_tree_uri, physical_base) in tree_entries {
-        if !norm_file.starts_with(normalise(physical_base).as_str()) {
+        let norm_base = normalise(physical_base);
+        let matches = norm_file.starts_with(norm_base.as_str());
+        log::debug!(
+            "[build_ids] physical_to_content_uri: check base={physical_base} matches={matches}"
+        );
+        if !matches {
             continue;
         }
         // The tree document ID is the already-encoded segment after `/tree/` in the URI
         // (e.g. `4A21-0000%3ARoms%2FSwitch`).
-        let tree_doc_id_enc = raw_tree_uri.split("/tree/").nth(1)?;
+        let tree_doc_id_enc = match raw_tree_uri.split("/tree/").nth(1) {
+            Some(s) => s,
+            None => {
+                log::warn!("[build_ids] physical_to_content_uri: no /tree/ in URI {raw_tree_uri}");
+                continue;
+            }
+        };
 
         // File document ID: "{volumeId}:{relativePathFromVolumeRoot}"
-        let (volume_id, rel): (&str, &str) =
+        let result = (|| -> Option<(&str, &str)> {
             if physical_path.starts_with("/storage/emulated/0/") {
-                ("primary", &physical_path["/storage/emulated/0/".len()..])
+                Some(("primary", &physical_path["/storage/emulated/0/".len()..]))
             } else {
                 let after = physical_path.strip_prefix("/storage/")?;
                 let slash = after.find('/')?;
-                (&after[..slash], &after[slash + 1..])
-            };
+                Some((&after[..slash], &after[slash + 1..]))
+            }
+        })();
+
+        let (volume_id, rel) = match result {
+            Some(v) => v,
+            None => {
+                log::warn!("[build_ids] physical_to_content_uri: cannot parse volume from {physical_path}");
+                continue;
+            }
+        };
 
         let file_doc_id = format!("{}:{}", volume_id, rel);
         let file_doc_id_enc = percent_encode_doc_id(&file_doc_id);
-
-        return Some(format!(
+        let uri = format!(
             "content://com.android.externalstorage.documents/tree/{}/document/{}",
             tree_doc_id_enc, file_doc_id_enc
-        ));
+        );
+        log::info!("[build_ids] physical_to_content_uri: -> {uri}");
+        return Some(uri);
     }
+    log::warn!(
+        "[build_ids] physical_to_content_uri: no matching tree entry for {physical_path} \
+         (tree_entries={}) — will fall back to file:// URI",
+        tree_entries.len()
+    );
     None
 }
 
@@ -705,7 +794,7 @@ pub(crate) fn physical_to_content_uri(physical_path: &str, tree_entries: &[(Stri
 /// Returns a `content://com.android.externalstorage.documents/…` URI for games on
 /// external SD cards (required for Eden to open them via ContentResolver), or a
 /// `file://` URI as a fallback for internal storage.
-fn find_rom_path_android(adb: &str, title_id: &str) -> Option<String> {
+fn find_rom_path_android(adb: &str, title_id: &str, game_name: &str) -> Option<String> {
     const CONFIG_PATH: &str =
         "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
     let config_out = Command::new(adb)
@@ -718,6 +807,7 @@ fn find_rom_path_android(adb: &str, title_id: &str) -> Option<String> {
     }
     let config = String::from_utf8_lossy(&config_out.stdout);
     let tid_lower = title_id.to_lowercase();
+    let name_norm = crate::rom_cache::normalize(game_name);
 
     // Collect (raw_tree_uri, physical_base) pairs and ordered search directories.
     let mut tree_entries: Vec<(String, String)> = Vec::new();
@@ -753,7 +843,18 @@ fn find_rom_path_android(adb: &str, title_id: &str) -> Option<String> {
                     if p.is_empty() {
                         continue;
                     }
-                    if p.to_lowercase().contains(&format!("[{}]", tid_lower)) {
+                    let p_lower = p.to_lowercase();
+                    let fname = std::path::Path::new(p).file_name()
+                        .map(|f| f.to_string_lossy().to_lowercase())
+                        .unwrap_or_default();
+                    let by_tid = p_lower.contains(&format!("[{}]", tid_lower));
+                    let by_name = !name_norm.is_empty()
+                        && crate::rom_cache::normalize(&fname).contains(&name_norm)
+                        && !is_non_base_filename(&fname);
+                    if by_tid || by_name {
+                        if by_name && !by_tid {
+                            log::info!("[build_ids] find_rom: fuzzy match '{fname}' for name_norm='{name_norm}'");
+                        }
                         log::info!("[build_ids] find_rom physical: {p}");
                         if let Some(uri) = physical_to_content_uri(p, &tree_entries) {
                             log::info!("[build_ids] find_rom content_uri: {uri}");
@@ -856,15 +957,24 @@ async fn poll_for_keys_ready(adb: &str) {
 pub async fn scan_build_id_android(
     adb_path: String,
     title_id: String,
+    base_title_id: String,
+    game_name: String,
 ) -> Result<String, String> {
-    log::info!("[build_ids] scan_build_id title={title_id}");
+    log::info!("[build_ids] scan_build_id title={title_id} base={base_title_id}");
     let adb = adb_bin(&adb_path);
 
+    // Use base_title_id for ROM lookup — update/DLC NSPs can't be launched by Eden.
+    let lookup_id = if !base_title_id.is_empty() { base_title_id.as_str() } else { title_id.as_str() };
+    // Disable fuzzy name matching when searching by base_title_id: the base game ROM
+    // has [base_tid] in its filename; fuzzy-matching by name would find Update NSPs instead.
+    let lookup_name = if lookup_id != title_id.as_str() { "" } else { game_name.as_str() };
+    log::info!("[build_ids] scan_build_id_android lookup_id={lookup_id} lookup_name={lookup_name:?}");
+
     // 1. Find ROM URI — content:// for SD-card games, file:// for internal storage.
-    let rom_uri = find_rom_path_android(&adb, &title_id).ok_or_else(|| {
+    let rom_uri = find_rom_path_android(&adb, lookup_id, lookup_name).ok_or_else(|| {
         format!(
-            "ROM not found on device for {title_id}. \
-             Make sure the game is in a directory configured in Eden's settings."
+            "ROM not found on device for [{lookup_id}]. \
+             Make sure the base game ROM is in a directory configured in Eden's settings."
         )
     })?;
     log::info!("[build_ids] scan_build_id rom_uri={rom_uri}");

@@ -5,6 +5,7 @@ mod cheatslips;
 mod cheats;
 mod db;
 mod games;
+mod rom_cache;
 mod settings;
 
 use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode, ColorChoice, WriteLogger};
@@ -78,6 +79,13 @@ pub fn run() {
             // games
             games::scan_eden_games_android,
             games::scan_eden_games_pc,
+            games::get_cached_games_pc,
+            games::get_cached_games_android,
+            games::get_eden_game_dirs_pc,
+            // rom cache
+            rom_cache::get_rom_cache,
+            rom_cache::set_rom_path_manual,
+            rom_cache::scan_and_update_rom_cache,
             // cheats
             cheats::install_cheat_android,
             cheats::list_installed_cheats_android,

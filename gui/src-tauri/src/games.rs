@@ -103,6 +103,7 @@ fn find_update_tids_android(adb_path: &str) -> Vec<String> {
 #[serde(rename_all = "camelCase")]
 pub struct TitleEntry {
     pub title_id: String,
+    pub base_title_id: String,
     pub name: String,
     pub image: String,
     pub category: String,
@@ -195,6 +196,7 @@ fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<String>) -> Vec
             };
             let entry = TitleEntry {
                 title_id: row.title_id.clone(),
+                base_title_id: if base_tid.is_empty() { row.title_id.clone() } else { base_tid.clone() },
                 name,
                 image: row.image.clone(),
                 category: category_from_tid(&row.title_id).to_string(),
@@ -315,8 +317,15 @@ fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<String>) -> Vec
             })
             .unwrap_or_default();
 
+        let base_tid_for_entry = prefix_to_idx.get(p12)
+            .map(|&idx| {
+                if idx < merged_len { merged[idx].base_title_id.clone() }
+                else { new_groups[idx - merged_len].base_title_id.clone() }
+            })
+            .unwrap_or_else(|| tid.clone());
         let entry = TitleEntry {
             title_id: tid.clone(),
+            base_title_id: base_tid_for_entry,
             name: fallback_name,
             image: String::new(),
             category: category.to_string(),
@@ -421,6 +430,7 @@ pub async fn scan_eden_games_android(
 
     let groups = build_groups(all_rows, &installed_ids);
     log::info!("[games::android] {} groups built", groups.len());
+    save_game_cache(&app, "android", &groups);
     Ok(groups)
 }
 
@@ -477,5 +487,74 @@ pub async fn scan_eden_games_pc(
 
     let groups = build_groups(all_rows, &installed_ids);
     log::info!("[games::pc] {} groups built", groups.len());
+    save_game_cache(&app, "pc", &groups);
     Ok(groups)
+}
+
+// ── Game list cache ───────────────────────────────────────────────────────────
+
+fn game_cache_path(app: &AppHandle, mode: &str) -> std::path::PathBuf {
+    let filename = match mode {
+        "android" => "game_list_cache_android.json",
+        _ => "game_list_cache_pc.json",
+    };
+    app.path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(filename)
+}
+
+pub fn save_game_cache_pub(app: &AppHandle, mode: &str, groups: &[GameGroup]) {
+    save_game_cache(app, mode, groups);
+}
+
+fn save_game_cache(app: &AppHandle, mode: &str, groups: &[GameGroup]) {
+    let path = game_cache_path(app, mode);
+    if let Ok(json) = serde_json::to_string(groups) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+fn load_game_cache(app: &AppHandle, mode: &str) -> Vec<GameGroup> {
+    let path = game_cache_path(app, mode);
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+/// Return the cached game list from the last successful PC scan.
+#[tauri::command]
+pub fn get_cached_games_pc(app: AppHandle) -> Vec<GameGroup> {
+    load_game_cache(&app, "pc")
+}
+
+/// Return the cached game list from the last successful Android scan.
+#[tauri::command]
+pub fn get_cached_games_android(app: AppHandle) -> Vec<GameGroup> {
+    load_game_cache(&app, "android")
+}
+
+/// Return Eden's configured non-virtual game directories on PC.
+/// Used by the frontend to set a default path in the ROM file picker.
+#[tauri::command]
+pub fn get_eden_game_dirs_pc() -> Vec<String> {
+    let config_path = match crate::build_ids::get_eden_config_path_pub() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    let config = match std::fs::read_to_string(&config_path) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    const VIRTUAL: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
+    let mut dirs = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in config.lines() {
+        if !line.contains("gamedirs") || !line.contains("\\path=") { continue; }
+        let raw = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
+        if raw.is_empty() || VIRTUAL.contains(&raw) { continue; }
+        if std::path::PathBuf::from(raw).exists() && seen.insert(raw.to_string()) {
+            dirs.push(raw.to_string());
+        }
+    }
+    dirs
 }
