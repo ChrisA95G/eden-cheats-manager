@@ -16,6 +16,7 @@ import android.provider.Settings
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.NotificationCompat
 import java.lang.ref.WeakReference
+import rikka.shizuku.Shizuku
 
 class MainActivity : TauriActivity() {
     companion object {
@@ -25,6 +26,123 @@ class MainActivity : TauriActivity() {
         private const val ALERT_CHANNEL_ID       = "scan_alert_channel"
         private const val RETURN_NOTIFICATION_ID = 43
         private const val RETURN_REQUEST_CODE    = 1
+        private const val SHIZUKU_REQ_CODE       = 2001
+
+        // ── API level ──────────────────────────────────────────────────────────
+
+        @JvmStatic
+        fun getApiLevel(): Int = Build.VERSION.SDK_INT
+
+        // ── Shizuku status ─────────────────────────────────────────────────────
+
+        /** True if the Shizuku service is running (binder reachable). */
+        @JvmStatic
+        fun isShizukuAvailable(): Boolean = try {
+            Shizuku.pingBinder()
+        } catch (_: Exception) { false }
+
+        /** True if MANAGE_EXTERNAL_STORAGE-equivalent permission is granted via Shizuku. */
+        @JvmStatic
+        fun isShizukuGranted(): Boolean = try {
+            !Shizuku.isPreV11() &&
+                Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } catch (_: Exception) { false }
+
+        /** Show the Shizuku permission dialog. No-op if pre-v11 or unavailable. */
+        @JvmStatic
+        fun requestShizukuPermission() {
+            try {
+                if (!Shizuku.isPreV11()) Shizuku.requestPermission(SHIZUKU_REQ_CODE)
+            } catch (e: Exception) {
+                android.util.Log.e("CheatsManager", "requestShizukuPermission: $e")
+            }
+        }
+
+        // ── Shizuku file bridge ────────────────────────────────────────────────
+        // Each method spawns a shell command via Shizuku (uid=2000 / ADB-level).
+        // Returns null / false on any failure so Rust can propagate a clean error.
+
+        /** Read a file's full text content via `cat`. Returns null on error. */
+        @JvmStatic
+        fun shizukuReadFile(path: String): String? = try {
+            val p = Shizuku.newProcess(arrayOf("cat", path), null, null)
+            val out = p.inputStream.bufferedReader().readText()
+            val exit = p.waitFor()
+            if (exit == 0) out else null
+        } catch (e: Exception) {
+            android.util.Log.e("CheatsManager", "shizukuReadFile($path): $e")
+            null
+        }
+
+        /** List directory entries, one name per line. Returns "" on error/empty. */
+        @JvmStatic
+        fun shizukuListDir(path: String): String = try {
+            val p = Shizuku.newProcess(arrayOf("ls", "-1", path), null, null)
+            val out = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            out
+        } catch (e: Exception) {
+            android.util.Log.e("CheatsManager", "shizukuListDir($path): $e")
+            ""
+        }
+
+        /**
+         * Find all .txt files under `dir` recursively.
+         * Returns newline-separated absolute paths, "" on error.
+         */
+        @JvmStatic
+        fun shizukuFindTxtFiles(dir: String): String = try {
+            val p = Shizuku.newProcess(
+                arrayOf("find", dir, "-name", "*.txt", "-type", "f"), null, null
+            )
+            val out = p.inputStream.bufferedReader().readText()
+            p.waitFor()
+            out
+        } catch (e: Exception) {
+            android.util.Log.e("CheatsManager", "shizukuFindTxtFiles($dir): $e")
+            ""
+        }
+
+        /**
+         * Write `content` to `path` via `tee`. Parent directory must already exist.
+         * Returns true on success.
+         */
+        @JvmStatic
+        fun shizukuWriteFile(path: String, content: String): Boolean = try {
+            val p = Shizuku.newProcess(arrayOf("tee", path), null, null)
+            p.outputStream.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+            p.waitFor() == 0
+        } catch (e: Exception) {
+            android.util.Log.e("CheatsManager", "shizukuWriteFile($path): $e")
+            false
+        }
+
+        /** Delete a file with `rm -f` (ignores not-found). Returns true on success. */
+        @JvmStatic
+        fun shizukuDeleteFile(path: String): Boolean = try {
+            Shizuku.newProcess(arrayOf("rm", "-f", path), null, null).waitFor() == 0
+        } catch (_: Exception) { false }
+
+        /**
+         * Remove an *empty* directory with `rmdir`.
+         * Succeeds silently if non-empty or not found — used for best-effort cleanup.
+         */
+        @JvmStatic
+        fun shizukuRmdir(path: String): Boolean = try {
+            Shizuku.newProcess(arrayOf("rmdir", path), null, null).waitFor() == 0
+        } catch (_: Exception) { false }
+
+        /** Create directory tree with `mkdir -p`. Returns true on success. */
+        @JvmStatic
+        fun shizukuMkdirs(path: String): Boolean = try {
+            Shizuku.newProcess(arrayOf("mkdir", "-p", path), null, null).waitFor() == 0
+        } catch (_: Exception) { false }
+
+        /** Return true if `path` exists (file or directory). */
+        @JvmStatic
+        fun shizukuPathExists(path: String): Boolean = try {
+            Shizuku.newProcess(arrayOf("test", "-e", path), null, null).waitFor() == 0
+        } catch (_: Exception) { false }
 
         /**
          * Called from Rust via JNI to launch Eden's EmulationActivity with a ROM URI.

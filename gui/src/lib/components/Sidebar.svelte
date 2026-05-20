@@ -28,6 +28,38 @@
   let savedConnections = $derived(settings?.savedConnections ?? []);
   let showConnPicker = $state(false);
   let connecting = $state(false);
+  let grantingShizuku = $state(false);
+
+  let isShizukuError = $derived(
+    typeof $gamesError === 'string' && (
+      $gamesError.includes('Shizuku') ||
+      $gamesError.includes('Android 14+') ||
+      $gamesError.includes('Android 16') ||
+      $gamesError.includes('not yet supported by Shizuku')
+    )
+  );
+  let shizukuGrantable = $derived(
+    typeof $gamesError === 'string' && $gamesError.includes('Tap Grant Access')
+  );
+  // API 37+ errors say "not yet supported" — nothing actionable.
+  let shizukuUnsupported = $derived(
+    typeof $gamesError === 'string' && $gamesError.includes('not yet supported')
+  );
+
+  async function grantShizuku() {
+    grantingShizuku = true;
+    try {
+      await invoke('request_shizuku_permission');
+      // Give user time to tap Allow in the Shizuku dialog, then rescan.
+      setTimeout(async () => {
+        grantingShizuku = false;
+        await scanGames(settings);
+      }, 3000);
+    } catch (e) {
+      console.error('request_shizuku_permission failed:', e);
+      grantingShizuku = false;
+    }
+  }
 
   onMount(async () => {
     if (settings?.targetMode === 'android') {
@@ -132,7 +164,34 @@
   </button>
 
   {#if $gamesError}
-    <div class="error-msg">{$gamesError}</div>
+    {#if isShizukuError}
+      <div class="shizuku-panel">
+        <div class="shizuku-title">
+          {shizukuUnsupported ? '⚠ Android version not supported' : '⚠ Shizuku setup required'}
+        </div>
+        <p class="shizuku-body">{$gamesError}</p>
+        {#if !shizukuUnsupported}
+          <div class="shizuku-actions">
+            <button
+              class="btn-shizuku-grant"
+              disabled={grantingShizuku}
+              onclick={grantShizuku}
+            >
+              {grantingShizuku ? '[ WAITING... ]' : '[ GRANT ACCESS ]'}
+            </button>
+            <button class="btn-shizuku-settings" onclick={() => onopenSettings?.()}>
+              [ SETTINGS ]
+            </button>
+          </div>
+        {:else}
+          <button class="btn-shizuku-settings" onclick={() => onopenSettings?.()}>
+            [ SETTINGS ]
+          </button>
+        {/if}
+      </div>
+    {:else}
+      <div class="error-msg">{$gamesError}</div>
+    {/if}
   {/if}
 
   <div class="game-list">
@@ -404,6 +463,57 @@
     padding: .35rem .6rem;
     font-size: .72rem;
   }
+
+  .shizuku-panel {
+    margin: 0 .75rem .5rem;
+    background: rgba(245,168,0,.06);
+    border: 1px solid var(--accent);
+    border-left: 3px solid var(--accent);
+    padding: .55rem .7rem;
+  }
+  .shizuku-title {
+    font-size: .72rem;
+    color: var(--accent);
+    letter-spacing: .06em;
+    margin-bottom: .35rem;
+  }
+  .shizuku-body {
+    font-size: .7rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+    white-space: pre-line;
+    margin: 0 0 .5rem;
+  }
+  .shizuku-actions {
+    display: flex;
+    gap: .4rem;
+    flex-wrap: wrap;
+  }
+  .btn-shizuku-grant {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-family: inherit;
+    font-size: .68rem;
+    letter-spacing: .07em;
+    padding: .3rem .65rem;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .btn-shizuku-grant:not(:disabled):hover { background: rgba(245,168,0,.15); }
+  .btn-shizuku-grant:disabled { opacity: .4; cursor: default; }
+  .btn-shizuku-settings {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: .68rem;
+    letter-spacing: .07em;
+    padding: .3rem .65rem;
+    cursor: pointer;
+    transition: color .12s, border-color .12s;
+  }
+  .btn-shizuku-settings:hover { color: var(--text); border-color: var(--text-muted); }
 
   /* Game list */
   .game-list { flex: 1; overflow-y: auto; padding: .2rem .4rem; }

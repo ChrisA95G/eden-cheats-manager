@@ -19,6 +19,8 @@
   let checkingAdb = $state(false);
   let appLogPath = $state('');
   let edenLogPath = $state('');
+  let shizukuStatus = $state(/** @type {any} */ (null));
+  let checkingShizuku = $state(false);
 
   // New connection form
   let newConnLabel = $state('');
@@ -33,6 +35,7 @@
     try { detectedEdenExe = await invoke('detect_eden_exe') ?? ''; } catch (_) {}
     try { appLogPath = await invoke('get_app_log_path') ?? ''; } catch (_) {}
     if (local.targetMode === 'android') checkAdb();
+    if (platform === 'android') refreshShizukuStatus();
     if (local.targetMode === 'pc' && local.pcLoadDir) refreshEdenLogPath(local.pcLoadDir);
   });
 
@@ -131,6 +134,20 @@
     }
   }
 
+  async function refreshShizukuStatus() {
+    checkingShizuku = true;
+    try { shizukuStatus = await invoke('check_shizuku_status'); } catch (_) {}
+    finally { checkingShizuku = false; }
+  }
+
+  async function grantShizuku() {
+    try {
+      await invoke('request_shizuku_permission');
+      // Re-check after a moment — user should see the Shizuku dialog then tap back.
+      setTimeout(refreshShizukuStatus, 2500);
+    } catch (e) { console.error('request_shizuku_permission failed:', e); }
+  }
+
   async function save() {
     saving = true;
     try {
@@ -179,6 +196,36 @@
           <legend>Target Mode</legend>
           <p class="hint">Running natively on Android — direct filesystem access, no ADB required.</p>
         </fieldset>
+
+        <!-- Shizuku status — only relevant on Android 14+ -->
+        {#if shizukuStatus && shizukuStatus.needsShizuku}
+          <fieldset>
+            <legend>Shizuku (Android 14+)</legend>
+            {#if shizukuStatus.available && shizukuStatus.granted}
+              <div class="status-badge ok">Shizuku running — access granted.</div>
+            {:else if shizukuStatus.available && !shizukuStatus.granted}
+              <div class="status-badge warn">Shizuku running — permission not granted.</div>
+              <button class="btn-secondary sm" onclick={grantShizuku}>[ GRANT ACCESS ]</button>
+            {:else}
+              <div class="status-badge warn">Shizuku not running.</div>
+              <p class="hint">Android 14+ blocks Eden's data folder without it.</p>
+              {#if shizukuStatus.apiLevel >= 37}
+                <p class="hint warn-text">Your Android version is not yet supported by Shizuku. Native mode is unavailable — use ADB mode instead.</p>
+              {:else if shizukuStatus.apiLevel >= 36}
+                <p class="hint">Android 16: the Play Store version does not support this Android version yet.</p>
+                <p class="hint">Install the latest APK from: <strong>github.com/RikkaApps/Shizuku/releases</strong></p>
+                <p class="hint">Then open Shizuku → Start via Wireless ADB.</p>
+              {:else}
+                <p class="hint">1. Enable Developer Options → Wireless Debugging</p>
+                <p class="hint">2. Install Shizuku from the Play Store (or GitHub for latest)</p>
+                <p class="hint">3. Open Shizuku → Start via Wireless ADB</p>
+              {/if}
+            {/if}
+            <button class="btn-secondary sm" onclick={refreshShizukuStatus} disabled={checkingShizuku} style="margin-top:0.5rem">
+              {checkingShizuku ? '[ CHECKING... ]' : '[ REFRESH STATUS ]'}
+            </button>
+          </fieldset>
+        {/if}
       {/if}
 
       <!-- PC Load Dir -->
@@ -477,6 +524,7 @@
   }
   .btn-browse:hover { color: var(--accent); border-color: var(--accent); }
   .hint { font-size: .72rem; color: var(--text-muted); margin: 0 0 .45rem; line-height: 1.5; }
+  .warn-text { color: var(--error); }
   .optional { font-size: .65rem; color: var(--text-dim); }
   code { font-family: inherit; font-size: .72rem; background: var(--surface2); padding: .05rem .3rem; border: 1px solid var(--border); }
   .status-badge { margin-top: .45rem; padding: .3rem .65rem; font-size: .75rem; border-left: 2px solid transparent; }
