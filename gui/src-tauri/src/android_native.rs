@@ -79,12 +79,17 @@ pub struct StoragePermissionStatus {
 pub fn check_storage_permission() -> StoragePermissionStatus {
     #[cfg(target_os = "android")]
     {
+        // API 34+ (Android 14+): Android/data/ is blocked regardless of MANAGE_EXTERNAL_STORAGE.
+        // Shizuku handles file access on those versions — this permission is irrelevant.
+        if get_api_level() >= 34 {
+            return StoragePermissionStatus { granted: true, message: "Android 14+ — file access via Shizuku.".into() };
+        }
         if jni_has_all_files_access() {
             StoragePermissionStatus { granted: true, message: "Storage access granted.".into() }
         } else {
             StoragePermissionStatus {
                 granted: false,
-                message: "Storage permission required. Tap 'Open Settings' to grant 'All files access' (under Special app access, not Permissions).".into(),
+                message: "Storage permission required. Tap 'Open Settings' to grant 'All files access'.".into(),
             }
         }
     }
@@ -570,6 +575,50 @@ static JVM_PTR: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
 #[cfg(target_os = "android")]
 static MAIN_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::OnceLock::new();
 
+/// Verify every static method that Rust calls on MainActivity by name still
+/// exists after R8/ProGuard minification. Logs to logcat via eprintln! (the
+/// Tauri logger is not yet initialised at JNI_OnLoad time). If any method is
+/// missing the release APK will silently mis-behave; this makes it loud.
+#[cfg(target_os = "android")]
+fn probe_jni_methods(env: &mut jni::JNIEnv, cls: &jni::objects::JClass) {
+    const METHODS: &[(&str, &str)] = &[
+        ("hasAllFilesAccess",        "()Z"),
+        ("openStorageSettings",      "()V"),
+        ("getApiLevel",              "()I"),
+        ("isShizukuAvailable",       "()Z"),
+        ("isShizukuGranted",         "()Z"),
+        ("requestShizukuPermission", "()V"),
+        ("shizukuReadFile",          "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("shizukuListDir",           "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("shizukuFindTxtFiles",      "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("shizukuWriteFile",         "(Ljava/lang/String;Ljava/lang/String;)Z"),
+        ("shizukuDeleteFile",        "(Ljava/lang/String;)Z"),
+        ("shizukuRmdir",             "(Ljava/lang/String;)Z"),
+        ("shizukuMkdirs",            "(Ljava/lang/String;)Z"),
+        ("shizukuPathExists",        "(Ljava/lang/String;)Z"),
+        ("launchIntent",             "(Ljava/lang/String;)V"),
+        ("returnToApp",              "()V"),
+        ("startScanService",         "()V"),
+        ("stopScanService",          "()V"),
+    ];
+    let mut missing: Vec<&str> = Vec::new();
+    for (name, sig) in METHODS {
+        if env.get_static_method_id(cls, name, sig).is_err() {
+            let _ = env.exception_clear();
+            missing.push(name);
+        }
+    }
+    if missing.is_empty() {
+        eprintln!("[ECM] JNI probe OK — all {} MainActivity methods found", METHODS.len());
+    } else {
+        eprintln!(
+            "[ECM] JNI PROBE FAILED — {}/{} methods missing (R8 renamed them): {:?}",
+            missing.len(), METHODS.len(), missing
+        );
+        eprintln!("[ECM] Fix: -keepclassmembers class dev.eden.cheats_manager.MainActivity {{ public static *; }} in proguard-rules.pro");
+    }
+}
+
 #[cfg(target_os = "android")]
 #[no_mangle]
 pub unsafe extern "C" fn JNI_OnLoad(
@@ -583,6 +632,7 @@ pub unsafe extern "C" fn JNI_OnLoad(
         let Ok(vm_ref) = (unsafe { jni::JavaVM::from_raw(vm) }) else { break 'capture };
         let Ok(mut env) = vm_ref.get_env() else { break 'capture };
         let Ok(cls) = env.find_class("dev/eden/cheats_manager/MainActivity") else { break 'capture };
+        probe_jni_methods(&mut env, &cls);
         let Ok(global) = env.new_global_ref(cls) else { break 'capture };
         let _ = MAIN_CLASS.set(global);
     }

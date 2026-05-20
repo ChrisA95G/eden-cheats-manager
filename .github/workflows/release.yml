@@ -115,6 +115,25 @@ jobs:
         env:
           NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
 
+      - name: Verify JNI methods not renamed by R8
+        run: |
+          APK=gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          APKANALYZER=$(find $ANDROID_SDK_ROOT/cmdline-tools -name apkanalyzer 2>/dev/null | sort -V | tail -1)
+          if [ -z "$APKANALYZER" ]; then
+            echo "apkanalyzer not found, skipping method check"
+            exit 0
+          fi
+          METHODS="hasAllFilesAccess openStorageSettings getApiLevel isShizukuAvailable isShizukuGranted requestShizukuPermission shizukuReadFile shizukuListDir shizukuFindTxtFiles shizukuWriteFile shizukuDeleteFile shizukuRmdir shizukuMkdirs shizukuPathExists launchIntent returnToApp startScanService stopScanService"
+          FAIL=0
+          DEX_DUMP=$($APKANALYZER dex packages --defined-only "$APK" 2>/dev/null)
+          for M in $METHODS; do
+            if ! echo "$DEX_DUMP" | grep -q "$M"; then
+              echo "ERROR: method '$M' missing from APK dex — R8 renamed or removed it"
+              FAIL=1
+            fi
+          done
+          [ $FAIL -eq 0 ] && echo "All JNI-called methods present in dex" || exit 1
+
       - name: Sign APK
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > keystore.jks

@@ -197,6 +197,18 @@
           <p class="hint">Running natively on Android — direct filesystem access, no ADB required.</p>
         </fieldset>
 
+        <!-- Storage access — only needed on Android 13 and below -->
+        {#if shizukuStatus && !shizukuStatus.needsShizuku}
+          <fieldset>
+            <legend>Storage Access</legend>
+            <p class="hint">Required on Android 13 and below to access Eden's data folder.</p>
+            <p class="hint">Samsung: Settings → Apps → Eden Cheats Manager → Permissions → Files and media → Allow management of all files.</p>
+            <button class="btn-secondary sm" onclick={async () => { try { await invoke('open_storage_settings'); } catch (_) {} }}>
+              [ GRANT STORAGE ACCESS ]
+            </button>
+          </fieldset>
+        {/if}
+
         <!-- Shizuku status — only relevant on Android 14+ -->
         {#if shizukuStatus && shizukuStatus.needsShizuku}
           <fieldset>

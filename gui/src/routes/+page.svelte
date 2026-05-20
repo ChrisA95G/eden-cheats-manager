@@ -16,6 +16,7 @@
   let platform = $state('desktop');
   let isMobile = $derived((/** @type {string} */ (platform)) === 'android');
   let storagePermission = $state(/** @type {any} */ (null));
+  let permissionDismissed = $state(false);
 
   onMount(async () => {
     try {
@@ -102,19 +103,20 @@
 
 {#if loading}
   <div class="loading-screen">LOADING</div>
-{:else if platform === 'android' && storagePermission && !storagePermission.granted}
+{:else if platform === 'android' && storagePermission && !storagePermission.granted && !permissionDismissed}
   <div class="permission-screen">
     <div class="permission-box">
-      <div class="permission-title">// STORAGE PERMISSION REQUIRED</div>
+      <div class="permission-title">// STORAGE PERMISSION</div>
       <p class="permission-body">
-        Eden Cheats Manager needs "All files access" to read and write cheat files in Eden's data directory.
+        Eden Cheats Manager needs "All files access" to read and write cheat files on Android 13 and below.
       </p>
       <p class="permission-path"><code>/Android/data/dev.eden.eden_emulator/files/load/</code></p>
       <p class="permission-body">
-        Tap <strong>Open Settings</strong> below, then enable <strong>Allow management of all files</strong>.
+        Tap <strong>Open Settings</strong>, then enable <strong>Allow management of all files</strong>.
       </p>
       <p class="permission-body" style="font-size:0.8em;opacity:0.7;">
-        (Found under Special app access → All files access — not the regular Permissions screen)
+        Stock Android: Special app access → All files access<br>
+        Samsung One UI: Apps → Eden Cheats Manager → Permissions → Files and media → Allow management of all files
       </p>
       <button class="permission-btn" onclick={async () => {
         try { await invoke('open_storage_settings'); } catch (_) {}
@@ -126,6 +128,12 @@
       }}>
         [ CHECK AGAIN ]
       </button>
+      <button class="permission-btn" style="margin-top:0.5rem;opacity:0.5;" onclick={() => permissionDismissed = true}>
+        [ SKIP FOR NOW ]
+      </button>
+      <p class="permission-body" style="font-size:0.72em;opacity:0.5;margin-top:0.5rem;">
+        You can grant this later via Settings if needed.
+      </p>
     </div>
   </div>
 {:else if !appSettings?.onboardingDone}
