@@ -114,13 +114,19 @@ pub fn open_storage_settings() -> Result<(), String> {
 #[tauri::command]
 pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGroup>, String> {
     let load_dir = PathBuf::from(ANDROID_LOAD_DIR);
-    log::info!("[games::native] load_dir={:?} exists={}", load_dir, load_dir.exists());
+    let load_dir_str = load_dir.to_string_lossy().to_string();
 
-    if !load_dir.exists() {
+    // On API ≥ 34 fail fast with a clear Shizuku error before any fs probing.
+    #[cfg(target_os = "android")]
+    ensure_shizuku_for_blocked_path(&load_dir_str)?;
+
+    log::info!("[games::native] load_dir={:?} exists={}", load_dir, native_path_exists(&load_dir_str));
+
+    if !native_path_exists(&load_dir_str) {
         // Check whether Eden's app data dir exists at all — if not, Eden isn't installed.
         let eden_data = load_dir
             .parent().and_then(|p| p.parent()) // .../files/load -> .../files -> .../dev.eden.eden_emulator
-            .map(|p| p.exists())
+            .map(|p| native_path_exists(&p.to_string_lossy()))
             .unwrap_or(false);
 
         if !eden_data {
@@ -132,7 +138,7 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
         }
 
         // Eden is installed but never launched — create the load dir ourselves.
-        if let Err(e) = std::fs::create_dir_all(&load_dir) {
+        if let Err(e) = native_mkdirs(&load_dir_str) {
             return Err(format!(
                 "Eden is installed but its load directory couldn't be created. \
                 Launch Eden once to initialise its data directory, then tap Scan again. ({})",
@@ -142,11 +148,10 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
         log::info!("[games::native] created load_dir: {:?}", load_dir);
     }
 
-    let entries = std::fs::read_dir(&load_dir).map_err(|e| e.to_string())?;
+    let names = native_list_dir_names(&load_dir_str)?;
     let mut installed_ids: HashSet<String> = HashSet::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if crate::games::is_valid_tid(&name) && entry.path().is_dir() {
+    for name in names {
+        if crate::games::is_valid_tid(&name) {
             installed_ids.insert(name);
         }
     }
@@ -179,7 +184,7 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
 
 /// Read Eden's config.ini directly from the filesystem to find update title IDs.
 fn find_update_tids_native() -> Vec<String> {
-    let config_text = match std::fs::read_to_string(ANDROID_CONFIG_PATH) {
+    let config_text = match native_read_file(ANDROID_CONFIG_PATH) {
         Ok(t) => t,
         Err(e) => {
             log::warn!("[games::native] could not read config.ini: {e}");
@@ -226,13 +231,12 @@ pub fn install_cheat_android_native(
     content: String,
 ) -> Result<(), String> {
     log::info!("[cheats::native] install title={title_id} build={build_id} name={cheat_name}");
-    let cheats_dir = PathBuf::from(ANDROID_LOAD_DIR)
+    let file = PathBuf::from(ANDROID_LOAD_DIR)
         .join(&title_id)
         .join(&cheat_name)
-        .join("cheats");
-    std::fs::create_dir_all(&cheats_dir).map_err(|e| e.to_string())?;
-    let file = cheats_dir.join(format!("{}.txt", build_id));
-    std::fs::write(&file, content.as_bytes()).map_err(|e| e.to_string())?;
+        .join("cheats")
+        .join(format!("{}.txt", build_id));
+    native_write_file(&file.to_string_lossy(), content.as_bytes())?;
     log::info!("[cheats::native] install OK: {}", file.display());
     Ok(())
 }
@@ -243,6 +247,35 @@ pub fn list_installed_cheats_android_native(
 ) -> Result<Vec<InstalledCheat>, String> {
     log::debug!("[cheats::native] list title={title_id}");
     let title_dir = PathBuf::from(ANDROID_LOAD_DIR).join(&title_id);
+    let title_dir_str = title_dir.to_string_lossy().to_string();
+
+    // On API ≥ 34 with a blocked path, use Shizuku's `find` to enumerate in one call.
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && title_dir_str.contains("/Android/data/") {
+        ensure_shizuku_for_blocked_path(&title_dir_str)?;
+        if !jni_shizuku_path_exists(&title_dir_str) {
+            return Ok(Vec::new());
+        }
+        let out = jni_shizuku_find_txt_files(&title_dir_str)?;
+        let mut result = Vec::new();
+        for line in out.lines().filter(|l| !l.trim().is_empty()) {
+            let path = std::path::Path::new(line.trim());
+            let Some(fname) = path.file_name() else { continue };
+            let fname_str = fname.to_string_lossy();
+            if !fname_str.ends_with(".txt") { continue; }
+            let Some(cheats_dir) = path.parent() else { continue };
+            if cheats_dir.file_name().map(|n| n != "cheats").unwrap_or(true) { continue; }
+            let Some(cheat_name_dir) = cheats_dir.parent() else { continue };
+            let cheat_name = cheat_name_dir.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let build_id = fname_str.trim_end_matches(".txt").to_uppercase();
+            result.push(InstalledCheat { cheat_name, build_id });
+        }
+        log::info!("[cheats::native] list (shizuku) -> {} entries", result.len());
+        return Ok(result);
+    }
+
     if !title_dir.exists() {
         return Ok(Vec::new());
     }
@@ -276,6 +309,23 @@ pub fn delete_cheat_android_native(
         .join(&cheat_name)
         .join("cheats")
         .join(format!("{}.txt", build_id));
+    let file_str = file.to_string_lossy().to_string();
+
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && file_str.contains("/Android/data/") {
+        ensure_shizuku_for_blocked_path(&file_str)?;
+        jni_shizuku_delete_file(&file_str)?;
+        // Best-effort cleanup of empty parent dirs.
+        if let Some(cheats_dir) = file.parent() {
+            jni_shizuku_rmdir(&cheats_dir.to_string_lossy());
+            if let Some(cheat_dir) = cheats_dir.parent() {
+                jni_shizuku_rmdir(&cheat_dir.to_string_lossy());
+            }
+        }
+        log::info!("[cheats::native] delete OK (shizuku)");
+        return Ok(());
+    }
+
     match std::fs::remove_file(&file) {
         Ok(()) => {
             let cheats_dir = file.parent().unwrap();
@@ -294,7 +344,7 @@ pub fn delete_cheat_android_native(
 /// Extract all build IDs from Eden's log file directly (no ADB).
 #[tauri::command]
 pub fn extract_build_ids_android_native() -> Result<Vec<String>, String> {
-    let text = std::fs::read_to_string(ANDROID_LOG_PATH)
+    let text = native_read_file(ANDROID_LOG_PATH)
         .map_err(|e| format!("Could not read Eden log at {ANDROID_LOG_PATH}: {e}"))?;
     let ids = parse_build_ids(&text);
     if ids.is_empty() {
@@ -314,7 +364,7 @@ pub struct DetectedBuildIds {
 /// Find build IDs in Eden's log that are associated with the given title_id.
 #[tauri::command]
 pub fn detect_build_ids_android_native(title_id: String) -> Result<DetectedBuildIds, String> {
-    let text = std::fs::read_to_string(ANDROID_LOG_PATH)
+    let text = native_read_file(ANDROID_LOG_PATH)
         .map_err(|e| format!("Could not read Eden log: {e}"))?;
     let build_ids = crate::build_ids::find_build_ids_for_title_in_log(&text, &title_id);
     Ok(DetectedBuildIds { title_id, build_ids })
@@ -398,7 +448,7 @@ pub async fn scan_build_id_android_native(title_id: String, base_title_id: Strin
                 tokio::time::sleep(std::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
                 poll_n += 1;
 
-                let Ok(text) = std::fs::read_to_string(ANDROID_LOG_PATH) else {
+                let Ok(text) = native_read_file(ANDROID_LOG_PATH) else {
                     continue;
                 };
                 let current = text.lines().count() as u64;
@@ -470,7 +520,7 @@ pub async fn scan_build_id_android_native(title_id: String, base_title_id: Strin
 /// storage. The URI is passed to Eden via JNI startActivity(), which can handle
 /// content:// URIs that `am start -d` (subprocess) cannot.
 fn find_rom_path_native(title_id: &str, game_name: &str) -> Option<String> {
-    let config = std::fs::read_to_string(crate::adb::ANDROID_CONFIG_PATH).ok()?;
+    let config = native_read_file(crate::adb::ANDROID_CONFIG_PATH).ok()?;
     let tid_lower = title_id.to_lowercase();
     let name_norm = crate::rom_cache::normalize(game_name);
 
@@ -586,6 +636,334 @@ fn jni_open_storage_settings() -> Result<(), String> {
     })
 }
 
+// ── Shizuku / API-level infrastructure ───────────────────────────────────────
+// On API ≤ 33 all blocked-path helpers fall through to direct std::fs.
+// On API ≥ 34 any path inside Android/data/ is routed through Shizuku
+// (ADB shell uid=2000 — confirmed to bypass the platform restriction).
+// Paths outside Android/data/ (user ROM dirs, etc.) always use direct std::fs.
+
+#[cfg(target_os = "android")]
+static API_LEVEL: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
+
+fn get_api_level() -> i32 {
+    #[cfg(target_os = "android")]
+    return *API_LEVEL.get_or_init(|| {
+        with_main_class(|env, jcls| {
+            env.call_static_method(jcls, "getApiLevel", "()I", &[])
+                .map_err(|e| format!("JNI getApiLevel: {e}"))
+                .and_then(|v| v.i().map_err(|e| format!("JNI int: {e}")))
+        })
+        .unwrap_or(0)
+    });
+    #[cfg(not(target_os = "android"))]
+    0
+}
+
+/// Returns Ok if (a) API < 34 or (b) Shizuku is running and permission is granted.
+fn ensure_shizuku_for_blocked_path(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && path.contains("/Android/data/") {
+        let api = get_api_level();
+
+        // Android 17+ — Shizuku has no release for this version yet.
+        if api >= 37 {
+            return Err(format!(
+                "Your device runs Android API {api}, which is not yet supported by Shizuku.\n\
+                 Native mode cannot access Eden's data folder on this Android version.\n\n\
+                 Workaround: use ADB mode (requires a PC with ADB)."
+            ));
+        }
+
+        if !jni_is_shizuku_available() {
+            return Err(if api >= 36 {
+                // Android 16 — Play Store build lags behind; GitHub APK needed.
+                "Android 16 blocks Eden's data folder. Shizuku is required, but the \
+                 Play Store version does not support Android 16 yet.\n\n\
+                 Install the latest APK directly from GitHub:\n\
+                 github.com/RikkaApps/Shizuku/releases\n\n\
+                 Then: Open Shizuku → Start via Wireless ADB → tap Grant Access."
+                    .to_string()
+            } else {
+                // Android 14–15 — Play Store build works fine.
+                "Android 14+ blocks Eden's data folder. Shizuku is required.\n\n\
+                 1. Enable Developer Options on your phone\n\
+                 2. Enable Wireless Debugging\n\
+                 3. Install Shizuku from the Play Store (or GitHub for latest)\n\
+                 4. Open Shizuku → Start via Wireless ADB\n\
+                 5. Tap Grant Access here"
+                    .to_string()
+            });
+        }
+        if !jni_is_shizuku_granted() {
+            return Err(
+                "Shizuku is running but access is not granted yet.\n\
+                 Tap Grant Access below."
+                    .into(),
+            );
+        }
+    }
+    Ok(())
+}
+
+// ── Shizuku JNI helpers (android-only) ───────────────────────────────────────
+
+#[cfg(target_os = "android")]
+fn jni_is_shizuku_available() -> bool {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "isShizukuAvailable", "()Z", &[])
+            .map_err(|e| format!("JNI isShizukuAvailable: {e}"))
+            .and_then(|v| v.z().map_err(|e| format!("JNI bool: {e}")))
+    })
+    .unwrap_or(false)
+}
+
+#[cfg(target_os = "android")]
+fn jni_is_shizuku_granted() -> bool {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "isShizukuGranted", "()Z", &[])
+            .map_err(|e| format!("JNI isShizukuGranted: {e}"))
+            .and_then(|v| v.z().map_err(|e| format!("JNI bool: {e}")))
+    })
+    .unwrap_or(false)
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_read_file(path: &str) -> Result<String, String> {
+    use jni::objects::{JObject, JString, JValue};
+    with_main_class(|env, jcls| {
+        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
+        let result = env
+            .call_static_method(
+                jcls,
+                "shizukuReadFile",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&JObject::from(path_j))],
+            )
+            .map_err(|e| format!("JNI shizukuReadFile: {e}"))?;
+        let jobj = result.l().map_err(|e| format!("JNI object: {e}"))?;
+        if jobj.is_null() {
+            return Err(format!("Cannot read {path} via Shizuku (missing or denied)"));
+        }
+        let s: String = env
+            .get_string(&JString::from(jobj))
+            .map_err(|e| format!("JNI string: {e}"))?
+            .into();
+        Ok(s)
+    })
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_list_dir(path: &str) -> Result<String, String> {
+    use jni::objects::{JObject, JString, JValue};
+    with_main_class(|env, jcls| {
+        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
+        let result = env
+            .call_static_method(
+                jcls,
+                "shizukuListDir",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&JObject::from(path_j))],
+            )
+            .map_err(|e| format!("JNI shizukuListDir: {e}"))?;
+        let jobj = result.l().map_err(|e| format!("JNI object: {e}"))?;
+        env.get_string(&JString::from(jobj))
+            .map(|s| s.into())
+            .map_err(|e| format!("JNI string: {e}"))
+    })
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_find_txt_files(dir: &str) -> Result<String, String> {
+    use jni::objects::{JObject, JString, JValue};
+    with_main_class(|env, jcls| {
+        let dir_j = env.new_string(dir).map_err(|e| format!("JNI string: {e}"))?;
+        let result = env
+            .call_static_method(
+                jcls,
+                "shizukuFindTxtFiles",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&JObject::from(dir_j))],
+            )
+            .map_err(|e| format!("JNI shizukuFindTxtFiles: {e}"))?;
+        let jobj = result.l().map_err(|e| format!("JNI object: {e}"))?;
+        env.get_string(&JString::from(jobj))
+            .map(|s| s.into())
+            .map_err(|e| format!("JNI string: {e}"))
+    })
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_write_file(path: &str, content: &str) -> Result<(), String> {
+    use jni::objects::{JObject, JValue};
+    with_main_class(|env, jcls| {
+        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
+        let content_j = env.new_string(content).map_err(|e| format!("JNI string: {e}"))?;
+        let result = env
+            .call_static_method(
+                jcls,
+                "shizukuWriteFile",
+                "(Ljava/lang/String;Ljava/lang/String;)Z",
+                &[
+                    JValue::Object(&JObject::from(path_j)),
+                    JValue::Object(&JObject::from(content_j)),
+                ],
+            )
+            .map_err(|e| format!("JNI shizukuWriteFile: {e}"))?;
+        let ok = result.z().map_err(|e| format!("JNI bool: {e}"))?;
+        if ok { Ok(()) } else { Err(format!("shizukuWriteFile({path}) returned false")) }
+    })
+}
+
+// Helper: call a Shizuku JNI method `(String)Z`.
+#[cfg(target_os = "android")]
+fn jni_shizuku_bool_path(method: &str, path: &str) -> Result<bool, String> {
+    use jni::objects::{JObject, JValue};
+    with_main_class(|env, jcls| {
+        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
+        let result = env
+            .call_static_method(
+                jcls,
+                method,
+                "(Ljava/lang/String;)Z",
+                &[JValue::Object(&JObject::from(path_j))],
+            )
+            .map_err(|e| format!("JNI {method}: {e}"))?;
+        result.z().map_err(|e| format!("JNI bool: {e}"))
+    })
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_mkdirs(path: &str) -> Result<(), String> {
+    match jni_shizuku_bool_path("shizukuMkdirs", path) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(format!("shizukuMkdirs({path}) failed")),
+        Err(e) => Err(e),
+    }
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_path_exists(path: &str) -> bool {
+    jni_shizuku_bool_path("shizukuPathExists", path).unwrap_or(false)
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_delete_file(path: &str) -> Result<(), String> {
+    match jni_shizuku_bool_path("shizukuDeleteFile", path) {
+        Ok(_) => Ok(()), // rm -f always succeeds (ignores not-found)
+        Err(e) => Err(e),
+    }
+}
+
+#[cfg(target_os = "android")]
+fn jni_shizuku_rmdir(path: &str) {
+    // Best-effort — ignore errors (rmdir fails silently on non-empty dirs)
+    let _ = jni_shizuku_bool_path("shizukuRmdir", path);
+}
+
+// ── Filesystem abstraction (direct fs on API ≤ 33, Shizuku on API ≥ 34) ──────
+
+fn native_read_file(path: &str) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && path.contains("/Android/data/") {
+        ensure_shizuku_for_blocked_path(path)?;
+        return jni_shizuku_read_file(path);
+    }
+    std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
+}
+
+fn native_path_exists(path: &str) -> bool {
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && path.contains("/Android/data/") {
+        if let Err(e) = ensure_shizuku_for_blocked_path(path) {
+            log::warn!("[native] path_exists({path}) — Shizuku not ready: {e}");
+            return false;
+        }
+        return jni_shizuku_path_exists(path);
+    }
+    std::path::Path::new(path).exists()
+}
+
+fn native_mkdirs(path: &str) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && path.contains("/Android/data/") {
+        ensure_shizuku_for_blocked_path(path)?;
+        return jni_shizuku_mkdirs(path);
+    }
+    std::fs::create_dir_all(path).map_err(|e| format!("{path}: {e}"))
+}
+
+fn native_list_dir_names(path: &str) -> Result<Vec<String>, String> {
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && path.contains("/Android/data/") {
+        ensure_shizuku_for_blocked_path(path)?;
+        let out = jni_shizuku_list_dir(path)?;
+        return Ok(out
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect());
+    }
+    let entries = std::fs::read_dir(path).map_err(|e| format!("{path}: {e}"))?;
+    Ok(entries
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect())
+}
+
+/// Write `content` to `path`, creating parent directories automatically.
+fn native_write_file(path: &str, content: &[u8]) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    if get_api_level() >= 34 && path.contains("/Android/data/") {
+        ensure_shizuku_for_blocked_path(path)?;
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            jni_shizuku_mkdirs(&parent.to_string_lossy())?;
+        }
+        return jni_shizuku_write_file(path, &String::from_utf8_lossy(content));
+    }
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, content).map_err(|e| format!("{path}: {e}"))
+}
+
+// ── Shizuku Tauri commands ────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShizukuStatus {
+    pub api_level: i32,
+    pub needs_shizuku: bool,
+    pub available: bool,
+    pub granted: bool,
+}
+
+/// Return current Shizuku readiness state. Safe to call on any platform/API level.
+#[tauri::command]
+pub fn check_shizuku_status() -> ShizukuStatus {
+    #[cfg(target_os = "android")]
+    {
+        let api_level = get_api_level();
+        let needs = api_level >= 34;
+        let available = if needs { jni_is_shizuku_available() } else { false };
+        let granted = if available { jni_is_shizuku_granted() } else { false };
+        return ShizukuStatus { api_level, needs_shizuku: needs, available, granted };
+    }
+    #[cfg(not(target_os = "android"))]
+    ShizukuStatus { api_level: 0, needs_shizuku: false, available: false, granted: false }
+}
+
+/// Show the Shizuku permission dialog. No-op on non-Android or API < 34.
+#[tauri::command]
+pub fn request_shizuku_permission() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "requestShizukuPermission", "()V", &[])
+            .map_err(|e| format!("JNI requestShizukuPermission: {e}"))?;
+        Ok(())
+    })?;
+    Ok(())
+}
+
 /// Call `MainActivity.launchIntent(uri)` via JNI so that `startActivity()` runs
 /// from the app's own Activity context — bypassing the permission restrictions
 /// that block `am start -d URI` when called from a forked subprocess.
@@ -680,7 +1058,7 @@ fn search_dir_for_rom(dir: &str, tid_lower: &str, name_norm: &str, depth: u32) -
 
 /// Count lines in a local file. Used to establish a log baseline.
 fn get_local_line_count(path: &str) -> Option<u64> {
-    std::fs::read_to_string(path)
+    native_read_file(path)
         .ok()
         .map(|t| t.lines().count() as u64)
 }
