@@ -224,7 +224,9 @@
     try {
       let result;
       if (settings.targetMode === 'androidNative') {
-        result = await invoke('list_installed_cheats_android_native', { titleId: game.titleId });
+        result = await invoke('list_installed_cheats_android_native', {
+          titleId: game.titleId,
+        });
       } else if (settings.targetMode === 'android') {
         result = await invoke('list_installed_cheats_android', { adbPath: settings.adbPath, titleId: game.titleId });
       } else {
@@ -1251,8 +1253,22 @@
     padding: .75rem .85rem;
   }
   .cheat-panel.mobile {
-    height: 100vh;
+    height: 100dvh;
     overflow-y: auto;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Push back bar below status bar / punch-hole camera */
+  .cheat-panel.mobile .back-bar {
+    padding-top: max(.65rem, calc(env(safe-area-inset-top) + .4rem));
+    padding-left: max(.75rem, calc(env(safe-area-inset-left) + .5rem));
+    padding-right: max(.75rem, calc(env(safe-area-inset-right) + .5rem));
+    min-height: 60px;
+  }
+  .cheat-panel.mobile .btn-back {
+    font-size: .88rem;
+    min-height: 44px;
+    padding: .5rem .6rem;
   }
 
   .cheat-panel.mobile .game-header,

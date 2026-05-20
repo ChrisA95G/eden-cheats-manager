@@ -257,7 +257,7 @@
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    height: 100dvh;
     overflow: hidden;
   }
 
@@ -498,22 +498,39 @@
     min-width: unset;
     border-right: none;
   }
+  /* Push header below punch-hole camera / status bar on edge-to-edge Android */
+  .sidebar.mobile .sidebar-header {
+    padding-top: max(1rem, calc(env(safe-area-inset-top) + .4rem));
+    padding-left: max(.85rem, calc(env(safe-area-inset-left) + .5rem));
+    padding-right: max(.85rem, calc(env(safe-area-inset-right) + .5rem));
+    min-height: 60px;
+    align-items: center;
+  }
+  .sidebar.mobile .app-brand { font-size: 1.05rem; }
+  .sidebar.mobile .mode-badge { font-size: .72rem; padding: .1rem .45rem; }
+  .sidebar.mobile .status-label { font-size: .8rem; }
+  .sidebar.mobile .btn-icon {
+    font-size: .78rem;
+    padding: .35rem .6rem;
+    min-height: 36px;
+    min-width: 44px;
+  }
   .sidebar.mobile .group-header,
   .sidebar.mobile .child-item {
-    min-height: 48px;
+    min-height: 52px;
     padding-top: .65rem;
     padding-bottom: .65rem;
   }
   .sidebar.mobile .scan-btn {
-    padding: .65rem 1rem;
-    font-size: .85rem;
+    padding: .75rem 1rem;
+    font-size: .88rem;
   }
   .sidebar.mobile .game-cover,
   .sidebar.mobile .game-cover-placeholder {
-    width: 42px;
-    height: 42px;
+    width: 44px;
+    height: 44px;
   }
-  .sidebar.mobile .game-name { font-size: .88rem; }
-  .sidebar.mobile .game-tid  { font-size: .7rem; }
-  .sidebar.mobile .conn-toggle { padding: .4rem .65rem; font-size: .8rem; }
+  .sidebar.mobile .game-name { font-size: .9rem; }
+  .sidebar.mobile .game-tid  { font-size: .72rem; }
+  .sidebar.mobile .conn-toggle { padding: .5rem .65rem; font-size: .82rem; }
 </style>

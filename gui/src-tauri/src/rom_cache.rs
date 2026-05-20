@@ -115,7 +115,7 @@ fn scan_dir(
 /// `(title_id, game_name)` pairs. Manual cache entries are never overwritten.
 /// Returns the number of newly matched ROMs.
 pub fn scan_rom_paths(
-    config_path: &PathBuf,
+    config_path: &std::path::Path,
     title_names: &[(String, String)],
     cache: &mut RomCache,
 ) -> usize {
@@ -127,7 +127,6 @@ pub fn scan_rom_paths(
         }
     };
 
-    const VIRTUAL: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
     let mut search_dirs: Vec<PathBuf> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -136,7 +135,7 @@ pub fn scan_rom_paths(
             continue;
         }
         let raw = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
-        if raw.is_empty() || VIRTUAL.contains(&raw) {
+        if raw.is_empty() || crate::adb::EDEN_VIRTUAL_DIRS.contains(&raw) {
             continue;
         }
         let p = PathBuf::from(raw);
@@ -188,7 +187,7 @@ pub async fn scan_and_update_rom_cache(
     app: AppHandle,
     title_names: Vec<(String, String)>,
 ) -> Result<usize, String> {
-    let config_path = crate::build_ids::get_eden_config_path_pub()
+    let config_path = crate::build_ids::get_eden_config_path()
         .ok_or_else(|| "Eden config not found".to_string())?;
     let mut cache = load_cache(&app);
     let count = scan_rom_paths(&config_path, &title_names, &mut cache);

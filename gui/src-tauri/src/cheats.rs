@@ -174,14 +174,15 @@ pub fn delete_cheat_pc(
         .join(&cheat_name)
         .join("cheats")
         .join(format!("{}.txt", build_id));
-    if file.exists() {
-        std::fs::remove_file(&file).map_err(|e| e.to_string())?;
-        log::info!("[cheats] delete_pc OK: {}", file.display());
-        // Clean up empty directories
-        let cheats_dir = file.parent().unwrap();
-        let cheat_dir = cheats_dir.parent().unwrap();
-        let _ = std::fs::remove_dir(cheats_dir);
-        let _ = std::fs::remove_dir(cheat_dir);
+    match std::fs::remove_file(&file) {
+        Ok(()) => {
+            log::info!("[cheats] delete_pc OK: {}", file.display());
+            let cheats_dir = file.parent().unwrap();
+            let _ = std::fs::remove_dir(cheats_dir);
+            let _ = std::fs::remove_dir(cheats_dir.parent().unwrap());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
     }
     Ok(())
 }

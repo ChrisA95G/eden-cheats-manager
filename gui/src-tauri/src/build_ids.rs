@@ -1,28 +1,15 @@
-use crate::adb::{adb_bin, adb_ls, REMOTE_BASE};
+use crate::adb::{adb_bin, adb_ls, loader_build_id_re, REMOTE_BASE};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
-#[allow(unused_imports)]
-use dirs_next;
 
 // Looser regex used for contextual log window: no `name=main` requirement.
 static LOG_BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();
 fn log_build_id_re() -> &'static Regex {
     LOG_BUILD_ID_RE.get_or_init(|| {
         Regex::new(r"build_id=([A-Fa-f0-9]{16,64})").unwrap()
-    })
-}
-
-// Strict regex that only matches NSO-loader lines: `build_id=HEX, name=main`.
-// Library-scan cache entries never include `, name=main` — only the NSO ELF Note
-// parser emits this suffix, and it is written exclusively during actual emulation
-// startup (not during MainActivity's game-library scan).
-static LOADER_BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();
-fn loader_build_id_re() -> &'static Regex {
-    LOADER_BUILD_ID_RE.get_or_init(|| {
-        Regex::new(r"build_id=([A-Fa-f0-9]{16,64}),\s*name=main").unwrap()
     })
 }
 
@@ -59,7 +46,7 @@ pub(crate) fn is_non_base_filename(fname_lower: &str) -> bool {
 /// first so they sort before library-scan cache entries in the output.  This
 /// ensures callers see the real emulation build ID at index 0 even when the log
 /// contains both kinds of entry for the same title.
-fn find_build_ids_for_title_in_log(text: &str, title_id: &str) -> Vec<String> {
+pub(crate) fn find_build_ids_for_title_in_log(text: &str, title_id: &str) -> Vec<String> {
     let tid_lower = title_id.to_lowercase();
     let lines: Vec<&str> = text.lines().collect();
     let loader_re = loader_build_id_re();
@@ -102,11 +89,6 @@ fn find_build_ids_for_title_in_log(text: &str, title_id: &str) -> Vec<String> {
     }
 
     out
-}
-
-/// Public wrapper for use by android_native module.
-pub fn find_build_ids_for_title_pub(text: &str, title_id: &str) -> Vec<String> {
-    find_build_ids_for_title_in_log(text, title_id)
 }
 
 // ── Android ───────────────────────────────────────────────────────────────────
@@ -303,11 +285,7 @@ pub fn detect_build_ids_pc(
 /// Returns the first candidate that exists on disk, logging every path tried.
 /// Multiple candidates per platform handle Qt version differences and installs
 /// that haven't been verified on real hardware yet.
-pub fn get_eden_config_path_pub() -> Option<PathBuf> {
-    get_eden_config_path()
-}
-
-fn get_eden_config_path() -> Option<PathBuf> {
+pub(crate) fn get_eden_config_path() -> Option<PathBuf> {
     let candidates: Vec<PathBuf> = if cfg!(target_os = "linux") {
         let home = dirs_next::home_dir().unwrap_or_default();
         vec![
@@ -406,9 +384,7 @@ fn find_rom_path_pc(title_id: &str, game_name: &str) -> Option<PathBuf> {
     let mut search_dirs: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    // Virtual sentinel values Eden uses for NAND/SDMC — not real filesystem paths.
-    const VIRTUAL: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
-
+    use crate::adb::EDEN_VIRTUAL_DIRS;
     for line in config.lines() {
         // qt-config.ini game dirs: `Paths\gamedirs\N\path=<value>`
         if !line.contains("gamedirs") || !line.contains("\\path=") {
@@ -420,7 +396,7 @@ fn find_rom_path_pc(title_id: &str, game_name: &str) -> Option<PathBuf> {
             log::debug!("[build_ids] find_rom_pc: empty raw value, skipping");
             continue;
         }
-        if VIRTUAL.contains(&raw) {
+        if EDEN_VIRTUAL_DIRS.contains(&raw) {
             log::debug!("[build_ids] find_rom_pc: virtual entry '{raw}', skipping");
             continue;
         }
@@ -663,8 +639,8 @@ pub async fn scan_build_id_pc(
 
 // ── Scan Build ID (Launch + Log Poll) ───────────────────────────────────────
 
-/// Eden package and emulation activity — update if the package name ever changes.
-const EDEN_PKG: &str = "dev.eden.eden_emulator";
+use crate::adb::EDEN_PKG;
+
 const EDEN_ACTIVITY: &str = "org.yuzu.yuzu_emu.activities.EmulationActivity";
 /// Eden writes its logs here (not to logcat).
 const EDEN_LOG_PATH: &str =
@@ -795,10 +771,9 @@ pub(crate) fn physical_to_content_uri(physical_path: &str, tree_entries: &[(Stri
 /// external SD cards (required for Eden to open them via ContentResolver), or a
 /// `file://` URI as a fallback for internal storage.
 fn find_rom_path_android(adb: &str, title_id: &str, game_name: &str) -> Option<String> {
-    const CONFIG_PATH: &str =
-        "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
+    use crate::adb::ANDROID_CONFIG_PATH;
     let config_out = Command::new(adb)
-        .args(["shell", "cat", CONFIG_PATH])
+        .args(["shell", "cat", ANDROID_CONFIG_PATH])
         .output()
         .ok()?;
     if !config_out.status.success() {

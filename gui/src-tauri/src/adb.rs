@@ -6,10 +6,17 @@ use std::sync::OnceLock;
 pub(crate) const REMOTE_BASE: &str =
     "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/load";
 
-static BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();
+pub(crate) const ANDROID_CONFIG_PATH: &str =
+    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
 
-fn build_id_re() -> &'static Regex {
-    BUILD_ID_RE.get_or_init(|| {
+pub(crate) const EDEN_PKG: &str = "dev.eden.eden_emulator";
+
+pub(crate) const EDEN_VIRTUAL_DIRS: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
+
+static LOADER_BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();
+
+pub(crate) fn loader_build_id_re() -> &'static Regex {
+    LOADER_BUILD_ID_RE.get_or_init(|| {
         Regex::new(r"build_id=([A-Fa-f0-9]{16,64}),\s*name=main").unwrap()
     })
 }
@@ -218,7 +225,7 @@ pub fn extract_build_ids_pc(load_dir: String, _title_id: String) -> Result<Vec<S
 }
 
 pub fn parse_build_ids(text: &str) -> Vec<String> {
-    let re = build_id_re();
+    let re = loader_build_id_re();
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
     for cap in re.captures_iter(text) {
@@ -282,9 +289,13 @@ pub fn adb_push_internal(adb: &str, local: &str, remote: &str) -> Result<(), Str
 }
 
 pub fn adb_mkdir(adb: &str, remote_path: &str) -> Result<(), String> {
-    Command::new(adb)
+    let out = Command::new(adb)
         .args(["shell", &format!("mkdir -p '{}'", remote_path)])
         .output()
         .map_err(|e| format!("ADB mkdir error: {}", e))?;
-    Ok(())
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).to_string())
+    }
 }

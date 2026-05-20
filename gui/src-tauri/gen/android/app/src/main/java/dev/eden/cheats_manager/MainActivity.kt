@@ -11,6 +11,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
 import androidx.activity.enableEdgeToEdge
 import androidx.core.app.NotificationCompat
 import java.lang.ref.WeakReference
@@ -148,6 +150,49 @@ class MainActivity : TauriActivity() {
             }
             activity.stopService(Intent(activity, ScanForegroundService::class.java))
             android.util.Log.i("CheatsManager", "stopScanService: OK")
+        }
+
+        /**
+         * Returns true if MANAGE_EXTERNAL_STORAGE is granted (Android 11+),
+         * or unconditionally true on older APIs where scoped storage doesn't apply.
+         * Called from Rust via JNI to check permission without path probing.
+         */
+        @JvmStatic
+        fun hasAllFilesAccess(): Boolean {
+            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                true
+            }
+        }
+
+        /**
+         * Open the system "All files access" page for this app.
+         * MANAGE_EXTERNAL_STORAGE is a special permission — it lives under
+         * "Special app access", not the normal "Permissions" screen.
+         * Falls back to the global special-access list if the per-app page fails.
+         */
+        @JvmStatic
+        fun openStorageSettings() {
+            val activity = instance?.get() ?: run {
+                android.util.Log.e("CheatsManager", "openStorageSettings: no activity reference")
+                return
+            }
+            try {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:${activity.packageName}")
+                )
+                activity.startActivity(intent)
+                android.util.Log.i("CheatsManager", "openStorageSettings: per-app page opened")
+            } catch (e: Exception) {
+                android.util.Log.w("CheatsManager", "openStorageSettings: per-app failed, trying global: $e")
+                try {
+                    activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                } catch (e2: Exception) {
+                    android.util.Log.e("CheatsManager", "openStorageSettings: both intents failed: $e2")
+                }
+            }
         }
     }
 

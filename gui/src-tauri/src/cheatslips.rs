@@ -65,7 +65,7 @@ fn ensure_cheats_db(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Add missing columns if they don't already exist. Safe to run on every startup.
-fn migrate_cheats_db(path: &PathBuf) -> Result<(), String> {
+fn migrate_cheats_db(path: &std::path::Path) -> Result<(), String> {
     let conn = Connection::open(path)
         .map_err(|e| format!("Failed to open cheats.db for migration: {}", e))?;
     // Ignore "duplicate column" errors — means that migration already ran.

@@ -1,26 +1,8 @@
-use crate::adb::REMOTE_BASE;
+use crate::adb::{ANDROID_CONFIG_PATH, REMOTE_BASE};
 use crate::db;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
-
-const REMOTE_CONFIG: &str =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
-
-/// Public wrapper for use by android_native module.
-pub fn build_groups_pub(rows: Vec<db::TitleRow>, installed_ids: &HashSet<String>) -> Vec<GameGroup> {
-    build_groups(rows, installed_ids)
-}
-
-/// Public wrapper for use by android_native module.
-pub fn content_uri_to_physical_pub(uri: &str) -> Option<String> {
-    content_uri_to_physical(uri)
-}
-
-/// Public wrapper for use by android_native module.
-pub fn extract_update_tid_from_filename_pub(filename: &str) -> Option<String> {
-    extract_update_tid_from_filename(filename)
-}
 
 /// Convert a content:// URI used by Eden's config to a physical /storage/… path.
 /// e.g. content://…/tree/4A21-0000%3ARoms%2FSwitch%2FRoms → /storage/4A21-0000/Roms/Switch/Roms
@@ -33,7 +15,7 @@ pub(crate) fn content_uri_to_physical(uri: &str) -> Option<String> {
 
 /// Extract the first 16-char hex title ID ending in "800" from an NSP/XCI filename,
 /// e.g. "Xenoblade … [0100FF500E34A800][v196608][UPDATE].nsp" → "0100FF500E34A800"
-fn extract_update_tid_from_filename(filename: &str) -> Option<String> {
+pub(crate) fn extract_update_tid_from_filename(filename: &str) -> Option<String> {
     let bytes = filename.as_bytes();
     let mut i = 0;
     while i + 17 < bytes.len() {
@@ -55,7 +37,7 @@ fn extract_update_tid_from_filename(filename: &str) -> Option<String> {
 fn find_update_tids_android(adb_path: &str) -> Vec<String> {
     let adb = if adb_path.is_empty() { "adb" } else { adb_path };
     let output = std::process::Command::new(adb)
-        .args(["shell", "cat", REMOTE_CONFIG])
+        .args(["shell", "cat", ANDROID_CONFIG_PATH])
         .output();
     let Ok(output) = output else {
         log::warn!("[games] could not spawn adb to read Eden config.ini");
@@ -133,7 +115,7 @@ fn category_from_tid(tid: &str) -> &str {
     }
 }
 
-fn is_valid_tid(s: &str) -> bool {
+pub(crate) fn is_valid_tid(s: &str) -> bool {
     s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit())
 }
 
@@ -141,7 +123,7 @@ fn is_valid_tid(s: &str) -> bool {
 /// title_id (the game family identifier), marking installed titles against
 /// a set of known IDs. Uses 12 chars instead of 13 because some games have
 /// DLCs/updates that differ at the 13th character position.
-fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<String>) -> Vec<GameGroup> {
+pub(crate) fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<String>) -> Vec<GameGroup> {
     log::info!("[games] build_groups: {} db rows, {} installed ids", rows.len(), installed_ids.len());
     for tid in installed_ids {
         log::debug!("[games] installed_id: {tid}");
@@ -504,11 +486,7 @@ fn game_cache_path(app: &AppHandle, mode: &str) -> std::path::PathBuf {
         .join(filename)
 }
 
-pub fn save_game_cache_pub(app: &AppHandle, mode: &str, groups: &[GameGroup]) {
-    save_game_cache(app, mode, groups);
-}
-
-fn save_game_cache(app: &AppHandle, mode: &str, groups: &[GameGroup]) {
+pub(crate) fn save_game_cache(app: &AppHandle, mode: &str, groups: &[GameGroup]) {
     let path = game_cache_path(app, mode);
     if let Ok(json) = serde_json::to_string(groups) {
         let _ = std::fs::write(&path, json);
@@ -537,7 +515,7 @@ pub fn get_cached_games_android(app: AppHandle) -> Vec<GameGroup> {
 /// Used by the frontend to set a default path in the ROM file picker.
 #[tauri::command]
 pub fn get_eden_game_dirs_pc() -> Vec<String> {
-    let config_path = match crate::build_ids::get_eden_config_path_pub() {
+    let config_path = match crate::build_ids::get_eden_config_path() {
         Some(p) => p,
         None => return Vec::new(),
     };
@@ -545,13 +523,12 @@ pub fn get_eden_game_dirs_pc() -> Vec<String> {
         Ok(c) => c,
         Err(_) => return Vec::new(),
     };
-    const VIRTUAL: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
     let mut dirs = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for line in config.lines() {
         if !line.contains("gamedirs") || !line.contains("\\path=") { continue; }
         let raw = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
-        if raw.is_empty() || VIRTUAL.contains(&raw) { continue; }
+        if raw.is_empty() || crate::adb::EDEN_VIRTUAL_DIRS.contains(&raw) { continue; }
         if std::path::PathBuf::from(raw).exists() && seen.insert(raw.to_string()) {
             dirs.push(raw.to_string());
         }

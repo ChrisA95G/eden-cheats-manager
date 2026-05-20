@@ -3,37 +3,24 @@
 ///
 /// The load directory and log path are fixed: Eden always stores its data at
 /// these paths on Android.
-use crate::adb::parse_build_ids;
+use crate::adb::{loader_build_id_re, parse_build_ids, ANDROID_CONFIG_PATH, EDEN_PKG};
 use crate::cheats::InstalledCheat;
 use crate::db;
 use crate::games::GameGroup;
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::OnceLock;
 use tauri::{AppHandle, Manager};
 
-const EDEN_PKG: &str = "dev.eden.eden_emulator";
 const EDEN_MAIN_ACTIVITY: &str = "org.yuzu.yuzu_emu.ui.main.MainActivity";
 const AM: &str = "/system/bin/am";
-
-static LOADER_RE: OnceLock<Regex> = OnceLock::new();
-fn loader_re() -> &'static Regex {
-    LOADER_RE.get_or_init(|| {
-        Regex::new(r"build_id=([A-Fa-f0-9]{16,64}),\s*name=main").unwrap()
-    })
-}
 
 pub(crate) const ANDROID_LOAD_DIR: &str =
     "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/load";
 
 const ANDROID_LOG_PATH: &str =
     "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt";
-
-const ANDROID_CONFIG_PATH: &str =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
 
 // ── Permission helpers ────────────────────────────────────────────────────────
 
@@ -86,18 +73,18 @@ pub struct StoragePermissionStatus {
 }
 
 /// Check whether the app has "all files access" (MANAGE_EXTERNAL_STORAGE).
-/// On Android this probes the actual filesystem; on desktop always returns true.
+/// On Android 11+ uses Environment.isExternalStorageManager() via JNI;
+/// on desktop always returns true.
 #[tauri::command]
 pub fn check_storage_permission() -> StoragePermissionStatus {
     #[cfg(target_os = "android")]
     {
-        let probe = std::path::Path::new(ANDROID_LOAD_DIR);
-        if probe.exists() || probe.parent().map(|p| p.exists()).unwrap_or(false) {
+        if jni_has_all_files_access() {
             StoragePermissionStatus { granted: true, message: "Storage access granted.".into() }
         } else {
             StoragePermissionStatus {
                 granted: false,
-                message: "Storage permission required. Please grant 'All files access' to this app in Settings → Apps → Eden Cheats Manager → Permissions.".into(),
+                message: "Storage permission required. Tap 'Open Settings' to grant 'All files access' (under Special app access, not Permissions).".into(),
             }
         }
     }
@@ -107,11 +94,21 @@ pub fn check_storage_permission() -> StoragePermissionStatus {
     }
 }
 
-// ── Games ─────────────────────────────────────────────────────────────────────
-
-fn is_valid_tid(s: &str) -> bool {
-    s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit())
+/// Open the Android system page for MANAGE_EXTERNAL_STORAGE.
+/// No-op on non-Android builds.
+#[tauri::command]
+pub fn open_storage_settings() -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        jni_open_storage_settings()
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(())
+    }
 }
+
+// ── Games ─────────────────────────────────────────────────────────────────────
 
 /// Scan the on-device Eden load directory directly (no ADB) and return game groups.
 #[tauri::command]
@@ -120,17 +117,36 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
     log::info!("[games::native] load_dir={:?} exists={}", load_dir, load_dir.exists());
 
     if !load_dir.exists() {
-        return Err(format!(
-            "Eden load directory not found at {}. Make sure Eden has been launched at least once and that storage permission is granted.",
-            ANDROID_LOAD_DIR
-        ));
+        // Check whether Eden's app data dir exists at all — if not, Eden isn't installed.
+        let eden_data = load_dir
+            .parent().and_then(|p| p.parent()) // .../files/load -> .../files -> .../dev.eden.eden_emulator
+            .map(|p| p.exists())
+            .unwrap_or(false);
+
+        if !eden_data {
+            return Err(
+                "Eden emulator is not installed or its data directory is not accessible. \
+                Install Eden and launch it once to create the required directories, \
+                then tap Scan again.".into()
+            );
+        }
+
+        // Eden is installed but never launched — create the load dir ourselves.
+        if let Err(e) = std::fs::create_dir_all(&load_dir) {
+            return Err(format!(
+                "Eden is installed but its load directory couldn't be created. \
+                Launch Eden once to initialise its data directory, then tap Scan again. ({})",
+                e
+            ));
+        }
+        log::info!("[games::native] created load_dir: {:?}", load_dir);
     }
 
     let entries = std::fs::read_dir(&load_dir).map_err(|e| e.to_string())?;
     let mut installed_ids: HashSet<String> = HashSet::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
-        if is_valid_tid(&name) && entry.path().is_dir() {
+        if crate::games::is_valid_tid(&name) && entry.path().is_dir() {
             installed_ids.insert(name);
         }
     }
@@ -155,9 +171,9 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
         }
     }
 
-    let groups = crate::games::build_groups_pub(all_rows, &installed_ids);
+    let groups = crate::games::build_groups(all_rows, &installed_ids);
     log::info!("[games::native] {} groups built", groups.len());
-    crate::games::save_game_cache_pub(&app, "android", &groups);
+    crate::games::save_game_cache(&app, "android", &groups);
     Ok(groups)
 }
 
@@ -175,7 +191,7 @@ fn find_update_tids_native() -> Vec<String> {
     for line in config_text.lines() {
         if !line.contains("\\path=") { continue; }
         let uri = line.splitn(2, '=').nth(1).map(|s| s.trim_matches('"')).unwrap_or("");
-        if let Some(physical) = crate::games::content_uri_to_physical_pub(uri) {
+        if let Some(physical) = crate::games::content_uri_to_physical(uri) {
             if let Some(parent) = std::path::Path::new(&physical).parent() {
                 parents.insert(parent.to_string_lossy().to_string());
             }
@@ -191,7 +207,7 @@ fn find_update_tids_native() -> Vec<String> {
         };
         for entry in dir.flatten() {
             let filename = entry.file_name().to_string_lossy().to_string();
-            if let Some(tid) = crate::games::extract_update_tid_from_filename_pub(&filename) {
+            if let Some(tid) = crate::games::extract_update_tid_from_filename(&filename) {
                 log::info!("[games::native] update found: {tid} ({filename})");
                 tids.push(tid);
             }
@@ -260,12 +276,14 @@ pub fn delete_cheat_android_native(
         .join(&cheat_name)
         .join("cheats")
         .join(format!("{}.txt", build_id));
-    if file.exists() {
-        std::fs::remove_file(&file).map_err(|e| e.to_string())?;
-        let cheats_dir = file.parent().unwrap();
-        let cheat_dir = cheats_dir.parent().unwrap();
-        let _ = std::fs::remove_dir(cheats_dir);
-        let _ = std::fs::remove_dir(cheat_dir);
+    match std::fs::remove_file(&file) {
+        Ok(()) => {
+            let cheats_dir = file.parent().unwrap();
+            let _ = std::fs::remove_dir(cheats_dir);
+            let _ = std::fs::remove_dir(cheats_dir.parent().unwrap());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.to_string()),
     }
     log::info!("[cheats::native] delete OK");
     Ok(())
@@ -298,7 +316,7 @@ pub struct DetectedBuildIds {
 pub fn detect_build_ids_android_native(title_id: String) -> Result<DetectedBuildIds, String> {
     let text = std::fs::read_to_string(ANDROID_LOG_PATH)
         .map_err(|e| format!("Could not read Eden log: {e}"))?;
-    let build_ids = crate::build_ids::find_build_ids_for_title_pub(&text, &title_id);
+    let build_ids = crate::build_ids::find_build_ids_for_title_in_log(&text, &title_id);
     Ok(DetectedBuildIds { title_id, build_ids })
 }
 
@@ -395,7 +413,7 @@ pub async fn scan_build_id_android_native(title_id: String, base_title_id: Strin
 
                 // Primary: strict NSO-loader match — only fires during real emulation.
                 for line in &new_lines {
-                    if let Some(cap) = loader_re().captures(line) {
+                    if let Some(cap) = loader_build_id_re().captures(line) {
                         let full = &cap[1];
                         let bid = full[..16.min(full.len())].to_uppercase();
                         log::info!("[build_ids::native] found via name=main: {bid}");
@@ -407,7 +425,7 @@ pub async fn scan_build_id_android_native(title_id: String, base_title_id: Strin
                 let elapsed_ms = poll_n as u64 * POLL_INTERVAL_MS;
                 if elapsed_ms >= SCAN_TIMEOUT * 500 {
                     let chunk = new_lines.join("\n");
-                    if let Some(bid) = crate::build_ids::find_build_ids_for_title_pub(&chunk, &title_id_poll).into_iter().next() {
+                    if let Some(bid) = crate::build_ids::find_build_ids_for_title_in_log(&chunk, &title_id_poll).into_iter().next() {
                         log::info!("[build_ids::native] found via title fallback: {bid}");
                         return Some(bid);
                     }
@@ -452,7 +470,7 @@ pub async fn scan_build_id_android_native(title_id: String, base_title_id: Strin
 /// storage. The URI is passed to Eden via JNI startActivity(), which can handle
 /// content:// URIs that `am start -d` (subprocess) cannot.
 fn find_rom_path_native(title_id: &str, game_name: &str) -> Option<String> {
-    let config = std::fs::read_to_string(ANDROID_CONFIG_PATH).ok()?;
+    let config = std::fs::read_to_string(crate::adb::ANDROID_CONFIG_PATH).ok()?;
     let tid_lower = title_id.to_lowercase();
     let name_norm = crate::rom_cache::normalize(game_name);
 
@@ -465,7 +483,7 @@ fn find_rom_path_native(title_id: &str, game_name: &str) -> Option<String> {
             continue;
         }
         let raw_uri = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
-        if let Some(physical) = crate::games::content_uri_to_physical_pub(raw_uri) {
+        if let Some(physical) = crate::games::content_uri_to_physical(raw_uri) {
             if let Some(parent) = std::path::Path::new(&physical).parent() {
                 let p = parent.to_string_lossy().to_string();
                 if seen.insert(p.clone()) {
@@ -543,6 +561,29 @@ where
         .ok_or_else(|| "MainActivity class not captured".to_string())?;
     let jcls = unsafe { JClass::from_raw(cls_global.as_raw()) };
     f(&mut env, &jcls)
+}
+
+/// Call `MainActivity.hasAllFilesAccess()` — returns true when
+/// MANAGE_EXTERNAL_STORAGE is granted (Android 11+) or unconditionally on older APIs.
+#[cfg(target_os = "android")]
+fn jni_has_all_files_access() -> bool {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "hasAllFilesAccess", "()Z", &[])
+            .map_err(|e| format!("JNI hasAllFilesAccess: {e}"))
+            .and_then(|v| v.z().map_err(|e| format!("JNI bool: {e}")))
+    })
+    .unwrap_or(false)
+}
+
+/// Call `MainActivity.openStorageSettings()` to launch the system
+/// MANAGE_APP_ALL_FILES_ACCESS_PERMISSION settings page.
+#[cfg(target_os = "android")]
+fn jni_open_storage_settings() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "openStorageSettings", "()V", &[])
+            .map_err(|e| format!("JNI openStorageSettings: {e}"))?;
+        Ok(())
+    })
 }
 
 /// Call `MainActivity.launchIntent(uri)` via JNI so that `startActivity()` runs
@@ -671,5 +712,44 @@ async fn poll_for_keys_ready_native(timeout_secs: u64) {
                 prev = cur;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn storage_permission_status_granted_serializes_camel_case() {
+        let status = StoragePermissionStatus { granted: true, message: "ok".into() };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"granted\":true"), "got: {json}");
+        assert!(json.contains("\"message\":"), "got: {json}");
+        // serde rename_all camelCase — both fields already camelCase so no rename needed,
+        // but verify no snake_case keys leak out.
+        assert!(!json.contains("_"), "unexpected snake_case in: {json}");
+    }
+
+    #[test]
+    fn storage_permission_status_denied_serializes() {
+        let status = StoragePermissionStatus { granted: false, message: "denied".into() };
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("\"granted\":false"), "got: {json}");
+        assert!(json.contains("\"denied\""), "got: {json}");
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn check_storage_permission_always_granted_on_desktop() {
+        let status = check_storage_permission();
+        assert!(status.granted, "desktop build must always report granted");
+    }
+
+    #[cfg(not(target_os = "android"))]
+    #[test]
+    fn open_storage_settings_is_noop_on_desktop() {
+        // On non-Android builds this should succeed (nothing to open).
+        let result = open_storage_settings();
+        assert!(result.is_ok(), "desktop open_storage_settings returned: {result:?}");
     }
 }

@@ -95,6 +95,7 @@ pub fn run() {
             cheats::delete_cheat_pc,
             // android native (direct filesystem — no ADB)
             android_native::check_storage_permission,
+            android_native::open_storage_settings,
             android_native::android_debug_info,
             android_native::scan_eden_games_android_native,
             android_native::install_cheat_android_native,

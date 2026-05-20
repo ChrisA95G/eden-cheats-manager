@@ -107,13 +107,21 @@
     <div class="permission-box">
       <div class="permission-title">// STORAGE PERMISSION REQUIRED</div>
       <p class="permission-body">
-        Eden Cheats Manager needs access to all files to read and write cheat files in Eden's data directory.
+        Eden Cheats Manager needs "All files access" to read and write cheat files in Eden's data directory.
       </p>
       <p class="permission-path"><code>/Android/data/dev.eden.eden_emulator/files/load/</code></p>
       <p class="permission-body">
-        Go to: <strong>Settings → Apps → Eden Cheats Manager → Permissions → Files and media → Allow management of all files</strong>
+        Tap <strong>Open Settings</strong> below, then enable <strong>Allow management of all files</strong>.
+      </p>
+      <p class="permission-body" style="font-size:0.8em;opacity:0.7;">
+        (Found under Special app access → All files access — not the regular Permissions screen)
       </p>
       <button class="permission-btn" onclick={async () => {
+        try { await invoke('open_storage_settings'); } catch (_) {}
+      }}>
+        [ OPEN SETTINGS ]
+      </button>
+      <button class="permission-btn" style="margin-top:0.5rem;opacity:0.7;" onclick={async () => {
         try { storagePermission = await invoke('check_storage_permission'); } catch (_) {}
       }}>
         [ CHECK AGAIN ]

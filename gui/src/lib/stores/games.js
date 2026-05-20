@@ -33,15 +33,12 @@ export const gamesLoading = writable(false);
 export const gamesError = writable('');
 
 /**
+ * Load games from the on-disk cache instantly, then kick off a fresh scan in
+ * the background to pick up any changes. Works for all target modes.
  * @param {Object} settings
  * @param {string} settings.targetMode
  * @param {string} [settings.adbPath]
  * @param {string} [settings.pcLoadDir]
- */
-/**
- * Load games from the on-disk cache instantly, then kick off a fresh scan in
- * the background to pick up any changes. Works for all target modes.
- * @param {Object} settings
  */
 export async function loadCachedGamesThenRescan(settings) {
   const mode = settings?.targetMode;
