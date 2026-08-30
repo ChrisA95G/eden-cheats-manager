@@ -30,7 +30,7 @@ class MainActivity : TauriActivity() {
         private const val SAF_PREFS = "eden_saf"
         private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
         private const val EDEN_DOCUMENTS_AUTHORITY = "dev.eden.eden_emulator.user"
-        private val REQUIRED_DIR_NAME = "load"
+        private const val EDEN_LOAD_DOCUMENT_ID = "root/load"
 
         // SAF test
         @JvmStatic
@@ -265,14 +265,16 @@ class MainActivity : TauriActivity() {
                 )
                 return@registerForActivityResult
             }
-            // Validate the folder name
-            val documentFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, uri)
-            val directoryName = documentFile?.name
-
-            if (directoryName != REQUIRED_DIR_NAME) {
+            val documentId = try {
+                DocumentsContract.getTreeDocumentId(uri)
+            } catch (error: IllegalArgumentException) {
+                android.util.Log.e("CheatsManager", "Invalid Eden tree URI", error)
+                return@registerForActivityResult
+            }
+            if (documentId != EDEN_LOAD_DOCUMENT_ID) {
                 android.util.Log.e(
                     "CheatsManager",
-                    "Invalid directory selected: '$directoryName'. Expected: '$REQUIRED_DIR_NAME'"
+                    "Invalid Eden directory: '$documentId'. Expected: '$EDEN_LOAD_DOCUMENT_ID'"
                 )
                 return@registerForActivityResult
             }
