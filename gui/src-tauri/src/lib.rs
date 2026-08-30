@@ -101,9 +101,6 @@ pub fn run() {
             android_native::install_cheat_android_native,
             android_native::list_installed_cheats_android_native,
             android_native::delete_cheat_android_native,
-            android_native::extract_build_ids_android_native,
-            android_native::detect_build_ids_android_native,
-            android_native::scan_build_id_android_native,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

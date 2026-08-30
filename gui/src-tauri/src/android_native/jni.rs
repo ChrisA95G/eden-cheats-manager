@@ -32,10 +32,6 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
             "safRemoveEmptyDirectory",
             "(Ljava/lang/String;)Ljava/lang/String;",
         ),
-        ("launchIntent", "(Ljava/lang/String;)V"),
-        ("returnToApp", "()V"),
-        ("startScanService", "()V"),
-        ("stopScanService", "()V"),
     ];
     let mut missing: Vec<&str> = Vec::new();
     for (name, sig) in METHODS {
@@ -237,85 +233,6 @@ pub(super) fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), 
         Ok(())
     } else {
         Err(format!("Unexpected SAF response: {response}"))
-    }
-}
-
-pub(super) fn launch_uri_from_activity(uri: &str) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        use ::jni::objects::{JObject, JValue};
-        return with_main_class(|env, jcls| {
-            let uri_j = env
-                .new_string(uri)
-                .map_err(|e| format!("JNI string: {e}"))?;
-            env.call_static_method(
-                jcls,
-                "launchIntent",
-                "(Ljava/lang/String;)V",
-                &[JValue::Object(&JObject::from(uri_j))],
-            )
-            .map_err(|e| format!("JNI launchIntent: {e}"))?;
-            Ok(())
-        });
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = uri;
-        Err("launch_uri_from_activity is Android-only".to_string())
-    }
-}
-
-/// Bring our app to the foreground, pushing Eden to background.
-pub(super) fn return_to_foreground() -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        return with_main_class(|env, jcls| {
-            env.call_static_method(jcls, "returnToApp", "()V", &[])
-                .map_err(|e| format!("JNI returnToApp: {e}"))?;
-            Ok(())
-        });
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        Ok(())
-    }
-}
-
-/// Start ScanForegroundService — puts our app into foreground-service state so that
-/// Android 12+ background activity launch restrictions don't apply when we call
-/// returnToApp() later.
-pub(super) fn start_scan_service() -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        return with_main_class(|env, jcls| {
-            env.call_static_method(jcls, "startScanService", "()V", &[])
-                .map_err(|e| format!("JNI startScanService: {e}"))?;
-            Ok(())
-        });
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        Ok(())
-    }
-}
-
-/// Stop ScanForegroundService once our app is back in the foreground.
-pub(super) fn stop_scan_service() -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        return with_main_class(|env, jcls| {
-            env.call_static_method(jcls, "stopScanService", "()V", &[])
-                .map_err(|e| format!("JNI stopScanService: {e}"))?;
-            Ok(())
-        });
-    }
-
-    #[cfg(not(target_os = "android"))]
-    {
-        Ok(())
     }
 }
 

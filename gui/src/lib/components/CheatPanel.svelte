@@ -122,13 +122,16 @@
 
   /** @param {any} game */
   async function detectBuildIds(game) {
+    if (settings.targetMode === 'androidNative') {
+      detectedBuildIds = [];
+      detectingBuildIds = false;
+      return;
+    }
+
     detectingBuildIds = true;
     try {
       let result;
-      if (settings.targetMode === 'androidNative') {
-        result = await invoke('detect_build_ids_android_native', { titleId: game.titleId });
-        result = result?.buildIds ?? [];
-      } else if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'android') {
         result = await invoke('detect_build_ids_android', {
           adbPath: settings.adbPath,
           titleId: game.titleId,
@@ -150,18 +153,12 @@
   }
 
   async function scanBuildId() {
-    if (!$selectedGame) return;
+    if (!$selectedGame || settings.targetMode === 'androidNative') return;
     scanningBuildId = true;
     scanBuildIdError = '';
     try {
       let bid;
-      if (settings.targetMode === 'androidNative') {
-        bid = await invoke('scan_build_id_android_native', {
-          titleId: $selectedGame.titleId,
-          baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
-          gameName: $selectedGame.name ?? '',
-        });
-      } else if (settings.targetMode === 'android') {
+      if (settings.targetMode === 'android') {
         bid = await invoke('scan_build_id_android', {
           adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
@@ -497,34 +494,39 @@
       </div>
     </div>
 
-    <div class="scan-build-bar">
-      <button
-        class="btn-scan-build"
-        disabled={scanningBuildId || detectingBuildIds}
-        onclick={scanBuildId}
-      >
-        {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
-      </button>
-      {#if settings.targetMode === 'pc'}
-        <button
-          class="btn-set-rom"
-          disabled={settingRomPath}
-          onclick={setRomPath}
-          title="Manually set the ROM file path for this game"
-        >
-          {settingRomPath ? '...' : '[ SET ROM PATH ]'}
-        </button>
-      {/if}
-      {#if scanBuildIdError}
-        <span class="scan-build-error">{scanBuildIdError}</span>
-      {/if}
-    </div>
-    {#if settings.targetMode === 'android'}
-      <p class="scan-build-hint">Device screen must be unlocked and on for scanning to work.</p>
-    {:else if settings.targetMode === 'androidNative'}
-      <p class="scan-build-hint">Eden launches, loads the game, and the build ID is read from the log. When done, tap the notification to return here. Eden stays suspended in the background — swipe it away from recents if you want to close it.</p>
+    {#if settings.targetMode === 'androidNative'}
+      <div class="native-build-notice">
+        <strong>BUILD ID DETECTION UNAVAILABLE</strong>
+        <span>Package-based detection is coming next. Until then, choose the matching Build ID row manually and verify it against your game version.</span>
+      </div>
     {:else}
-      <p class="scan-build-hint">Eden launches automatically, reads the build ID, then closes. Set the Eden executable path in Settings if not detected. Use [ SET ROM PATH ] if the game ROM is not auto-detected.</p>
+      <div class="scan-build-bar">
+        <button
+          class="btn-scan-build"
+          disabled={scanningBuildId || detectingBuildIds}
+          onclick={scanBuildId}
+        >
+          {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
+        </button>
+        {#if settings.targetMode === 'pc'}
+          <button
+            class="btn-set-rom"
+            disabled={settingRomPath}
+            onclick={setRomPath}
+            title="Manually set the ROM file path for this game"
+          >
+            {settingRomPath ? '...' : '[ SET ROM PATH ]'}
+          </button>
+        {/if}
+        {#if scanBuildIdError}
+          <span class="scan-build-error">{scanBuildIdError}</span>
+        {/if}
+      </div>
+      {#if settings.targetMode === 'android'}
+        <p class="scan-build-hint">Device screen must be unlocked and on for scanning to work.</p>
+      {:else}
+        <p class="scan-build-hint">Eden launches automatically, reads the Build ID, then closes. Set the Eden executable path in Settings if not detected. Use [ SET ROM PATH ] if the game ROM is not auto-detected.</p>
+      {/if}
     {/if}
 
     {#if cheatsError}
@@ -1146,6 +1148,18 @@
   }
 
   /* ── Scan Build ID ── */
+  .native-build-notice {
+    display: grid;
+    gap: .25rem;
+    margin: .6rem 1.25rem .35rem;
+    padding: .65rem .75rem;
+    border-left: 2px solid var(--accent);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: .72rem;
+    line-height: 1.5;
+  }
+  .native-build-notice strong { color: var(--accent); letter-spacing: .08em; }
   .scan-build-bar {
     display: flex;
     align-items: center;

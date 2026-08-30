@@ -152,18 +152,20 @@ You can change any of these settings later via the **SYS** button in the top-rig
 
 Click **[ SCAN LIBRARY ]** in the sidebar. The app scans your installed games and groups them by title (base game, updates, DLCs).
 
-> **Android users:** make sure your device is connected and USB Debugging is on before scanning. The app will show a clear error if no device is detected — it won't try to load games from a disconnected device.
+> **Android via ADB:** make sure your device is connected and USB Debugging is on before scanning. Native Android uses the separately granted Eden load directory and does not require USB debugging.
 
 ### Select a game
 
 Click any game in the sidebar. The right panel shows:
 - All available cheats from the local database
-- The Build ID detected from Eden's log files (if available)
+- The Build ID detected from Eden's log files in PC or ADB mode (if available)
 - Cheats already installed on your device / PC
+
+> Native Android Build ID detection is temporarily unavailable while package-based detection is being developed. Native users must choose the matching Build ID row manually and verify it against their game version.
 
 ### Install a cheat
 
-1. Find the **Build ID** row that matches your game version — look for the **✓ Detected** badge
+1. Find the **Build ID** row that matches your game version. PC and ADB modes show a **✓ Detected** badge when a log match is available; native Android currently requires manual verification.
 2. Click the row to expand it
 3. Click **[ INSTALL ]** next to any cheat
 
@@ -235,7 +237,7 @@ The **first 16 characters** (`92C78BB3DCBBC3F7`) are the Build ID. Cheats are ti
 
 ### Scan Build ID
 
-If the Build ID isn't detected automatically from Eden's existing logs, use **[ SCAN BUILD ID ]**.
+PC and Android (ADB) modes can use **[ SCAN BUILD ID ]** when the Build ID is not detected automatically from Eden's existing logs.
 
 **PC mode:** Click Scan, then launch the game in Eden. The app watches Eden's log file for the build ID entry and returns it automatically (within a few seconds of the game loading). No further action needed — you can launch the game before or after clicking Scan.
 
@@ -252,9 +254,7 @@ If the ROM isn't found automatically, a **[ SET ROM PATH ]** button appears in t
 
 > The device screen must be **unlocked and on** for Android (ADB) scanning to work.
 
-**Android (on-device) mode:** Click Scan. The app launches Eden and the game automatically, reads the Build ID from Eden's log, then sends a notification when done. Tap the notification to return to Eden Cheats Manager. Eden stays suspended in the background — swipe it away from recents if you want to close it.
-
-> On-device scanning completes in a few seconds once the game starts loading.
+**Android (on-device) mode:** Native log-based detection and scanning are intentionally unavailable because Android does not grant ECM access to Eden's private log/config files. ECM no longer launches games, runs a foreground scan service, or requests notification permission for this workaround. Package-based Build ID detection is planned; until then, verify and choose the correct Build ID row manually.
 
 ---
 
@@ -267,13 +267,13 @@ If the ROM isn't found automatically, a **[ SET ROM PATH ]** button appears in t
 > Launch Eden once and confirm its `load` directory exists, then select **Eden → load** again in Settings. If Eden was reinstalled, Android may have revoked the previous persisted permission.
 
 **Build ID not detected**
-> Launch the game in Eden at least once to generate a log entry, then click **Detect Build IDs** or **Scan Build ID**. On PC, Scan watches the Eden log file in real time — click Scan, then launch the game.
+> In PC or ADB mode, launch the game in Eden to generate a log entry, then use **Scan Build ID**. Native Android cannot read Eden's private logs; choose the matching Build ID manually until package-based detection is available.
 
 **"No device connected" when scanning**
 > Make sure USB Debugging is enabled, the cable is plugged in, and you tapped **Allow** on the "Allow USB debugging?" prompt on your device.
 
-**Scan Build ID fails or times out**
-> - Device screen must be unlocked and on (Android)
+**Scan Build ID fails or times out (PC / ADB)**
+> - The device screen must be unlocked and on when using ADB
 > - The game must be in a directory configured in Eden's settings, or use **[ SET ROM PATH ]** (PC) to point to the ROM file directly
 > - If the game is on an SD card, Eden must have storage access permission for that card
 
