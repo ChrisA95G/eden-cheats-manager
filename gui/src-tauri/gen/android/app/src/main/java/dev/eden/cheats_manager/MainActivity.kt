@@ -30,6 +30,7 @@ class MainActivity : TauriActivity() {
         private const val SAF_PREFS = "eden_saf"
         private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
         private const val EDEN_DOCUMENTS_AUTHORITY = "dev.eden.eden_emulator.user"
+        private val REQUIRED_DIR_NAME = "load"
 
         // SAF test
         @JvmStatic
@@ -261,6 +262,17 @@ class MainActivity : TauriActivity() {
                 android.util.Log.e(
                     "CheatsManager",
                     "Selected directory is not provided by Eden"
+                )
+                return@registerForActivityResult
+            }
+            // Validate the folder name
+            val documentFile = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, uri)
+            val directoryName = documentFile?.name
+
+            if (directoryName != REQUIRED_DIR_NAME) {
+                android.util.Log.e(
+                    "CheatsManager",
+                    "Invalid directory selected: '$directoryName'. Expected: '$REQUIRED_DIR_NAME'"
                 )
                 return@registerForActivityResult
             }
