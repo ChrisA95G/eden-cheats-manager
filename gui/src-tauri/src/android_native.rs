@@ -1,229 +1,63 @@
-/// Native Android filesystem access — used when the app runs directly on an
-/// Android device instead of talking to one over ADB from a desktop.
-///
-/// The load directory and log path are fixed: Eden always stores its data at
-/// these paths on Android.
-use crate::adb::{loader_build_id_re, parse_build_ids, ANDROID_CONFIG_PATH, EDEN_PKG};
+/// Native Android integration used when the app runs on the same device as Eden.
+/// Eden's load directory is accessed exclusively through its SAF provider.
+use crate::adb::{loader_build_id_re, parse_build_ids, EDEN_PKG};
 use crate::cheats::InstalledCheat;
+#[cfg(target_os = "android")]
 use crate::db;
 use crate::games::GameGroup;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::PathBuf;
 use std::process::Command;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+#[cfg(target_os = "android")]
+use tauri::Manager;
 
 const EDEN_MAIN_ACTIVITY: &str = "org.yuzu.yuzu_emu.ui.main.MainActivity";
 const AM: &str = "/system/bin/am";
 
-pub(crate) const ANDROID_LOAD_DIR: &str =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/load";
-
 const ANDROID_LOG_PATH: &str =
     "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt";
 
-// ── Permission helpers ────────────────────────────────────────────────────────
-
-/// Returns a diagnostic string with full path probing details — useful for debugging.
-#[tauri::command]
-pub fn android_debug_info() -> String {
-    let load = std::path::Path::new(ANDROID_LOAD_DIR);
-    let log_p = std::path::Path::new(ANDROID_LOG_PATH);
-    let cfg = std::path::Path::new(ANDROID_CONFIG_PATH);
-
-    let mut lines = vec![
-        format!("LOAD_DIR: {}", ANDROID_LOAD_DIR),
-        format!("  exists={}", load.exists()),
-        format!("  parent_exists={}", load.parent().map(|p| p.exists()).unwrap_or(false)),
-    ];
-
-    if load.exists() {
-        match std::fs::read_dir(load) {
-            Ok(entries) => {
-                let names: Vec<_> = entries
-                    .flatten()
-                    .map(|e| e.file_name().to_string_lossy().to_string())
-                    .take(20)
-                    .collect();
-                lines.push(format!("  contents (first 20): {:?}", names));
-            }
-            Err(e) => lines.push(format!("  read_dir error: {e}")),
-        }
-    }
-
-    lines.push(format!("LOG_PATH: {} exists={}", ANDROID_LOG_PATH, log_p.exists()));
-    lines.push(format!("CONFIG_PATH: {} exists={}", ANDROID_CONFIG_PATH, cfg.exists()));
-
-    // Storage parent chain
-    let mut probe = std::path::Path::new("/storage/emulated/0");
-    lines.push(format!("/storage/emulated/0 exists={}", probe.exists()));
-    probe = std::path::Path::new("/storage/emulated");
-    lines.push(format!("/storage/emulated exists={}", probe.exists()));
-    probe = std::path::Path::new("/storage");
-    lines.push(format!("/storage exists={}", probe.exists()));
-
-    lines.join("\n")
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StoragePermissionStatus {
-    pub granted: bool,
-    pub message: String,
-}
-
-/// Check whether the app has "all files access" (MANAGE_EXTERNAL_STORAGE).
-/// On Android 11+ uses Environment.isExternalStorageManager() via JNI;
-/// on desktop always returns true.
-#[tauri::command]
-pub fn check_storage_permission() -> StoragePermissionStatus {
-    #[cfg(target_os = "android")]
-    {
-        // API 34+ (Android 14+): Android/data/ is blocked regardless of MANAGE_EXTERNAL_STORAGE.
-        // Shizuku handles file access on those versions — this permission is irrelevant.
-        if get_api_level() >= 34 {
-            return StoragePermissionStatus { granted: true, message: "Android 14+ — file access via Shizuku.".into() };
-        }
-        if jni_has_all_files_access() {
-            StoragePermissionStatus { granted: true, message: "Storage access granted.".into() }
-        } else {
-            StoragePermissionStatus {
-                granted: false,
-                message: "Storage permission required. Tap 'Open Settings' to grant 'All files access'.".into(),
-            }
-        }
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        StoragePermissionStatus { granted: true, message: "Desktop — no permission needed.".into() }
-    }
-}
-
-/// Open the Android system page for MANAGE_EXTERNAL_STORAGE.
-/// No-op on non-Android builds.
-#[tauri::command]
-pub fn open_storage_settings() -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        jni_open_storage_settings()
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        Ok(())
-    }
-}
-
 // ── Games ─────────────────────────────────────────────────────────────────────
 
-/// Scan the on-device Eden load directory directly (no ADB) and return game groups.
+/// Scan title-ID directories exposed by Eden's selected SAF `load` directory.
 #[tauri::command]
 pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGroup>, String> {
-    let load_dir = PathBuf::from(ANDROID_LOAD_DIR);
-    let load_dir_str = load_dir.to_string_lossy().to_string();
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        return Err("Native Eden scanning is only available on Android.".into());
+    }
 
-    // On API ≥ 34 fail fast with a clear Shizuku error before any fs probing.
     #[cfg(target_os = "android")]
-    ensure_shizuku_for_blocked_path(&load_dir_str)?;
+    {
+        let entries = jni_saf_list_directory("")?;
+        let installed_ids: HashSet<String> = entries
+            .into_iter()
+            .filter(|entry| entry.directory && crate::games::is_valid_tid(&entry.name))
+            .map(|entry| entry.name)
+            .collect();
+        log::info!("[games::native] {} valid installed IDs via SAF", installed_ids.len());
 
-    log::info!("[games::native] load_dir={:?} exists={}", load_dir, native_path_exists(&load_dir_str));
-
-    if !native_path_exists(&load_dir_str) {
-        // Check whether Eden's app data dir exists at all — if not, Eden isn't installed.
-        let eden_data = load_dir
-            .parent().and_then(|p| p.parent()) // .../files/load -> .../files -> .../dev.eden.eden_emulator
-            .map(|p| native_path_exists(&p.to_string_lossy()))
-            .unwrap_or(false);
-
-        if !eden_data {
-            return Err(
-                "Eden emulator is not installed or its data directory is not accessible. \
-                Install Eden and launch it once to create the required directories, \
-                then tap Scan again.".into()
-            );
+        let state = app.state::<db::DbState>();
+        let mut seen_prefixes: HashSet<String> = HashSet::new();
+        for tid in &installed_ids {
+            if tid.len() >= 12 { seen_prefixes.insert(tid[..12].to_string()); }
         }
 
-        // Eden is installed but never launched — create the load dir ourselves.
-        if let Err(e) = native_mkdirs(&load_dir_str) {
-            return Err(format!(
-                "Eden is installed but its load directory couldn't be created. \
-                Launch Eden once to initialise its data directory, then tap Scan again. ({})",
-                e
-            ));
-        }
-        log::info!("[games::native] created load_dir: {:?}", load_dir);
-    }
-
-    let names = native_list_dir_names(&load_dir_str)?;
-    let mut installed_ids: HashSet<String> = HashSet::new();
-    for name in names {
-        if crate::games::is_valid_tid(&name) {
-            installed_ids.insert(name);
-        }
-    }
-    log::info!("[games::native] {} valid installed IDs", installed_ids.len());
-
-    // Also check for update TIDs from Eden config (same logic as ADB path but direct FS)
-    let update_tids = find_update_tids_native();
-    log::info!("[games::native] {} update TIDs from config scan", update_tids.len());
-    installed_ids.extend(update_tids);
-
-    let state = app.state::<db::DbState>();
-    let mut seen_prefixes: HashSet<String> = HashSet::new();
-    for tid in &installed_ids {
-        if tid.len() >= 12 { seen_prefixes.insert(tid[..12].to_string()); }
-    }
-
-    let mut all_rows = Vec::new();
-    for prefix in &seen_prefixes {
-        match db::query_base_prefix(&state, prefix) {
-            Ok(rows) => all_rows.extend(rows),
-            Err(e) => log::warn!("[games::native] prefix {} query error: {}", prefix, e),
-        }
-    }
-
-    let groups = crate::games::build_groups(all_rows, &installed_ids);
-    log::info!("[games::native] {} groups built", groups.len());
-    crate::games::save_game_cache(&app, "android", &groups);
-    Ok(groups)
-}
-
-/// Read Eden's config.ini directly from the filesystem to find update title IDs.
-fn find_update_tids_native() -> Vec<String> {
-    let config_text = match native_read_file(ANDROID_CONFIG_PATH) {
-        Ok(t) => t,
-        Err(e) => {
-            log::warn!("[games::native] could not read config.ini: {e}");
-            return Vec::new();
-        }
-    };
-
-    let mut parents: HashSet<String> = HashSet::new();
-    for line in config_text.lines() {
-        if !line.contains("\\path=") { continue; }
-        let uri = line.splitn(2, '=').nth(1).map(|s| s.trim_matches('"')).unwrap_or("");
-        if let Some(physical) = crate::games::content_uri_to_physical(uri) {
-            if let Some(parent) = std::path::Path::new(&physical).parent() {
-                parents.insert(parent.to_string_lossy().to_string());
+        let mut all_rows = Vec::new();
+        for prefix in &seen_prefixes {
+            match db::query_base_prefix(&state, prefix) {
+                Ok(rows) => all_rows.extend(rows),
+                Err(e) => log::warn!("[games::native] prefix {} query error: {}", prefix, e),
             }
         }
-    }
 
-    let mut tids = Vec::new();
-    for parent in &parents {
-        let updates_dir = format!("{}/Updates", parent);
-        let dir = match std::fs::read_dir(&updates_dir) {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        for entry in dir.flatten() {
-            let filename = entry.file_name().to_string_lossy().to_string();
-            if let Some(tid) = crate::games::extract_update_tid_from_filename(&filename) {
-                log::info!("[games::native] update found: {tid} ({filename})");
-                tids.push(tid);
-            }
-        }
+        let groups = crate::games::build_groups(all_rows, &installed_ids);
+        log::info!("[games::native] {} groups built", groups.len());
+        crate::games::save_game_cache(&app, "android", &groups);
+        Ok(groups)
     }
-    tids
 }
 
 // ── Cheats ────────────────────────────────────────────────────────────────────
@@ -236,14 +70,20 @@ pub fn install_cheat_android_native(
     content: String,
 ) -> Result<(), String> {
     log::info!("[cheats::native] install title={title_id} build={build_id} name={cheat_name}");
-    let file = PathBuf::from(ANDROID_LOAD_DIR)
-        .join(&title_id)
-        .join(&cheat_name)
-        .join("cheats")
-        .join(format!("{}.txt", build_id));
-    native_write_file(&file.to_string_lossy(), content.as_bytes())?;
-    log::info!("[cheats::native] install OK: {}", file.display());
-    Ok(())
+    let relative_path = format!("{title_id}/{cheat_name}/cheats/{build_id}.txt");
+
+    #[cfg(target_os = "android")]
+    {
+        jni_saf_write_text_file(&relative_path, &content)?;
+        log::info!("[cheats::native] install OK via SAF: {relative_path}");
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (relative_path, content);
+        Err("Native cheat installation is only available on Android.".into())
+    }
 }
 
 #[tauri::command]
@@ -251,55 +91,33 @@ pub fn list_installed_cheats_android_native(
     title_id: String,
 ) -> Result<Vec<InstalledCheat>, String> {
     log::debug!("[cheats::native] list title={title_id}");
-    let title_dir = PathBuf::from(ANDROID_LOAD_DIR).join(&title_id);
-    let title_dir_str = title_dir.to_string_lossy().to_string();
 
-    // On API ≥ 34 with a blocked path, use Shizuku's `find` to enumerate in one call.
     #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && title_dir_str.contains("/Android/data/") {
-        ensure_shizuku_for_blocked_path(&title_dir_str)?;
-        if !jni_shizuku_path_exists(&title_dir_str) {
-            return Ok(Vec::new());
-        }
-        let out = jni_shizuku_find_txt_files(&title_dir_str)?;
+    {
         let mut result = Vec::new();
-        for line in out.lines().filter(|l| !l.trim().is_empty()) {
-            let path = std::path::Path::new(line.trim());
-            let Some(fname) = path.file_name() else { continue };
-            let fname_str = fname.to_string_lossy();
-            if !fname_str.ends_with(".txt") { continue; }
-            let Some(cheats_dir) = path.parent() else { continue };
-            if cheats_dir.file_name().map(|n| n != "cheats").unwrap_or(true) { continue; }
-            let Some(cheat_name_dir) = cheats_dir.parent() else { continue };
-            let cheat_name = cheat_name_dir.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let build_id = fname_str.trim_end_matches(".txt").to_uppercase();
-            result.push(InstalledCheat { cheat_name, build_id });
-        }
-        log::info!("[cheats::native] list (shizuku) -> {} entries", result.len());
-        return Ok(result);
-    }
-
-    if !title_dir.exists() {
-        return Ok(Vec::new());
-    }
-    let mut result = Vec::new();
-    for entry in std::fs::read_dir(&title_dir).map_err(|e| e.to_string())?.flatten() {
-        let cheat_name = entry.file_name().to_string_lossy().to_string();
-        let cheats_dir = entry.path().join("cheats");
-        if cheats_dir.is_dir() {
-            for f in std::fs::read_dir(&cheats_dir).map_err(|e| e.to_string())?.flatten() {
-                let fname = f.file_name().to_string_lossy().to_string();
-                if fname.ends_with(".txt") {
-                    let build_id = fname.trim_end_matches(".txt").to_uppercase();
-                    result.push(InstalledCheat { cheat_name: cheat_name.clone(), build_id });
+        for cheat in jni_saf_list_directory(&title_id)?
+            .into_iter()
+            .filter(|entry| entry.directory)
+        {
+            let cheats_path = format!("{title_id}/{}/cheats", cheat.name);
+            for file in jni_saf_list_directory(&cheats_path)? {
+                if !file.directory && file.name.ends_with(".txt") {
+                    result.push(InstalledCheat {
+                        cheat_name: cheat.name.clone(),
+                        build_id: file.name.trim_end_matches(".txt").to_uppercase(),
+                    });
                 }
             }
         }
+        log::info!("[cheats::native] list via SAF -> {} entries", result.len());
+        return Ok(result);
     }
-    log::info!("[cheats::native] list -> {} entries", result.len());
-    Ok(result)
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = title_id;
+        Err("Native cheat listing is only available on Android.".into())
+    }
 }
 
 #[tauri::command]
@@ -309,39 +127,23 @@ pub fn delete_cheat_android_native(
     build_id: String,
 ) -> Result<(), String> {
     log::info!("[cheats::native] delete title={title_id} build={build_id} name={cheat_name}");
-    let file = PathBuf::from(ANDROID_LOAD_DIR)
-        .join(&title_id)
-        .join(&cheat_name)
-        .join("cheats")
-        .join(format!("{}.txt", build_id));
-    let file_str = file.to_string_lossy().to_string();
+    let cheats_path = format!("{title_id}/{cheat_name}/cheats");
+    let relative_path = format!("{cheats_path}/{build_id}.txt");
 
     #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && file_str.contains("/Android/data/") {
-        ensure_shizuku_for_blocked_path(&file_str)?;
-        jni_shizuku_delete_file(&file_str)?;
-        // Best-effort cleanup of empty parent dirs.
-        if let Some(cheats_dir) = file.parent() {
-            jni_shizuku_rmdir(&cheats_dir.to_string_lossy());
-            if let Some(cheat_dir) = cheats_dir.parent() {
-                jni_shizuku_rmdir(&cheat_dir.to_string_lossy());
-            }
-        }
-        log::info!("[cheats::native] delete OK (shizuku)");
+    {
+        jni_saf_delete_file(&relative_path)?;
+        jni_saf_remove_empty_directory(&cheats_path)?;
+        jni_saf_remove_empty_directory(&format!("{title_id}/{cheat_name}"))?;
+        log::info!("[cheats::native] delete OK via SAF");
         return Ok(());
     }
 
-    match std::fs::remove_file(&file) {
-        Ok(()) => {
-            let cheats_dir = file.parent().unwrap();
-            let _ = std::fs::remove_dir(cheats_dir);
-            let _ = std::fs::remove_dir(cheats_dir.parent().unwrap());
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e.to_string()),
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (relative_path, cheats_path);
+        Err("Native cheat deletion is only available on Android.".into())
     }
-    log::info!("[cheats::native] delete OK");
-    Ok(())
 }
 
 // ── Build IDs ─────────────────────────────────────────────────────────────────
@@ -582,21 +384,12 @@ static MAIN_CLASS: std::sync::OnceLock<jni::objects::GlobalRef> = std::sync::Onc
 #[cfg(target_os = "android")]
 fn probe_jni_methods(env: &mut jni::JNIEnv, cls: &jni::objects::JClass) {
     const METHODS: &[(&str, &str)] = &[
-        ("hasAllFilesAccess",        "()Z"),
-        ("openStorageSettings",      "()V"),
-        ("getApiLevel",              "()I"),
-        ("isShizukuAvailable",       "()Z"),
-        ("isShizukuGranted",         "()Z"),
-        ("requestShizukuPermission", "()V"),
-        ("shizukuReadFile",          "(Ljava/lang/String;)Ljava/lang/String;"),
-        ("shizukuListDir",           "(Ljava/lang/String;)Ljava/lang/String;"),
-        ("shizukuFindTxtFiles",      "(Ljava/lang/String;)Ljava/lang/String;"),
-        ("shizukuWriteFile",         "(Ljava/lang/String;Ljava/lang/String;)Z"),
-        ("shizukuDeleteFile",        "(Ljava/lang/String;)Z"),
-        ("shizukuRmdir",             "(Ljava/lang/String;)Z"),
-        ("shizukuMkdirs",            "(Ljava/lang/String;)Z"),
-        ("shizukuPathExists",        "(Ljava/lang/String;)Z"),
-        ("launchIntent",             "(Ljava/lang/String;)V"),
+        ("selectEdenLoadDirectory",   "()V"),
+        ("safListDirectory",          "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("safWriteTextFile",          "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"),
+        ("safDeleteFile",             "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("safRemoveEmptyDirectory",   "(Ljava/lang/String;)Ljava/lang/String;"),
+        ("launchIntent",              "(Ljava/lang/String;)V"),
         ("returnToApp",              "()V"),
         ("startScanService",         "()V"),
         ("stopScanService",          "()V"),
@@ -663,355 +456,163 @@ where
     f(&mut env, &jcls)
 }
 
-/// Call `MainActivity.hasAllFilesAccess()` — returns true when
-/// MANAGE_EXTERNAL_STORAGE is granted (Android 11+) or unconditionally on older APIs.
-#[cfg(target_os = "android")]
-fn jni_has_all_files_access() -> bool {
-    with_main_class(|env, jcls| {
-        env.call_static_method(jcls, "hasAllFilesAccess", "()Z", &[])
-            .map_err(|e| format!("JNI hasAllFilesAccess: {e}"))
-            .and_then(|v| v.z().map_err(|e| format!("JNI bool: {e}")))
-    })
-    .unwrap_or(false)
-}
-
-/// Call `MainActivity.openStorageSettings()` to launch the system
-/// MANAGE_APP_ALL_FILES_ACCESS_PERMISSION settings page.
-#[cfg(target_os = "android")]
-fn jni_open_storage_settings() -> Result<(), String> {
-    with_main_class(|env, jcls| {
-        env.call_static_method(jcls, "openStorageSettings", "()V", &[])
-            .map_err(|e| format!("JNI openStorageSettings: {e}"))?;
-        Ok(())
-    })
-}
-
-// ── Shizuku / API-level infrastructure ───────────────────────────────────────
-// On API ≤ 33 all blocked-path helpers fall through to direct std::fs.
-// On API ≥ 34 any path inside Android/data/ is routed through Shizuku
-// (ADB shell uid=2000 — confirmed to bypass the platform restriction).
-// Paths outside Android/data/ (user ROM dirs, etc.) always use direct std::fs.
+// ── SAF storage bridge ────────────────────────────────────────────────────────
 
 #[cfg(target_os = "android")]
-static API_LEVEL: std::sync::OnceLock<i32> = std::sync::OnceLock::new();
-
-fn get_api_level() -> i32 {
-    #[cfg(target_os = "android")]
-    return *API_LEVEL.get_or_init(|| {
-        with_main_class(|env, jcls| {
-            env.call_static_method(jcls, "getApiLevel", "()I", &[])
-                .map_err(|e| format!("JNI getApiLevel: {e}"))
-                .and_then(|v| v.i().map_err(|e| format!("JNI int: {e}")))
-        })
-        .unwrap_or(0)
-    });
-    #[cfg(not(target_os = "android"))]
-    0
-}
-
-/// Returns Ok if (a) API < 34 or (b) Shizuku is running and permission is granted.
-fn ensure_shizuku_for_blocked_path(path: &str) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && path.contains("/Android/data/") {
-        let api = get_api_level();
-
-        // Android 17+ — Shizuku has no release for this version yet.
-        if api >= 37 {
-            return Err(format!(
-                "Your device runs Android API {api}, which is not yet supported by Shizuku.\n\
-                 Native mode cannot access Eden's data folder on this Android version.\n\n\
-                 Workaround: use ADB mode (requires a PC with ADB)."
-            ));
-        }
-
-        if !jni_is_shizuku_available() {
-            return Err(if api >= 36 {
-                // Android 16 — Play Store build lags behind; GitHub APK needed.
-                "Android 16 blocks Eden's data folder. Shizuku is required, but the \
-                 Play Store version does not support Android 16 yet.\n\n\
-                 Install the latest APK directly from GitHub:\n\
-                 github.com/RikkaApps/Shizuku/releases\n\n\
-                 Then: Open Shizuku → Start via Wireless ADB → tap Grant Access."
-                    .to_string()
-            } else {
-                // Android 14–15 — Play Store build works fine.
-                "Android 14+ blocks Eden's data folder. Shizuku is required.\n\n\
-                 1. Enable Developer Options on your phone\n\
-                 2. Enable Wireless Debugging\n\
-                 3. Install Shizuku from the Play Store (or GitHub for latest)\n\
-                 4. Open Shizuku → Start via Wireless ADB\n\
-                 5. Tap Grant Access here"
-                    .to_string()
-            });
-        }
-        if !jni_is_shizuku_granted() {
-            return Err(
-                "Shizuku is running but access is not granted yet.\n\
-                 Tap Grant Access below."
-                    .into(),
-            );
-        }
-    }
-    Ok(())
-}
-
-// ── Shizuku JNI helpers (android-only) ───────────────────────────────────────
-
-#[cfg(target_os = "android")]
-fn jni_is_shizuku_available() -> bool {
-    with_main_class(|env, jcls| {
-        env.call_static_method(jcls, "isShizukuAvailable", "()Z", &[])
-            .map_err(|e| format!("JNI isShizukuAvailable: {e}"))
-            .and_then(|v| v.z().map_err(|e| format!("JNI bool: {e}")))
-    })
-    .unwrap_or(false)
+#[derive(Debug, Deserialize)]
+struct SafEntry {
+    name: String,
+    directory: bool,
 }
 
 #[cfg(target_os = "android")]
-fn jni_is_shizuku_granted() -> bool {
-    with_main_class(|env, jcls| {
-        env.call_static_method(jcls, "isShizukuGranted", "()Z", &[])
-            .map_err(|e| format!("JNI isShizukuGranted: {e}"))
-            .and_then(|v| v.z().map_err(|e| format!("JNI bool: {e}")))
-    })
-    .unwrap_or(false)
-}
-
-#[cfg(target_os = "android")]
-fn jni_shizuku_read_file(path: &str) -> Result<String, String> {
+fn jni_saf_path_call(method: &str, relative_path: &str) -> Result<String, String> {
     use jni::objects::{JObject, JString, JValue};
     with_main_class(|env, jcls| {
-        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
-        let result = env
-            .call_static_method(
-                jcls,
-                "shizukuReadFile",
-                "(Ljava/lang/String;)Ljava/lang/String;",
-                &[JValue::Object(&JObject::from(path_j))],
-            )
-            .map_err(|e| format!("JNI shizukuReadFile: {e}"))?;
-        let jobj = result.l().map_err(|e| format!("JNI object: {e}"))?;
-        if jobj.is_null() {
-            return Err(format!("Cannot read {path} via Shizuku (missing or denied)"));
-        }
-        let s: String = env
-            .get_string(&JString::from(jobj))
-            .map_err(|e| format!("JNI string: {e}"))?
-            .into();
-        Ok(s)
-    })
-}
-
-#[cfg(target_os = "android")]
-fn jni_shizuku_list_dir(path: &str) -> Result<String, String> {
-    use jni::objects::{JObject, JString, JValue};
-    with_main_class(|env, jcls| {
-        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
-        let result = env
-            .call_static_method(
-                jcls,
-                "shizukuListDir",
-                "(Ljava/lang/String;)Ljava/lang/String;",
-                &[JValue::Object(&JObject::from(path_j))],
-            )
-            .map_err(|e| format!("JNI shizukuListDir: {e}"))?;
-        let jobj = result.l().map_err(|e| format!("JNI object: {e}"))?;
-        env.get_string(&JString::from(jobj))
-            .map(|s| s.into())
-            .map_err(|e| format!("JNI string: {e}"))
-    })
-}
-
-#[cfg(target_os = "android")]
-fn jni_shizuku_find_txt_files(dir: &str) -> Result<String, String> {
-    use jni::objects::{JObject, JString, JValue};
-    with_main_class(|env, jcls| {
-        let dir_j = env.new_string(dir).map_err(|e| format!("JNI string: {e}"))?;
-        let result = env
-            .call_static_method(
-                jcls,
-                "shizukuFindTxtFiles",
-                "(Ljava/lang/String;)Ljava/lang/String;",
-                &[JValue::Object(&JObject::from(dir_j))],
-            )
-            .map_err(|e| format!("JNI shizukuFindTxtFiles: {e}"))?;
-        let jobj = result.l().map_err(|e| format!("JNI object: {e}"))?;
-        env.get_string(&JString::from(jobj))
-            .map(|s| s.into())
-            .map_err(|e| format!("JNI string: {e}"))
-    })
-}
-
-#[cfg(target_os = "android")]
-fn jni_shizuku_write_file(path: &str, content: &str) -> Result<(), String> {
-    use jni::objects::{JObject, JValue};
-    with_main_class(|env, jcls| {
-        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
-        let content_j = env.new_string(content).map_err(|e| format!("JNI string: {e}"))?;
-        let result = env
-            .call_static_method(
-                jcls,
-                "shizukuWriteFile",
-                "(Ljava/lang/String;Ljava/lang/String;)Z",
-                &[
-                    JValue::Object(&JObject::from(path_j)),
-                    JValue::Object(&JObject::from(content_j)),
-                ],
-            )
-            .map_err(|e| format!("JNI shizukuWriteFile: {e}"))?;
-        let ok = result.z().map_err(|e| format!("JNI bool: {e}"))?;
-        if ok { Ok(()) } else { Err(format!("shizukuWriteFile({path}) returned false")) }
-    })
-}
-
-// Helper: call a Shizuku JNI method `(String)Z`.
-#[cfg(target_os = "android")]
-fn jni_shizuku_bool_path(method: &str, path: &str) -> Result<bool, String> {
-    use jni::objects::{JObject, JValue};
-    with_main_class(|env, jcls| {
-        let path_j = env.new_string(path).map_err(|e| format!("JNI string: {e}"))?;
+        let path = env.new_string(relative_path).map_err(|e| format!("JNI string: {e}"))?;
         let result = env
             .call_static_method(
                 jcls,
                 method,
-                "(Ljava/lang/String;)Z",
-                &[JValue::Object(&JObject::from(path_j))],
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                &[JValue::Object(&JObject::from(path))],
             )
             .map_err(|e| format!("JNI {method}: {e}"))?;
-        result.z().map_err(|e| format!("JNI bool: {e}"))
+        let object = result.l().map_err(|e| format!("JNI object: {e}"))?;
+        if object.is_null() {
+            return Err(format!("{method} returned null"));
+        }
+        env.get_string(&JString::from(object))
+            .map(|value| value.into())
+            .map_err(|e| format!("JNI string: {e}"))
     })
 }
 
 #[cfg(target_os = "android")]
-fn jni_shizuku_mkdirs(path: &str) -> Result<(), String> {
-    match jni_shizuku_bool_path("shizukuMkdirs", path) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err(format!("shizukuMkdirs({path}) failed")),
-        Err(e) => Err(e),
+fn jni_saf_write_call(relative_path: &str, content: &str) -> Result<String, String> {
+    use jni::objects::{JObject, JString, JValue};
+    with_main_class(|env, jcls| {
+        let path = env.new_string(relative_path).map_err(|e| format!("JNI string: {e}"))?;
+        let content = env.new_string(content).map_err(|e| format!("JNI string: {e}"))?;
+        let result = env
+            .call_static_method(
+                jcls,
+                "safWriteTextFile",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[
+                    JValue::Object(&JObject::from(path)),
+                    JValue::Object(&JObject::from(content)),
+                ],
+            )
+            .map_err(|e| format!("JNI safWriteTextFile: {e}"))?;
+        let object = result.l().map_err(|e| format!("JNI object: {e}"))?;
+        if object.is_null() {
+            return Err("safWriteTextFile returned null".into());
+        }
+        env.get_string(&JString::from(object))
+            .map(|value| value.into())
+            .map_err(|e| format!("JNI string: {e}"))
+    })
+}
+
+#[cfg(target_os = "android")]
+fn parse_saf_response(response: String) -> Result<String, String> {
+    if let Some(error) = response.strip_prefix("ERROR:") {
+        Err(error.trim().to_string())
+    } else {
+        Ok(response)
     }
 }
 
 #[cfg(target_os = "android")]
-fn jni_shizuku_path_exists(path: &str) -> bool {
-    jni_shizuku_bool_path("shizukuPathExists", path).unwrap_or(false)
+fn jni_saf_list_directory(relative_path: &str) -> Result<Vec<SafEntry>, String> {
+    let response = parse_saf_response(jni_saf_path_call("safListDirectory", relative_path)?)?;
+    serde_json::from_str(&response).map_err(|e| format!("Invalid SAF directory response: {e}"))
 }
 
 #[cfg(target_os = "android")]
-fn jni_shizuku_delete_file(path: &str) -> Result<(), String> {
-    match jni_shizuku_bool_path("shizukuDeleteFile", path) {
-        Ok(_) => Ok(()), // rm -f always succeeds (ignores not-found)
-        Err(e) => Err(e),
-    }
+fn jni_saf_write_text_file(relative_path: &str, content: &str) -> Result<(), String> {
+    let response = parse_saf_response(jni_saf_write_call(relative_path, content)?)?;
+    if response == "OK" { Ok(()) } else { Err(format!("Unexpected SAF response: {response}")) }
 }
 
 #[cfg(target_os = "android")]
-fn jni_shizuku_rmdir(path: &str) {
-    // Best-effort — ignore errors (rmdir fails silently on non-empty dirs)
-    let _ = jni_shizuku_bool_path("shizukuRmdir", path);
+fn jni_saf_delete_file(relative_path: &str) -> Result<(), String> {
+    let response = parse_saf_response(jni_saf_path_call("safDeleteFile", relative_path)?)?;
+    if response == "OK" { Ok(()) } else { Err(format!("Unexpected SAF response: {response}")) }
 }
 
-// ── Filesystem abstraction (direct fs on API ≤ 33, Shizuku on API ≥ 34) ──────
+#[cfg(target_os = "android")]
+fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), String> {
+    let response = parse_saf_response(jni_saf_path_call("safRemoveEmptyDirectory", relative_path)?)?;
+    if response == "OK" { Ok(()) } else { Err(format!("Unexpected SAF response: {response}")) }
+}
 
+/// Direct Eden log/config access remains disabled while build-ID discovery is redesigned.
 fn native_read_file(path: &str) -> Result<String, String> {
     #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && path.contains("/Android/data/") {
-        ensure_shizuku_for_blocked_path(path)?;
-        return jni_shizuku_read_file(path);
+    if path.contains("/Android/data/") {
+        return Err("Direct Eden data access is unavailable; build-ID discovery still needs migration.".into());
     }
     std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
 }
 
-fn native_path_exists(path: &str) -> bool {
-    #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && path.contains("/Android/data/") {
-        if let Err(e) = ensure_shizuku_for_blocked_path(path) {
-            log::warn!("[native] path_exists({path}) — Shizuku not ready: {e}");
-            return false;
-        }
-        return jni_shizuku_path_exists(path);
-    }
-    std::path::Path::new(path).exists()
-}
+// ── SAF setup commands ─────────────────────────────────────────────────────────
 
-fn native_mkdirs(path: &str) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && path.contains("/Android/data/") {
-        ensure_shizuku_for_blocked_path(path)?;
-        return jni_shizuku_mkdirs(path);
-    }
-    std::fs::create_dir_all(path).map_err(|e| format!("{path}: {e}"))
-}
-
-fn native_list_dir_names(path: &str) -> Result<Vec<String>, String> {
-    #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && path.contains("/Android/data/") {
-        ensure_shizuku_for_blocked_path(path)?;
-        let out = jni_shizuku_list_dir(path)?;
-        return Ok(out
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect());
-    }
-    let entries = std::fs::read_dir(path).map_err(|e| format!("{path}: {e}"))?;
-    Ok(entries
-        .flatten()
-        .map(|e| e.file_name().to_string_lossy().to_string())
-        .collect())
-}
-
-/// Write `content` to `path`, creating parent directories automatically.
-fn native_write_file(path: &str, content: &[u8]) -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    if get_api_level() >= 34 && path.contains("/Android/data/") {
-        ensure_shizuku_for_blocked_path(path)?;
-        if let Some(parent) = std::path::Path::new(path).parent() {
-            jni_shizuku_mkdirs(&parent.to_string_lossy())?;
-        }
-        return jni_shizuku_write_file(path, &String::from_utf8_lossy(content));
-    }
-    if let Some(parent) = std::path::Path::new(path).parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    std::fs::write(path, content).map_err(|e| format!("{path}: {e}"))
-}
-
-// ── Shizuku Tauri commands ────────────────────────────────────────────────────
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ShizukuStatus {
-    pub api_level: i32,
-    pub needs_shizuku: bool,
-    pub available: bool,
-    pub granted: bool,
-}
-
-/// Return current Shizuku readiness state. Safe to call on any platform/API level.
+/// Open Androids document-tree picker so the user can grant access to Edens
+/// exposed `load` directory. The picker result is persisted by MainActivity.
 #[tauri::command]
-pub fn check_shizuku_status() -> ShizukuStatus {
+pub fn select_eden_load_directory() -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        let api_level = get_api_level();
-        let needs = api_level >= 34;
-        let available = if needs { jni_is_shizuku_available() } else { false };
-        let granted = if available { jni_is_shizuku_granted() } else { false };
-        return ShizukuStatus { api_level, needs_shizuku: needs, available, granted };
+        return with_main_class(|env, jcls| {
+            env.call_static_method(jcls, "selectEdenLoadDirectory", "()V", &[])
+                .map_err(|e| format!("JNI selectEdenLoadDirectory: {e}"))?;
+            Ok(())
+        });
     }
     #[cfg(not(target_os = "android"))]
-    ShizukuStatus { api_level: 0, needs_shizuku: false, available: false, granted: false }
+    {
+        Err("Eden SAF directory selection is only available on Android.".into())
+    }
 }
 
-/// Show the Shizuku permission dialog. No-op on non-Android or API < 34.
+/// Exercise the production SAF bridge with nested create, write, list, delete,
+/// and empty-directory cleanup operations.
 #[tauri::command]
-pub fn request_shizuku_permission() -> Result<(), String> {
+pub fn test_eden_load_directory() -> Result<String, String> {
     #[cfg(target_os = "android")]
-    with_main_class(|env, jcls| {
-        env.call_static_method(jcls, "requestShizukuPermission", "()V", &[])
-            .map_err(|e| format!("JNI requestShizukuPermission: {e}"))?;
-        Ok(())
-    })?;
-    Ok(())
+    {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_millis();
+        let probe_root = format!(".ecm-saf-probe-{timestamp}");
+        let probe_directory = format!("{probe_root}/nested");
+        let probe_file = format!("{probe_directory}/probe.txt");
+
+        let result = (|| {
+            jni_saf_write_text_file(&probe_file, "ECM SAF probe")?;
+            let entries = jni_saf_list_directory(&probe_directory)?;
+            if !entries.iter().any(|entry| !entry.directory && entry.name == "probe.txt") {
+                return Err("Probe file was not listed through SAF.".into());
+            }
+            jni_saf_delete_file(&probe_file)?;
+            jni_saf_remove_empty_directory(&probe_directory)?;
+            jni_saf_remove_empty_directory(&probe_root)?;
+            Ok("OK".to_string())
+        })();
+
+        let _ = jni_saf_delete_file(&probe_file);
+        let _ = jni_saf_remove_empty_directory(&probe_directory);
+        let _ = jni_saf_remove_empty_directory(&probe_root);
+        return result;
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        Err("Eden SAF access testing is only available on Android.".into())
+    }
 }
 
 /// Call `MainActivity.launchIntent(uri)` via JNI so that `startActivity()` runs
@@ -1140,44 +741,5 @@ async fn poll_for_keys_ready_native(timeout_secs: u64) {
                 prev = cur;
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn storage_permission_status_granted_serializes_camel_case() {
-        let status = StoragePermissionStatus { granted: true, message: "ok".into() };
-        let json = serde_json::to_string(&status).unwrap();
-        assert!(json.contains("\"granted\":true"), "got: {json}");
-        assert!(json.contains("\"message\":"), "got: {json}");
-        // serde rename_all camelCase — both fields already camelCase so no rename needed,
-        // but verify no snake_case keys leak out.
-        assert!(!json.contains("_"), "unexpected snake_case in: {json}");
-    }
-
-    #[test]
-    fn storage_permission_status_denied_serializes() {
-        let status = StoragePermissionStatus { granted: false, message: "denied".into() };
-        let json = serde_json::to_string(&status).unwrap();
-        assert!(json.contains("\"granted\":false"), "got: {json}");
-        assert!(json.contains("\"denied\""), "got: {json}");
-    }
-
-    #[cfg(not(target_os = "android"))]
-    #[test]
-    fn check_storage_permission_always_granted_on_desktop() {
-        let status = check_storage_permission();
-        assert!(status.granted, "desktop build must always report granted");
-    }
-
-    #[cfg(not(target_os = "android"))]
-    #[test]
-    fn open_storage_settings_is_noop_on_desktop() {
-        // On non-Android builds this should succeed (nothing to open).
-        let result = open_storage_settings();
-        assert!(result.is_ok(), "desktop open_storage_settings returned: {result:?}");
     }
 }
