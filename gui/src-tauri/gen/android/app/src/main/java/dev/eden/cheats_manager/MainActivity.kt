@@ -11,15 +11,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.provider.DocumentsContract
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import java.lang.ref.WeakReference
-import org.json.JSONArray
-import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
+    private val edenSafStorage = EdenSafStorage(this)
+
     companion object {
         @Volatile private var instance: WeakReference<MainActivity>? = null
         @Volatile private var killEdenOnResume = false
@@ -27,48 +25,45 @@ class MainActivity : TauriActivity() {
         private const val ALERT_CHANNEL_ID       = "scan_alert_channel"
         private const val RETURN_NOTIFICATION_ID = 43
         private const val RETURN_REQUEST_CODE    = 1
-        private const val SAF_PREFS = "eden_saf"
-        private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
-        private const val EDEN_DOCUMENTS_AUTHORITY = "dev.eden.eden_emulator.user"
-        private const val EDEN_LOAD_DOCUMENT_ID = "root/load"
 
-        // SAF test
         @JvmStatic
         fun selectEdenLoadDirectory() {
-            val activity = instance?.get() ?: return
-
-            activity.runOnUiThread {
-                activity.edenLoadPicker.launch(null)
-            }
+            instance?.get()?.edenSafStorage?.selectLoadDirectory()
         }
 
+        @JvmStatic
+        fun getEdenLoadAccessStatus(): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.edenSafStorage.getAccessStatus()
+        }
 
         @JvmStatic
         fun safListDirectory(relativePath: String): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.safListDirectoryInternal(relativePath)
+            return activity.edenSafStorage.listDirectory(relativePath)
         }
 
         @JvmStatic
         fun safWriteTextFile(relativePath: String, content: String): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.safWriteTextFileInternal(relativePath, content)
+            return activity.edenSafStorage.writeTextFile(relativePath, content)
         }
 
         @JvmStatic
         fun safDeleteFile(relativePath: String): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.safDeleteFileInternal(relativePath)
+            return activity.edenSafStorage.deleteFile(relativePath)
         }
 
         @JvmStatic
         fun safRemoveEmptyDirectory(relativePath: String): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.safRemoveEmptyDirectoryInternal(relativePath)
+            return activity.edenSafStorage.removeEmptyDirectory(relativePath)
         }
 
         /**
@@ -244,233 +239,6 @@ class MainActivity : TauriActivity() {
     override fun onDestroy() {
         super.onDestroy()
         instance = null
-    }
-    private data class SafDocument(
-        val uri: Uri,
-        val name: String,
-        val directory: Boolean
-    )
-
-    private val edenLoadPicker =
-        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            if (uri == null) {
-                android.util.Log.i("CheatsManager", "SAF selection cancelled")
-                return@registerForActivityResult
-            }
-
-            if (uri.authority != EDEN_DOCUMENTS_AUTHORITY) {
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Selected directory is not provided by Eden"
-                )
-                return@registerForActivityResult
-            }
-            val documentId = try {
-                DocumentsContract.getTreeDocumentId(uri)
-            } catch (error: IllegalArgumentException) {
-                android.util.Log.e("CheatsManager", "Invalid Eden tree URI", error)
-                return@registerForActivityResult
-            }
-            if (documentId != EDEN_LOAD_DOCUMENT_ID) {
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Invalid Eden directory: '$documentId'. Expected: '$EDEN_LOAD_DOCUMENT_ID'"
-                )
-                return@registerForActivityResult
-            }
-
-            try {
-                val flags =
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-
-                contentResolver.takePersistableUriPermission(uri, flags)
-
-                getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(PREF_EDEN_LOAD_URI, uri.toString())
-                    .apply()
-
-                android.util.Log.i(
-                    "CheatsManager",
-                    "Eden SAF directory permission saved"
-                )
-            } catch (e: Exception) {
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Could not persist Eden SAF permission",
-                    e
-                )
-            }
-        }
-
-    private fun edenLoadRootUri(): Uri {
-        val savedUri = getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
-            .getString(PREF_EDEN_LOAD_URI, null)
-            ?: throw IllegalStateException("Select Eden's load directory first")
-        val treeUri = Uri.parse(savedUri)
-        return DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            DocumentsContract.getTreeDocumentId(treeUri)
-        )
-    }
-
-    private fun safPathSegments(relativePath: String): List<String> {
-        if (relativePath.isBlank()) return emptyList()
-        val segments = relativePath.split('/')
-        if (segments.any { it.isBlank() || it == "." || it == ".." }) {
-            throw IllegalArgumentException("Invalid relative path: $relativePath")
-        }
-        return segments
-    }
-
-    private fun queryChildren(parentUri: Uri): List<SafDocument> {
-        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
-            parentUri,
-            DocumentsContract.getDocumentId(parentUri)
-        )
-        val projection = arrayOf(
-            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            DocumentsContract.Document.COLUMN_MIME_TYPE
-        )
-        val cursor = contentResolver.query(childrenUri, projection, null, null, null)
-            ?: throw IllegalStateException("Could not query Eden directory")
-        val children = mutableListOf<SafDocument>()
-        cursor.use {
-            val idColumn = it.getColumnIndexOrThrow(
-                DocumentsContract.Document.COLUMN_DOCUMENT_ID
-            )
-            val nameColumn = it.getColumnIndexOrThrow(
-                DocumentsContract.Document.COLUMN_DISPLAY_NAME
-            )
-            val mimeColumn = it.getColumnIndexOrThrow(
-                DocumentsContract.Document.COLUMN_MIME_TYPE
-            )
-            while (it.moveToNext()) {
-                val documentId = it.getString(idColumn)
-                children.add(
-                    SafDocument(
-                        uri = DocumentsContract.buildDocumentUriUsingTree(
-                            parentUri,
-                            documentId
-                        ),
-                        name = it.getString(nameColumn),
-                        directory = it.getString(mimeColumn) ==
-                            DocumentsContract.Document.MIME_TYPE_DIR
-                    )
-                )
-            }
-        }
-        return children
-    }
-
-    private fun findChild(parentUri: Uri, name: String): SafDocument? =
-        queryChildren(parentUri).firstOrNull { it.name == name }
-
-    private fun resolveDirectory(relativePath: String, create: Boolean): Uri? {
-        var current = edenLoadRootUri()
-        for (segment in safPathSegments(relativePath)) {
-            val existing = findChild(current, segment)
-            current = when {
-                existing == null && create -> DocumentsContract.createDocument(
-                    contentResolver,
-                    current,
-                    DocumentsContract.Document.MIME_TYPE_DIR,
-                    segment
-                ) ?: throw IllegalStateException("Could not create directory: $segment")
-                existing == null -> return null
-                !existing.directory -> throw IllegalStateException("Not a directory: $segment")
-                else -> existing.uri
-            }
-        }
-        return current
-    }
-
-    private fun resolveDocument(relativePath: String): SafDocument? {
-        val segments = safPathSegments(relativePath)
-        if (segments.isEmpty()) {
-            throw IllegalArgumentException("A file path is required")
-        }
-        val parent = resolveDirectory(segments.dropLast(1).joinToString("/"), false)
-            ?: return null
-        return findChild(parent, segments.last())
-    }
-
-    private fun safError(error: Exception): String =
-        "ERROR: ${error.message ?: error.javaClass.simpleName}"
-
-    private fun safStatus(action: () -> Unit): String = try {
-        action()
-        "OK"
-    } catch (error: Exception) {
-        safError(error)
-    }
-
-    private fun safListDirectoryInternal(relativePath: String): String {
-        return try {
-            val directory = resolveDirectory(relativePath, false) ?: return "[]"
-            val result = JSONArray()
-            for (child in queryChildren(directory)) {
-                result.put(
-                    JSONObject()
-                        .put("name", child.name)
-                        .put("directory", child.directory)
-                )
-            }
-            result.toString()
-        } catch (error: Exception) {
-            safError(error)
-        }
-    }
-
-    private fun safWriteTextFileInternal(relativePath: String, content: String): String =
-        safStatus {
-            val segments = safPathSegments(relativePath)
-            if (segments.isEmpty()) {
-                throw IllegalArgumentException("A file path is required")
-            }
-            val parent = resolveDirectory(
-                segments.dropLast(1).joinToString("/"),
-                true
-            ) ?: throw IllegalStateException("Could not resolve parent directory")
-            val filename = segments.last()
-            val existing = findChild(parent, filename)
-            if (existing?.directory == true) {
-                throw IllegalStateException("Path is a directory: $relativePath")
-            }
-            val fileUri = existing?.uri ?: DocumentsContract.createDocument(
-                contentResolver,
-                parent,
-                "text/plain",
-                filename
-            ) ?: throw IllegalStateException("Could not create file: $filename")
-            val output = contentResolver.openOutputStream(fileUri, "wt")
-                ?: throw IllegalStateException("Could not open file: $filename")
-            output.use {
-                it.write(content.toByteArray(Charsets.UTF_8))
-            }
-        }
-
-    private fun safDeleteFileInternal(relativePath: String): String = safStatus {
-        val document = resolveDocument(relativePath) ?: return@safStatus
-        if (document.directory) {
-            throw IllegalStateException("Path is a directory: $relativePath")
-        }
-        if (!DocumentsContract.deleteDocument(contentResolver, document.uri)) {
-            throw IllegalStateException("Could not delete file: $relativePath")
-        }
-    }
-
-    private fun safRemoveEmptyDirectoryInternal(relativePath: String): String = safStatus {
-        val document = resolveDocument(relativePath) ?: return@safStatus
-        if (!document.directory) {
-            throw IllegalStateException("Path is not a directory: $relativePath")
-        }
-        if (queryChildren(document.uri).isEmpty() &&
-            !DocumentsContract.deleteDocument(contentResolver, document.uri)) {
-            throw IllegalStateException("Could not delete directory: $relativePath")
-        }
     }
 
 }
