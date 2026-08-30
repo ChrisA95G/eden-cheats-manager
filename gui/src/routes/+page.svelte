@@ -15,8 +15,6 @@
   /** @type {'android' | 'desktop'} */
   let platform = $state('desktop');
   let isMobile = $derived((/** @type {string} */ (platform)) === 'android');
-  let storagePermission = $state(/** @type {any} */ (null));
-  let permissionDismissed = $state(false);
 
   onMount(async () => {
     try {
@@ -33,10 +31,6 @@
           onboardingDone: true,
         };
         try { await saveSettings(appSettings); } catch (_) {}
-        // Check if storage permission is already granted
-        try {
-          storagePermission = await invoke('check_storage_permission');
-        } catch (_) {}
       } else if (appSettings?.targetMode === 'android') {
         try {
           const usbDevices = await invoke('get_usb_devices', { adbPath: appSettings.adbPath });
@@ -103,39 +97,6 @@
 
 {#if loading}
   <div class="loading-screen">LOADING</div>
-{:else if platform === 'android' && storagePermission && !storagePermission.granted && !permissionDismissed}
-  <div class="permission-screen">
-    <div class="permission-box">
-      <div class="permission-title">// STORAGE PERMISSION</div>
-      <p class="permission-body">
-        Eden Cheats Manager needs "All files access" to read and write cheat files on Android 13 and below.
-      </p>
-      <p class="permission-path"><code>/Android/data/dev.eden.eden_emulator/files/load/</code></p>
-      <p class="permission-body">
-        Tap <strong>Open Settings</strong>, then enable <strong>Allow management of all files</strong>.
-      </p>
-      <p class="permission-body" style="font-size:0.8em;opacity:0.7;">
-        Stock Android: Special app access → All files access<br>
-        Samsung One UI: Apps → Eden Cheats Manager → Permissions → Files and media → Allow management of all files
-      </p>
-      <button class="permission-btn" onclick={async () => {
-        try { await invoke('open_storage_settings'); } catch (_) {}
-      }}>
-        [ OPEN SETTINGS ]
-      </button>
-      <button class="permission-btn" style="margin-top:0.5rem;opacity:0.7;" onclick={async () => {
-        try { storagePermission = await invoke('check_storage_permission'); } catch (_) {}
-      }}>
-        [ CHECK AGAIN ]
-      </button>
-      <button class="permission-btn" style="margin-top:0.5rem;opacity:0.5;" onclick={() => permissionDismissed = true}>
-        [ SKIP FOR NOW ]
-      </button>
-      <p class="permission-body" style="font-size:0.72em;opacity:0.5;margin-top:0.5rem;">
-        You can grant this later via Settings if needed.
-      </p>
-    </div>
-  </div>
 {:else if !appSettings?.onboardingDone}
   <Onboarding currentSettings={appSettings ?? {}} ondone={handleOnboardingDone} />
   {#if saveError}<div style="position:fixed;bottom:1rem;left:1rem;right:1rem;background:#c00;color:#fff;padding:.5rem .75rem;border-radius:4px;font-size:.8rem;z-index:999">{saveError}</div>{/if}
@@ -252,57 +213,4 @@
     overflow: hidden;
   }
 
-  .permission-screen {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    padding: 1.5rem;
-  }
-
-  .permission-box {
-    border: 1px solid var(--border);
-    background: var(--surface);
-    padding: 2rem;
-    max-width: 480px;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
-
-  .permission-title {
-    color: var(--accent);
-    font-size: 1rem;
-    letter-spacing: 0.1em;
-    margin-bottom: 0.5rem;
-  }
-
-  .permission-body {
-    color: var(--text);
-    font-size: 0.85rem;
-    line-height: 1.6;
-  }
-
-  .permission-path code {
-    color: var(--text-muted);
-    font-size: 0.78rem;
-    word-break: break-all;
-  }
-
-  .permission-btn {
-    margin-top: 0.5rem;
-    background: transparent;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    padding: 0.6rem 1rem;
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-    letter-spacing: 0.1em;
-  }
-
-  .permission-btn:hover {
-    background: var(--accent-dim);
-  }
 </style>

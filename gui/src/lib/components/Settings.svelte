@@ -19,8 +19,8 @@
   let checkingAdb = $state(false);
   let appLogPath = $state('');
   let edenLogPath = $state('');
-  let shizukuStatus = $state(/** @type {any} */ (null));
-  let checkingShizuku = $state(false);
+  let safTestResult = $state('');
+  let testingSaf = $state(false);
 
   // New connection form
   let newConnLabel = $state('');
@@ -35,7 +35,6 @@
     try { detectedEdenExe = await invoke('detect_eden_exe') ?? ''; } catch (_) {}
     try { appLogPath = await invoke('get_app_log_path') ?? ''; } catch (_) {}
     if (local.targetMode === 'android') checkAdb();
-    if (platform === 'android') refreshShizukuStatus();
     if (local.targetMode === 'pc' && local.pcLoadDir) refreshEdenLogPath(local.pcLoadDir);
   });
 
@@ -134,18 +133,25 @@
     }
   }
 
-  async function refreshShizukuStatus() {
-    checkingShizuku = true;
-    try { shizukuStatus = await invoke('check_shizuku_status'); } catch (_) {}
-    finally { checkingShizuku = false; }
+
+  async function selectEdenLoadDirectory() {
+    safTestResult = '';
+    try {
+      await invoke('select_eden_load_directory');
+    } catch (e) {
+      safTestResult = `ERROR: ${e}`;
+    }
   }
 
-  async function grantShizuku() {
+  async function testEdenLoadDirectory() {
+    testingSaf = true;
     try {
-      await invoke('request_shizuku_permission');
-      // Re-check after a moment — user should see the Shizuku dialog then tap back.
-      setTimeout(refreshShizukuStatus, 2500);
-    } catch (e) { console.error('request_shizuku_permission failed:', e); }
+      safTestResult = String(await invoke('test_eden_load_directory'));
+    } catch (e) {
+      safTestResult = `ERROR: ${e}`;
+    } finally {
+      testingSaf = false;
+    }
   }
 
   async function save() {
@@ -194,50 +200,25 @@
       {:else}
         <fieldset>
           <legend>Target Mode</legend>
-          <p class="hint">Running natively on Android — direct filesystem access, no ADB required.</p>
+          <p class="hint">Running natively on Android — on-device storage access, no ADB required.</p>
         </fieldset>
 
-        <!-- Storage access — only needed on Android 13 and below -->
-        {#if shizukuStatus && !shizukuStatus.needsShizuku}
-          <fieldset>
-            <legend>Storage Access</legend>
-            <p class="hint">Required on Android 13 and below to access Eden's data folder.</p>
-            <p class="hint">Samsung: Settings → Apps → Eden Cheats Manager → Permissions → Files and media → Allow management of all files.</p>
-            <button class="btn-secondary sm" onclick={async () => { try { await invoke('open_storage_settings'); } catch (_) {} }}>
-              [ GRANT STORAGE ACCESS ]
+        <fieldset>
+          <legend>Eden Load Directory — SAF Test</legend>
+          <p class="hint">Select <strong>Eden → load</strong> in Android's folder picker, then test access.</p>
+          <div class="saf-actions">
+            <button class="btn-secondary sm" onclick={selectEdenLoadDirectory}>[ SELECT DIRECTORY ]</button>
+            <button class="btn-secondary sm" onclick={testEdenLoadDirectory} disabled={testingSaf}>
+              {testingSaf ? '[ TESTING... ]' : '[ TEST ACCESS ]'}
             </button>
-          </fieldset>
-        {/if}
+          </div>
+          {#if safTestResult}
+            <div class="status-badge" class:ok={safTestResult === 'OK'} class:warn={safTestResult !== 'OK'}>
+              {safTestResult === 'OK' ? 'SAF access works.' : safTestResult}
+            </div>
+          {/if}
+        </fieldset>
 
-        <!-- Shizuku status — only relevant on Android 14+ -->
-        {#if shizukuStatus && shizukuStatus.needsShizuku}
-          <fieldset>
-            <legend>Shizuku (Android 14+)</legend>
-            {#if shizukuStatus.available && shizukuStatus.granted}
-              <div class="status-badge ok">Shizuku running — access granted.</div>
-            {:else if shizukuStatus.available && !shizukuStatus.granted}
-              <div class="status-badge warn">Shizuku running — permission not granted.</div>
-              <button class="btn-secondary sm" onclick={grantShizuku}>[ GRANT ACCESS ]</button>
-            {:else}
-              <div class="status-badge warn">Shizuku not running.</div>
-              <p class="hint">Android 14+ blocks Eden's data folder without it.</p>
-              {#if shizukuStatus.apiLevel >= 37}
-                <p class="hint warn-text">Your Android version is not yet supported by Shizuku. Native mode is unavailable — use ADB mode instead.</p>
-              {:else if shizukuStatus.apiLevel >= 36}
-                <p class="hint">Android 16: the Play Store version does not support this Android version yet.</p>
-                <p class="hint">Install the latest APK from: <strong>github.com/RikkaApps/Shizuku/releases</strong></p>
-                <p class="hint">Then open Shizuku → Start via Wireless ADB.</p>
-              {:else}
-                <p class="hint">1. Enable Developer Options → Wireless Debugging</p>
-                <p class="hint">2. Install Shizuku from the Play Store (or GitHub for latest)</p>
-                <p class="hint">3. Open Shizuku → Start via Wireless ADB</p>
-              {/if}
-            {/if}
-            <button class="btn-secondary sm" onclick={refreshShizukuStatus} disabled={checkingShizuku} style="margin-top:0.5rem">
-              {checkingShizuku ? '[ CHECKING... ]' : '[ REFRESH STATUS ]'}
-            </button>
-          </fieldset>
-        {/if}
       {/if}
 
       <!-- PC Load Dir -->
@@ -536,12 +517,12 @@
   }
   .btn-browse:hover { color: var(--accent); border-color: var(--accent); }
   .hint { font-size: .72rem; color: var(--text-muted); margin: 0 0 .45rem; line-height: 1.5; }
-  .warn-text { color: var(--error); }
   .optional { font-size: .65rem; color: var(--text-dim); }
   code { font-family: inherit; font-size: .72rem; background: var(--surface2); padding: .05rem .3rem; border: 1px solid var(--border); }
   .status-badge { margin-top: .45rem; padding: .3rem .65rem; font-size: .75rem; border-left: 2px solid transparent; }
   .status-badge.ok   { background: rgba(74,222,128,.08); color: var(--success); border-left-color: var(--success); }
   .status-badge.warn { background: rgba(245,168,0,.08); color: var(--accent); border-left-color: var(--accent); }
+  .saf-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
 
   .btn-primary, .btn-secondary {
     padding: .42rem 1rem;

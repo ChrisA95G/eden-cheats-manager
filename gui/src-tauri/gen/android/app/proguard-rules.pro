@@ -11,9 +11,6 @@
     public static *;
 }
 
-# Shizuku API classes are used via reflection and AIDL internally.
--keep class rikka.shizuku.** { *; }
--keep class moe.shizuku.** { *; }
 
 # Preserve line numbers in stack traces for release crash debugging.
 -keepattributes SourceFile,LineNumberTable

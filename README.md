@@ -4,7 +4,7 @@ A desktop app for managing cheat codes on the [Eden](https://github.com/eden-emu
 
 > **Supports:** Android (native APK) · Android devices via ADB · PC installs (Windows / Linux / macOS)
 >
-> **Android 14+ (on-device):** requires [Shizuku](https://shizuku.rikkaapp.dev/) — see [setup instructions](#3-android-14-on-device--shizuku-setup) below.
+> **Android (on-device):** grant access to **Eden → load** through Android's system folder picker — see [setup instructions](#3-android-on-device--grant-eden-storage-access) below.
 
 ![Eden Cheats Manager — main view](docs/images/main.png)
 
@@ -26,7 +26,7 @@ A desktop app for managing cheat codes on the [Eden](https://github.com/eden-emu
 
 1. [Download & install the app](#1-download--install-the-app)
 2. [Android setup — enabling ADB](#2-android-setup--enabling-adb)
-3. [Android 14+ (on-device) — Shizuku setup](#3-android-14-on-device--shizuku-setup)
+3. [Android (on-device) — grant Eden storage access](#3-android-on-device--grant-eden-storage-access)
 4. [First launch & setup wizard](#4-first-launch--setup-wizard)
 5. [Using the app](#5-using-the-app)
 6. [Getting cheats from Cheatslips](#6-getting-cheats-from-cheatslips)
@@ -50,7 +50,7 @@ Go to the [Releases](../../releases) page and download the file for your operati
 
 Run the installer (or sideload the APK on Android — enable "Install from unknown sources" in your device settings), launch the app, and continue to the next section.
 
-> **Android APK (on-device)?** If you installed the APK directly on the Android device running Eden, skip to [First launch](#4-first-launch--setup-wizard) — no ADB or PC required. Android 14+ users also need [Shizuku](#3-android-14-on-device--shizuku-setup).
+> **Android APK (on-device)?** If you installed the APK directly on the Android device running Eden, follow the [on-device storage setup](#3-android-on-device--grant-eden-storage-access) — no ADB or PC required.
 >
 > **PC mode only?** If you're using Eden on PC (not Android), skip to [First launch](#4-first-launch--setup-wizard).
 
@@ -106,39 +106,17 @@ Leave the ADB path blank in Settings if `adb` is already available system-wide (
 
 ---
 
-## 3. Android 14+ (on-device) — Shizuku setup
+## 3. Android (on-device) — grant Eden storage access
 
-Android 14 and later block apps from reading each other's `/Android/data/` folders directly, including Eden's save and cheat directories. The on-device APK works around this using **Shizuku**, which grants ADB-level filesystem access without requiring a PC.
+The native Android app uses Eden's Storage Access Framework provider on every supported Android version. This keeps storage access consistent and avoids broad filesystem permissions.
 
-If your device runs Android 13 or below, skip this section.
+1. Install and launch Eden at least once so its `load` directory exists.
+2. Open Eden Cheats Manager → **Settings** → **Eden Load Directory**.
+3. Tap **[ SELECT DIRECTORY ]**.
+4. In the picker sidebar, choose **Eden** as a storage provider (like an SD card or cloud drive), open **load**, then confirm the folder.
+5. Tap **[ TEST ACCESS ]**. The result should say **SAF access works.**
 
-### Step 1 — Enable Wireless Debugging
-
-1. Open **Settings** → **Developer options**
-2. Turn **Wireless Debugging** on
-
-> Developer options must be enabled first — see [Android setup](#2-android-setup--enabling-adb) step 1 if you haven't done this yet.
-
-### Step 2 — Install Shizuku
-
-- **Android 14 or 15:** install **Shizuku** from the [Play Store](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api)
-- **Android 16:** the Play Store build does not yet support Android 16 — download the latest APK directly from [github.com/RikkaApps/Shizuku/releases](https://github.com/RikkaApps/Shizuku/releases) instead
-
-> Android 17 and later are not yet supported by Shizuku. Use ADB mode (requires a PC) as a workaround until Shizuku adds support.
-
-### Step 3 — Start Shizuku via Wireless ADB
-
-1. Open Shizuku
-2. Tap **Start via Wireless ADB** and follow the on-screen prompts
-3. Shizuku should show a "Running" status
-
-### Step 4 — Grant access in Eden Cheats Manager
-
-When you tap **SCAN LIBRARY** for the first time, a prompt will appear if Shizuku permission hasn't been granted yet. Tap **[ GRANT ACCESS ]** in the sidebar, then tap **Allow** in the Shizuku dialog.
-
-You can also check Shizuku status at any time in **Settings** → **Shizuku (Android 14+)**.
-
-> Shizuku must be running every time you use the app. It stops when the device reboots — repeat Step 3 after a restart.
+Android persists this permission across app restarts and device reboots. Select the directory again if Eden is reinstalled or the permission is revoked.
 
 ---
 
@@ -151,7 +129,7 @@ On first launch, a setup wizard walks you through the basics.
 **Step 1 — Choose your mode:**
 - **PC / Desktop** — Eden is installed on this computer. The app reads and writes cheat files directly.
 - **Android (ADB)** — Eden is running on an Android device. The app communicates over ADB from a desktop/laptop.
-- **Android (on-device)** — the app is installed as an APK on the same Android device running Eden. No ADB or PC needed. This mode is selected automatically when running the APK. **Android 14+ requires Shizuku** — see [Shizuku setup](#3-android-14-on-device--shizuku-setup).
+- **Android (on-device)** — the app is installed as an APK on the same Android device running Eden. No ADB or PC needed. This mode is selected automatically when running the APK. Grant access to **Eden → load** through [Android's folder picker](#3-android-on-device--grant-eden-storage-access).
 
 **Step 2 (Android only) — ADB path:**
 Leave blank if `adb` is on your system PATH, or browse to the `adb` / `adb.exe` binary.
@@ -240,7 +218,7 @@ Eden loads cheats from this layout on disk:
                  └── <BuildID>.txt    ← 16-char hex, version-specific
 ```
 
-On Android, the load directory is:
+On Android, ECM accesses the load directory exclusively through Eden's Storage Access Framework provider. Its physical location remains:
 ```
 /Android/data/dev.eden.eden_emulator/files/load/
 ```
@@ -282,8 +260,11 @@ If the ROM isn't found automatically, a **[ SET ROM PATH ]** button appears in t
 
 ## 9. Troubleshooting
 
-**"Shizuku setup required" / "Shizuku not running" (Android 14+)**
-> Shizuku must be started after every reboot. Open the Shizuku app → **Start via Wireless ADB**. Then tap **[ GRANT ACCESS ]** in the Eden Cheats Manager sidebar. If you're on Android 16, use the GitHub APK instead of the Play Store version. Android 17+ is not yet supported — use ADB mode from a PC.
+**Eden is not visible in the Android folder picker**
+> Open the picker's navigation sidebar and choose **Eden** as a storage provider, similar to selecting an SD card or cloud drive. Eden is not shown as a normal folder under internal storage. Then open **load** and confirm the folder.
+
+**SAF access test fails**
+> Launch Eden once and confirm its `load` directory exists, then select **Eden → load** again in Settings. If Eden was reinstalled, Android may have revoked the previous persisted permission.
 
 **Build ID not detected**
 > Launch the game in Eden at least once to generate a log entry, then click **Detect Build IDs** or **Scan Build ID**. On PC, Scan watches the Eden log file in real time — click Scan, then launch the game.

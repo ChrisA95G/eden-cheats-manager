@@ -11,12 +11,13 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
-import android.provider.Settings
+import android.provider.DocumentsContract
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import java.lang.ref.WeakReference
-import rikka.shizuku.Shizuku
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : TauriActivity() {
     companion object {
@@ -26,123 +27,48 @@ class MainActivity : TauriActivity() {
         private const val ALERT_CHANNEL_ID       = "scan_alert_channel"
         private const val RETURN_NOTIFICATION_ID = 43
         private const val RETURN_REQUEST_CODE    = 1
-        private const val SHIZUKU_REQ_CODE       = 2001
+        private const val SAF_PREFS = "eden_saf"
+        private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
+        private const val EDEN_DOCUMENTS_AUTHORITY = "dev.eden.eden_emulator.user"
 
-        // ── API level ──────────────────────────────────────────────────────────
-
+        // SAF test
         @JvmStatic
-        fun getApiLevel(): Int = Build.VERSION.SDK_INT
+        fun selectEdenLoadDirectory() {
+            val activity = instance?.get() ?: return
 
-        // ── Shizuku status ─────────────────────────────────────────────────────
-
-        /** True if the Shizuku service is running (binder reachable). */
-        @JvmStatic
-        fun isShizukuAvailable(): Boolean = try {
-            Shizuku.pingBinder()
-        } catch (_: Exception) { false }
-
-        /** True if MANAGE_EXTERNAL_STORAGE-equivalent permission is granted via Shizuku. */
-        @JvmStatic
-        fun isShizukuGranted(): Boolean = try {
-            !Shizuku.isPreV11() &&
-                Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
-        } catch (_: Exception) { false }
-
-        /** Show the Shizuku permission dialog. No-op if pre-v11 or unavailable. */
-        @JvmStatic
-        fun requestShizukuPermission() {
-            try {
-                if (!Shizuku.isPreV11()) Shizuku.requestPermission(SHIZUKU_REQ_CODE)
-            } catch (e: Exception) {
-                android.util.Log.e("CheatsManager", "requestShizukuPermission: $e")
+            activity.runOnUiThread {
+                activity.edenLoadPicker.launch(null)
             }
         }
 
-        // ── Shizuku file bridge ────────────────────────────────────────────────
-        // Each method spawns a shell command via Shizuku (uid=2000 / ADB-level).
-        // Returns null / false on any failure so Rust can propagate a clean error.
 
-        /** Read a file's full text content via `cat`. Returns null on error. */
         @JvmStatic
-        fun shizukuReadFile(path: String): String? = try {
-            val p = Shizuku.newProcess(arrayOf("cat", path), null, null)
-            val out = p.inputStream.bufferedReader().readText()
-            val exit = p.waitFor()
-            if (exit == 0) out else null
-        } catch (e: Exception) {
-            android.util.Log.e("CheatsManager", "shizukuReadFile($path): $e")
-            null
+        fun safListDirectory(relativePath: String): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.safListDirectoryInternal(relativePath)
         }
 
-        /** List directory entries, one name per line. Returns "" on error/empty. */
         @JvmStatic
-        fun shizukuListDir(path: String): String = try {
-            val p = Shizuku.newProcess(arrayOf("ls", "-1", path), null, null)
-            val out = p.inputStream.bufferedReader().readText()
-            p.waitFor()
-            out
-        } catch (e: Exception) {
-            android.util.Log.e("CheatsManager", "shizukuListDir($path): $e")
-            ""
+        fun safWriteTextFile(relativePath: String, content: String): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.safWriteTextFileInternal(relativePath, content)
         }
 
-        /**
-         * Find all .txt files under `dir` recursively.
-         * Returns newline-separated absolute paths, "" on error.
-         */
         @JvmStatic
-        fun shizukuFindTxtFiles(dir: String): String = try {
-            val p = Shizuku.newProcess(
-                arrayOf("find", dir, "-name", "*.txt", "-type", "f"), null, null
-            )
-            val out = p.inputStream.bufferedReader().readText()
-            p.waitFor()
-            out
-        } catch (e: Exception) {
-            android.util.Log.e("CheatsManager", "shizukuFindTxtFiles($dir): $e")
-            ""
+        fun safDeleteFile(relativePath: String): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.safDeleteFileInternal(relativePath)
         }
 
-        /**
-         * Write `content` to `path` via `tee`. Parent directory must already exist.
-         * Returns true on success.
-         */
         @JvmStatic
-        fun shizukuWriteFile(path: String, content: String): Boolean = try {
-            val p = Shizuku.newProcess(arrayOf("tee", path), null, null)
-            p.outputStream.use { it.write(content.toByteArray(Charsets.UTF_8)) }
-            p.waitFor() == 0
-        } catch (e: Exception) {
-            android.util.Log.e("CheatsManager", "shizukuWriteFile($path): $e")
-            false
+        fun safRemoveEmptyDirectory(relativePath: String): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.safRemoveEmptyDirectoryInternal(relativePath)
         }
-
-        /** Delete a file with `rm -f` (ignores not-found). Returns true on success. */
-        @JvmStatic
-        fun shizukuDeleteFile(path: String): Boolean = try {
-            Shizuku.newProcess(arrayOf("rm", "-f", path), null, null).waitFor() == 0
-        } catch (_: Exception) { false }
-
-        /**
-         * Remove an *empty* directory with `rmdir`.
-         * Succeeds silently if non-empty or not found — used for best-effort cleanup.
-         */
-        @JvmStatic
-        fun shizukuRmdir(path: String): Boolean = try {
-            Shizuku.newProcess(arrayOf("rmdir", path), null, null).waitFor() == 0
-        } catch (_: Exception) { false }
-
-        /** Create directory tree with `mkdir -p`. Returns true on success. */
-        @JvmStatic
-        fun shizukuMkdirs(path: String): Boolean = try {
-            Shizuku.newProcess(arrayOf("mkdir", "-p", path), null, null).waitFor() == 0
-        } catch (_: Exception) { false }
-
-        /** Return true if `path` exists (file or directory). */
-        @JvmStatic
-        fun shizukuPathExists(path: String): Boolean = try {
-            Shizuku.newProcess(arrayOf("test", "-e", path), null, null).waitFor() == 0
-        } catch (_: Exception) { false }
 
         /**
          * Called from Rust via JNI to launch Eden's EmulationActivity with a ROM URI.
@@ -270,48 +196,7 @@ class MainActivity : TauriActivity() {
             android.util.Log.i("CheatsManager", "stopScanService: OK")
         }
 
-        /**
-         * Returns true if MANAGE_EXTERNAL_STORAGE is granted (Android 11+),
-         * or unconditionally true on older APIs where scoped storage doesn't apply.
-         * Called from Rust via JNI to check permission without path probing.
-         */
-        @JvmStatic
-        fun hasAllFilesAccess(): Boolean {
-            return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                Environment.isExternalStorageManager()
-            } else {
-                true
-            }
-        }
 
-        /**
-         * Open the system "All files access" page for this app.
-         * MANAGE_EXTERNAL_STORAGE is a special permission — it lives under
-         * "Special app access", not the normal "Permissions" screen.
-         * Falls back to the global special-access list if the per-app page fails.
-         */
-        @JvmStatic
-        fun openStorageSettings() {
-            val activity = instance?.get() ?: run {
-                android.util.Log.e("CheatsManager", "openStorageSettings: no activity reference")
-                return
-            }
-            try {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:${activity.packageName}")
-                )
-                activity.startActivity(intent)
-                android.util.Log.i("CheatsManager", "openStorageSettings: per-app page opened")
-            } catch (e: Exception) {
-                android.util.Log.w("CheatsManager", "openStorageSettings: per-app failed, trying global: $e")
-                try {
-                    activity.startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                } catch (e2: Exception) {
-                    android.util.Log.e("CheatsManager", "openStorageSettings: both intents failed: $e2")
-                }
-            }
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -359,4 +244,219 @@ class MainActivity : TauriActivity() {
         super.onDestroy()
         instance = null
     }
+    private data class SafDocument(
+        val uri: Uri,
+        val name: String,
+        val directory: Boolean
+    )
+
+    private val edenLoadPicker =
+        registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            if (uri == null) {
+                android.util.Log.i("CheatsManager", "SAF selection cancelled")
+                return@registerForActivityResult
+            }
+
+            if (uri.authority != EDEN_DOCUMENTS_AUTHORITY) {
+                android.util.Log.e(
+                    "CheatsManager",
+                    "Selected directory is not provided by Eden"
+                )
+                return@registerForActivityResult
+            }
+
+            try {
+                val flags =
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+
+                contentResolver.takePersistableUriPermission(uri, flags)
+
+                getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(PREF_EDEN_LOAD_URI, uri.toString())
+                    .apply()
+
+                android.util.Log.i(
+                    "CheatsManager",
+                    "Eden SAF directory permission saved"
+                )
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "CheatsManager",
+                    "Could not persist Eden SAF permission",
+                    e
+                )
+            }
+        }
+
+    private fun edenLoadRootUri(): Uri {
+        val savedUri = getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
+            .getString(PREF_EDEN_LOAD_URI, null)
+            ?: throw IllegalStateException("Select Eden's load directory first")
+        val treeUri = Uri.parse(savedUri)
+        return DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        )
+    }
+
+    private fun safPathSegments(relativePath: String): List<String> {
+        if (relativePath.isBlank()) return emptyList()
+        val segments = relativePath.split('/')
+        if (segments.any { it.isBlank() || it == "." || it == ".." }) {
+            throw IllegalArgumentException("Invalid relative path: $relativePath")
+        }
+        return segments
+    }
+
+    private fun queryChildren(parentUri: Uri): List<SafDocument> {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            parentUri,
+            DocumentsContract.getDocumentId(parentUri)
+        )
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
+        )
+        val cursor = contentResolver.query(childrenUri, projection, null, null, null)
+            ?: throw IllegalStateException("Could not query Eden directory")
+        val children = mutableListOf<SafDocument>()
+        cursor.use {
+            val idColumn = it.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID
+            )
+            val nameColumn = it.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME
+            )
+            val mimeColumn = it.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+            while (it.moveToNext()) {
+                val documentId = it.getString(idColumn)
+                children.add(
+                    SafDocument(
+                        uri = DocumentsContract.buildDocumentUriUsingTree(
+                            parentUri,
+                            documentId
+                        ),
+                        name = it.getString(nameColumn),
+                        directory = it.getString(mimeColumn) ==
+                            DocumentsContract.Document.MIME_TYPE_DIR
+                    )
+                )
+            }
+        }
+        return children
+    }
+
+    private fun findChild(parentUri: Uri, name: String): SafDocument? =
+        queryChildren(parentUri).firstOrNull { it.name == name }
+
+    private fun resolveDirectory(relativePath: String, create: Boolean): Uri? {
+        var current = edenLoadRootUri()
+        for (segment in safPathSegments(relativePath)) {
+            val existing = findChild(current, segment)
+            current = when {
+                existing == null && create -> DocumentsContract.createDocument(
+                    contentResolver,
+                    current,
+                    DocumentsContract.Document.MIME_TYPE_DIR,
+                    segment
+                ) ?: throw IllegalStateException("Could not create directory: $segment")
+                existing == null -> return null
+                !existing.directory -> throw IllegalStateException("Not a directory: $segment")
+                else -> existing.uri
+            }
+        }
+        return current
+    }
+
+    private fun resolveDocument(relativePath: String): SafDocument? {
+        val segments = safPathSegments(relativePath)
+        if (segments.isEmpty()) {
+            throw IllegalArgumentException("A file path is required")
+        }
+        val parent = resolveDirectory(segments.dropLast(1).joinToString("/"), false)
+            ?: return null
+        return findChild(parent, segments.last())
+    }
+
+    private fun safError(error: Exception): String =
+        "ERROR: ${error.message ?: error.javaClass.simpleName}"
+
+    private fun safStatus(action: () -> Unit): String = try {
+        action()
+        "OK"
+    } catch (error: Exception) {
+        safError(error)
+    }
+
+    private fun safListDirectoryInternal(relativePath: String): String {
+        return try {
+            val directory = resolveDirectory(relativePath, false) ?: return "[]"
+            val result = JSONArray()
+            for (child in queryChildren(directory)) {
+                result.put(
+                    JSONObject()
+                        .put("name", child.name)
+                        .put("directory", child.directory)
+                )
+            }
+            result.toString()
+        } catch (error: Exception) {
+            safError(error)
+        }
+    }
+
+    private fun safWriteTextFileInternal(relativePath: String, content: String): String =
+        safStatus {
+            val segments = safPathSegments(relativePath)
+            if (segments.isEmpty()) {
+                throw IllegalArgumentException("A file path is required")
+            }
+            val parent = resolveDirectory(
+                segments.dropLast(1).joinToString("/"),
+                true
+            ) ?: throw IllegalStateException("Could not resolve parent directory")
+            val filename = segments.last()
+            val existing = findChild(parent, filename)
+            if (existing?.directory == true) {
+                throw IllegalStateException("Path is a directory: $relativePath")
+            }
+            val fileUri = existing?.uri ?: DocumentsContract.createDocument(
+                contentResolver,
+                parent,
+                "text/plain",
+                filename
+            ) ?: throw IllegalStateException("Could not create file: $filename")
+            val output = contentResolver.openOutputStream(fileUri, "wt")
+                ?: throw IllegalStateException("Could not open file: $filename")
+            output.use {
+                it.write(content.toByteArray(Charsets.UTF_8))
+            }
+        }
+
+    private fun safDeleteFileInternal(relativePath: String): String = safStatus {
+        val document = resolveDocument(relativePath) ?: return@safStatus
+        if (document.directory) {
+            throw IllegalStateException("Path is a directory: $relativePath")
+        }
+        if (!DocumentsContract.deleteDocument(contentResolver, document.uri)) {
+            throw IllegalStateException("Could not delete file: $relativePath")
+        }
+    }
+
+    private fun safRemoveEmptyDirectoryInternal(relativePath: String): String = safStatus {
+        val document = resolveDocument(relativePath) ?: return@safStatus
+        if (!document.directory) {
+            throw IllegalStateException("Path is not a directory: $relativePath")
+        }
+        if (queryChildren(document.uri).isEmpty() &&
+            !DocumentsContract.deleteDocument(contentResolver, document.uri)) {
+            throw IllegalStateException("Could not delete directory: $relativePath")
+        }
+    }
+
 }
