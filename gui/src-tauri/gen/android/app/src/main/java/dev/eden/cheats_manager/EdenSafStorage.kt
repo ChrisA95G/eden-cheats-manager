@@ -58,11 +58,34 @@ internal class EdenSafStorage(private val activity: MainActivity) {
                 val flags =
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or
                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                val previousUri = preferences()
+                    .getString(PREF_EDEN_LOAD_URI, null)
+                    ?.let(Uri::parse)
+
                 contentResolver.takePersistableUriPermission(uri, flags)
-                preferences()
+                val saved = preferences()
                     .edit()
                     .putString(PREF_EDEN_LOAD_URI, uri.toString())
-                    .apply()
+                    .commit()
+                if (!saved) {
+                    if (previousUri != uri) {
+                        contentResolver.releasePersistableUriPermission(uri, flags)
+                    }
+                    throw IllegalStateException("Could not save Eden SAF directory")
+                }
+
+                if (previousUri != null && previousUri != uri) {
+                    try {
+                        contentResolver.releasePersistableUriPermission(previousUri, flags)
+                    } catch (error: SecurityException) {
+                        android.util.Log.w(
+                            "CheatsManager",
+                            "Could not release the previous Eden SAF permission",
+                            error
+                        )
+                    }
+                }
+
                 android.util.Log.i(
                     "CheatsManager",
                     "Eden SAF directory permission saved"
