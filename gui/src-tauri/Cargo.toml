@@ -28,6 +28,9 @@ simplelog = "0.12"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 sha2 = "0.10"
 hex = "0.4"
+nx-archive = "=0.1.2"
+# nx-archive uses a broad binrw range; keep the parser on its published/tested version.
+binrw = "=0.14.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21", default-features = false }

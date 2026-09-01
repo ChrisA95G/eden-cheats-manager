@@ -4,6 +4,7 @@
   import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import { onMount, untrack } from 'svelte';
   import { saveSettings } from '../stores/settings.js';
+  import PackageDiscovery from './PackageDiscovery.svelte';
 
   /** @type {{ settings: any, platform?: string, onclose: function, onrerunSetup: function }} */
   let { settings, platform = 'desktop', onclose, onrerunSetup } = $props();
@@ -217,6 +218,11 @@
               {safTestResult === 'OK' ? 'SAF access works.' : safTestResult}
             </div>
           {/if}
+        </fieldset>
+
+        <fieldset>
+          <legend>Package Build ID</legend>
+          <PackageDiscovery />
         </fieldset>
 
       {/if}

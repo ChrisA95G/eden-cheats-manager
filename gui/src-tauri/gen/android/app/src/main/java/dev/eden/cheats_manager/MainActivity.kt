@@ -6,9 +6,11 @@ import java.lang.ref.WeakReference
 
 class MainActivity : TauriActivity() {
     private val edenSafStorage = EdenSafStorage(this)
+    private val packageDocumentStorage = PackageDocumentStorage(this)
 
     companion object {
-        @Volatile private var instance: WeakReference<MainActivity>? = null
+        @Volatile
+        private var instance: WeakReference<MainActivity>? = null
 
         @JvmStatic
         fun selectEdenLoadDirectory() {
@@ -48,6 +50,37 @@ class MainActivity : TauriActivity() {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
             return activity.edenSafStorage.removeEmptyDirectory(relativePath)
+        }
+
+        @JvmStatic
+        fun selectProdKeysDocument() {
+            instance?.get()?.packageDocumentStorage?.selectProdKeys()
+        }
+
+        @JvmStatic
+        fun selectGamePackageDocument() {
+            instance?.get()?.packageDocumentStorage?.selectGamePackage()
+        }
+
+        @JvmStatic
+        fun getPackageDiscoveryStatus(): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.packageDocumentStorage.getStatus()
+        }
+
+        @JvmStatic
+        fun openProdKeysReadFd(): Int {
+            val activity = instance?.get()
+                ?: return PackageDocumentStorage.FD_ERROR_UNAVAILABLE
+            return activity.packageDocumentStorage.openProdKeysReadFd()
+        }
+
+        @JvmStatic
+        fun openGamePackageReadFd(): Int {
+            val activity = instance?.get()
+                ?: return PackageDocumentStorage.FD_ERROR_UNAVAILABLE
+            return activity.packageDocumentStorage.openGamePackageReadFd()
         }
     }
 

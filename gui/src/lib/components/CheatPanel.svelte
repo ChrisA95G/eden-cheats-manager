@@ -2,6 +2,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { open as openDialog } from '@tauri-apps/plugin-dialog';
   import { selectedGame } from '../stores/games.js';
+  import PackageDiscovery from './PackageDiscovery.svelte';
 
   let { settings, platform = 'desktop', isMobile = false } = $props();
 
@@ -13,7 +14,7 @@
   // Which build-id accordion row is open (by cheat.id)
   let expandedId = $state(/** @type {string | null} */ (null));
 
-  // Detected build IDs on the device / PC for the selected game
+  // Build IDs detected from the target or a user-selected package.
   let detectedBuildIds = $state(/** @type {string[]} */ ([]));
   let detectingBuildIds = $state(false);
 
@@ -150,6 +151,12 @@
     } finally {
       detectingBuildIds = false;
     }
+  }
+
+  /** @param {{ buildId: string }} metadata */
+  function acceptPackageMetadata(metadata) {
+    detectedBuildIds = [metadata.buildId.toUpperCase()];
+    scanBuildIdError = '';
   }
 
   async function scanBuildId() {
@@ -495,9 +502,11 @@
     </div>
 
     {#if settings.targetMode === 'androidNative'}
-      <div class="native-build-notice">
-        <strong>BUILD ID DETECTION UNAVAILABLE</strong>
-        <span>Package-based detection is coming next. Until then, choose the matching Build ID row manually and verify it against your game version.</span>
+      <div class="native-package-discovery">
+        <PackageDiscovery
+          expectedBaseTitleId={$selectedGame.baseTitleId ?? $selectedGame.titleId}
+          onmetadata={acceptPackageMetadata}
+        />
       </div>
     {:else}
       <div class="scan-build-bar">
@@ -1148,18 +1157,12 @@
   }
 
   /* ── Scan Build ID ── */
-  .native-build-notice {
-    display: grid;
-    gap: .25rem;
+  .native-package-discovery {
     margin: .6rem 1.25rem .35rem;
-    padding: .65rem .75rem;
-    border-left: 2px solid var(--accent);
+    padding: .75rem;
+    border: 1px solid var(--border);
     background: var(--surface);
-    color: var(--text-muted);
-    font-size: .72rem;
-    line-height: 1.5;
   }
-  .native-build-notice strong { color: var(--accent); letter-spacing: .08em; }
   .scan-build-bar {
     display: flex;
     align-items: center;

@@ -32,6 +32,11 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
             "safRemoveEmptyDirectory",
             "(Ljava/lang/String;)Ljava/lang/String;",
         ),
+        ("selectProdKeysDocument", "()V"),
+        ("selectGamePackageDocument", "()V"),
+        ("getPackageDiscoveryStatus", "()Ljava/lang/String;"),
+        ("openProdKeysReadFd", "()I"),
+        ("openGamePackageReadFd", "()I"),
     ];
     let mut missing: Vec<&str> = Vec::new();
     for (name, sig) in METHODS {
@@ -115,6 +120,25 @@ where
 pub(super) struct SafEntry {
     pub(super) name: String,
     pub(super) directory: bool,
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn jni_noarg_void_call(method: &str) -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, method, "()V", &[])
+            .map_err(|e| format!("JNI {method}: {e}"))?;
+        Ok(())
+    })
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn jni_noarg_int_call(method: &str) -> Result<i32, String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, method, "()I", &[])
+            .map_err(|e| format!("JNI {method}: {e}"))?
+            .i()
+            .map_err(|e| format!("JNI integer: {e}"))
+    })
 }
 
 #[cfg(target_os = "android")]
@@ -238,9 +262,5 @@ pub(super) fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), 
 
 #[cfg(target_os = "android")]
 pub(super) fn select_eden_load_directory_from_activity() -> Result<(), String> {
-    with_main_class(|env, jcls| {
-        env.call_static_method(jcls, "selectEdenLoadDirectory", "()V", &[])
-            .map_err(|e| format!("JNI selectEdenLoadDirectory: {e}"))?;
-        Ok(())
-    })
+    jni_noarg_void_call("selectEdenLoadDirectory")
 }
