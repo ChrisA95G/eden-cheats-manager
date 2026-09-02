@@ -2,7 +2,11 @@ mod archive;
 mod keys;
 mod program;
 
+pub(crate) const NO_BUILD_ID_CONTENT_ERROR: &str =
+    "This package contains no base application or update metadata. DLC alone cannot determine a Build ID.";
+
 use archive::{parse_package_archive, ReadAtFile};
+use nx_archive::formats::Keyset;
 use serde::Serialize;
 use std::fs::File;
 
@@ -21,25 +25,48 @@ pub struct PackageMetadata {
     pub matched_program_content_id: bool,
 }
 
+pub(crate) fn is_package_without_build_id(message: &str) -> bool {
+    message == NO_BUILD_ID_CONTENT_ERROR
+}
+
+pub(crate) struct PackageKeys {
+    keyset: Keyset,
+}
+
 pub fn discover_package_metadata(
     prod_keys_file: File,
     package_file: File,
 ) -> Result<PackageMetadata, String> {
+    let keys = load_package_keys(prod_keys_file)?;
+    discover_package_metadata_with_keys(&keys, package_file)
+}
+
+pub(crate) fn load_package_keys(prod_keys_file: File) -> Result<PackageKeys, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        discover_package_metadata_inner(prod_keys_file, package_file)
+        let started = std::time::Instant::now();
+        let source = ReadAtFile::new(prod_keys_file)?;
+        let keyset = keys::parse_prod_keys(&source)?;
+        log::debug!("[package] keys parsed in {:?}", started.elapsed());
+        Ok(PackageKeys { keyset })
+    }))
+    .map_err(|_| "The key parser rejected malformed prod.keys data.".to_string())?
+}
+
+pub(crate) fn discover_package_metadata_with_keys(
+    keys: &PackageKeys,
+    package_file: File,
+) -> Result<PackageMetadata, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        discover_package_metadata_inner(&keys.keyset, package_file)
     }))
     .map_err(|_| "The package parser rejected malformed archive data.".to_string())?
 }
 
 fn discover_package_metadata_inner(
-    prod_keys_file: File,
+    keyset: &Keyset,
     package_file: File,
 ) -> Result<PackageMetadata, String> {
     let started = std::time::Instant::now();
-    let keys_source = ReadAtFile::new(prod_keys_file)?;
-    let keyset = keys::parse_prod_keys(&keys_source)?;
-    log::debug!("[package] keys parsed in {:?}", started.elapsed());
-
     let stage = std::time::Instant::now();
     let package_source = ReadAtFile::new(package_file)?;
     let archive = parse_package_archive(&package_source)?;
@@ -57,7 +84,7 @@ fn discover_package_metadata_inner(
     let program = program::discover_program_metadata(
         &package_source,
         &archive.entries,
-        &keyset,
+        keyset,
         title_keys.as_ref(),
     )?;
     log::debug!(

@@ -82,10 +82,15 @@ pub async fn discover_package_metadata() -> Result<PackageMetadata, String> {
 }
 
 #[cfg(target_os = "android")]
-fn file_from_jni_fd(method: &str, label: &str) -> Result<std::fs::File, String> {
+pub(super) fn file_from_jni_fd(method: &str, label: &str) -> Result<std::fs::File, String> {
+    let fd = jni_noarg_int_call(method)?;
+    file_from_jni_result(fd, label)
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn file_from_jni_result(fd: i32, label: &str) -> Result<std::fs::File, String> {
     use std::os::fd::{FromRawFd, OwnedFd};
 
-    let fd = jni_noarg_int_call(method)?;
     if fd < 0 {
         let reason = match fd {
             -1 => "has not been selected",

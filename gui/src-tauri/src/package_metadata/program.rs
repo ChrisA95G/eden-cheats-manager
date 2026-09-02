@@ -155,7 +155,7 @@ fn select_program_content(cnmts: &[Cnmt]) -> Result<SelectedContent<'_>, String>
     }
 
     if application_ids.is_empty() {
-        return Err("This package contains no base application or update metadata. DLC alone cannot determine a Build ID.".into());
+        return Err(super::NO_BUILD_ID_CONTENT_ERROR.into());
     }
     if application_ids.len() != 1 {
         return Err(
