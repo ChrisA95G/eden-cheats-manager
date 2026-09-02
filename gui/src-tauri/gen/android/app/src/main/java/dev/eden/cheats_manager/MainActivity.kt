@@ -6,6 +6,7 @@ import java.lang.ref.WeakReference
 
 class MainActivity : TauriActivity() {
     private val edenSafStorage = EdenSafStorage(this)
+    private val edenRootDiscovery = EdenRootDiscovery(this)
     private val packageDocumentStorage = PackageDocumentStorage(this)
 
     companion object {
@@ -22,6 +23,18 @@ class MainActivity : TauriActivity() {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
             return activity.edenSafStorage.getAccessStatus()
+        }
+
+        @JvmStatic
+        fun selectEdenRootDirectory() {
+            instance?.get()?.edenRootDiscovery?.selectRootDirectory()
+        }
+
+        @JvmStatic
+        fun inspectEdenInstallation(): String {
+            val activity = instance?.get()
+                ?: return "ERROR: Main activity unavailable"
+            return activity.edenRootDiscovery.inspectInstallation()
         }
 
         @JvmStatic
