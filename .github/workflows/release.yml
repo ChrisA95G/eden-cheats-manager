@@ -123,7 +123,7 @@ jobs:
             echo "apkanalyzer not found, skipping method check"
             exit 0
           fi
-          METHODS="selectEdenLoadDirectory getEdenLoadAccessStatus safListDirectory safWriteTextFile safDeleteFile safRemoveEmptyDirectory selectProdKeysDocument selectGamePackageDocument getPackageDiscoveryStatus openProdKeysReadFd openGamePackageReadFd"
+          METHODS="selectEdenLoadDirectory getEdenLoadAccessStatus safListDirectory safWriteTextFile safDeleteFile safRemoveEmptyDirectory selectProdKeysDocument selectGamePackageDocument getPackageDiscoveryStatus openProdKeysReadFd openGamePackageReadFd selectEdenRootDirectory inspectEdenInstallation selectGameLibraryDirectory getGameLibraryStatus listGameLibraryPackages openGameLibraryPackageReadFd"
           FAIL=0
           DEX_DUMP=$($APKANALYZER dex packages --defined-only "$APK" 2>/dev/null)
           for M in $METHODS; do

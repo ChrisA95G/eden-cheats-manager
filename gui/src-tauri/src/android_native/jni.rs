@@ -39,6 +39,10 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
         ("getPackageDiscoveryStatus", "()Ljava/lang/String;"),
         ("openProdKeysReadFd", "()I"),
         ("openGamePackageReadFd", "()I"),
+        ("selectGameLibraryDirectory", "()V"),
+        ("getGameLibraryStatus", "()Ljava/lang/String;"),
+        ("listGameLibraryPackages", "()Ljava/lang/String;"),
+        ("openGameLibraryPackageReadFd", "(Ljava/lang/String;)I"),
     ];
     let mut missing: Vec<&str> = Vec::new();
     for (name, sig) in METHODS {
@@ -140,6 +144,25 @@ pub(super) fn jni_noarg_int_call(method: &str) -> Result<i32, String> {
             .map_err(|e| format!("JNI {method}: {e}"))?
             .i()
             .map_err(|e| format!("JNI integer: {e}"))
+    })
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn jni_string_int_call(method: &str, value: &str) -> Result<i32, String> {
+    use ::jni::objects::{JObject, JValue};
+    with_main_class(|env, jcls| {
+        let value = env
+            .new_string(value)
+            .map_err(|e| format!("JNI string: {e}"))?;
+        env.call_static_method(
+            jcls,
+            method,
+            "(Ljava/lang/String;)I",
+            &[JValue::Object(&JObject::from(value))],
+        )
+        .map_err(|e| format!("JNI {method}: {e}"))?
+        .i()
+        .map_err(|e| format!("JNI integer: {e}"))
     })
 }
 
