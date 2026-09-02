@@ -1,14 +1,16 @@
 mod adb;
 mod android_native;
 mod build_ids;
-mod cheatslips;
 mod cheats;
+mod cheatslips;
 mod db;
 mod games;
 mod rom_cache;
 mod settings;
 
-use simplelog::{CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode, ColorChoice, WriteLogger};
+use simplelog::{
+    ColorChoice, CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode, WriteLogger,
+};
 use std::fs::OpenOptions;
 use tauri::Manager;
 
@@ -22,7 +24,9 @@ pub fn run() {
             // ── Logging setup ───────────────────────────────────────────
             // Log to terminal and to a size-capped rotating log file.
             // If the log exceeds 5 MB, rotate it to .old before opening.
-            let log_dir = app.path().app_log_dir()
+            let log_dir = app
+                .path()
+                .app_log_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             std::fs::create_dir_all(&log_dir).ok();
             let log_file = log_dir.join("eden-cheats-manager.log");
@@ -39,10 +43,19 @@ pub fn run() {
                 .open(&log_file)
                 .expect("could not open log file");
             CombinedLogger::init(vec![
-                TermLogger::new(LevelFilter::Debug, Config::default(), TerminalMode::Mixed, ColorChoice::Auto),
+                TermLogger::new(
+                    LevelFilter::Debug,
+                    Config::default(),
+                    TerminalMode::Mixed,
+                    ColorChoice::Auto,
+                ),
                 WriteLogger::new(LevelFilter::Debug, Config::default(), file),
-            ]).ok();
-            log::info!("Eden Cheats Manager started — log file: {}", log_file.display());
+            ])
+            .ok();
+            log::info!(
+                "Eden Cheats Manager started — log file: {}",
+                log_file.display()
+            );
             // ── DB init ─────────────────────────────────────────────────
             db::init_db(&app.handle());
             Ok(())
@@ -97,6 +110,8 @@ pub fn run() {
             android_native::get_eden_load_access_status,
             android_native::select_eden_load_directory,
             android_native::test_eden_load_directory,
+            android_native::select_eden_root_directory,
+            android_native::inspect_eden_installation,
             android_native::scan_eden_games_android_native,
             android_native::install_cheat_android_native,
             android_native::list_installed_cheats_android_native,

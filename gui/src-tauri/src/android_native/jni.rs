@@ -22,6 +22,8 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
     const METHODS: &[(&str, &str)] = &[
         ("selectEdenLoadDirectory", "()V"),
         ("getEdenLoadAccessStatus", "()Ljava/lang/String;"),
+        ("selectEdenRootDirectory", "()V"),
+        ("inspectEdenInstallation", "()Ljava/lang/String;"),
         ("safListDirectory", "(Ljava/lang/String;)Ljava/lang/String;"),
         (
             "safWriteTextFile",
@@ -241,6 +243,15 @@ pub(super) fn select_eden_load_directory_from_activity() -> Result<(), String> {
     with_main_class(|env, jcls| {
         env.call_static_method(jcls, "selectEdenLoadDirectory", "()V", &[])
             .map_err(|e| format!("JNI selectEdenLoadDirectory: {e}"))?;
+        Ok(())
+    })
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn select_eden_root_directory_from_activity() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        env.call_static_method(jcls, "selectEdenRootDirectory", "()V", &[])
+            .map_err(|e| format!("JNI selectEdenRootDirectory: {e}"))?;
         Ok(())
     })
 }
