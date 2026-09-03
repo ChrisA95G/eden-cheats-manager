@@ -1,104 +1,11 @@
-use crate::adb::{adb_bin, adb_ls, adb_mkdir, adb_push_internal, REMOTE_BASE};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::process::Command;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InstalledCheat {
     pub cheat_name: String,
     pub build_id: String,
-}
-
-// ── Android ───────────────────────────────────────────────────────────────────
-
-#[tauri::command]
-pub fn install_cheat_android(
-    adb_path: String,
-    title_id: String,
-    cheat_name: String,
-    build_id: String,
-    content: String,
-) -> Result<(), String> {
-    log::info!("[cheats] install_android title={title_id} build={build_id} name={cheat_name}");
-    let adb = adb_bin(&adb_path);
-
-    let remote_dir = format!("{}/{}/{}/cheats", REMOTE_BASE, title_id, cheat_name);
-    adb_mkdir(&adb, &remote_dir)?;
-
-    // Write content to a temp file then push
-    let tmp = std::env::temp_dir().join(format!(
-        "{}_{}.txt",
-        build_id,
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
-    std::fs::write(&tmp, content.as_bytes()).map_err(|e| e.to_string())?;
-
-    let remote_file = format!("{}/{}.txt", remote_dir, build_id);
-    adb_push_internal(&adb, tmp.to_str().unwrap(), &remote_file)?;
-    let _ = std::fs::remove_file(&tmp);
-    log::info!("[cheats] install_android OK: {cheat_name}/{build_id}");
-    Ok(())
-}
-
-#[tauri::command]
-pub fn list_installed_cheats_android(
-    adb_path: String,
-    title_id: String,
-) -> Result<Vec<InstalledCheat>, String> {
-    log::debug!("[cheats] list_installed_android title={title_id}");
-    let title_dir = format!("{}/{}", REMOTE_BASE, title_id);
-    let cheat_names = adb_ls(adb_path.clone(), title_dir.clone())?;
-    let mut result = Vec::new();
-    for name in &cheat_names {
-        log::debug!("[cheats] scanning android cheat dir: {name}");
-        let cheats_dir = format!("{}/{}/cheats", title_dir, name);
-        match adb_ls(adb_path.clone(), cheats_dir) {
-            Ok(files) => {
-                for file in files {
-                    if file.ends_with(".txt") {
-                        let build_id = file.trim_end_matches(".txt").to_uppercase();
-                        log::debug!("[cheats] found android installed: {name}/{build_id}");
-                        result.push(InstalledCheat {
-                            cheat_name: name.clone(),
-                            build_id,
-                        });
-                    }
-                }
-            }
-            Err(e) => log::warn!("[cheats] could not ls cheats dir for {name}: {e}"),
-        }
-    }
-    log::info!("[cheats] list_installed_android -> {} entries", result.len());
-    Ok(result)
-}
-
-#[tauri::command]
-pub fn delete_cheat_android(
-    adb_path: String,
-    title_id: String,
-    cheat_name: String,
-    build_id: String,
-) -> Result<(), String> {
-    log::info!("[cheats] delete_android title={title_id} build={build_id} name={cheat_name}");
-    let adb = adb_bin(&adb_path);
-    let remote_file = format!(
-        "{}/{}/{}/cheats/{}.txt",
-        REMOTE_BASE, title_id, cheat_name, build_id
-    );
-    let out = Command::new(&adb)
-        .args(["shell", &format!("rm -f '{}'", remote_file)])
-        .output()
-        .map_err(|e| format!("ADB error: {}", e))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr).to_string();
-        log::error!("[cheats] delete_android failed: {err}");
-        return Err(err);
-    }
-    log::info!("[cheats] delete_android OK: {cheat_name}/{build_id}");
-    Ok(())
 }
 
 // ── PC ────────────────────────────────────────────────────────────────────────

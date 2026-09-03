@@ -1,4 +1,3 @@
-use crate::adb::{ANDROID_CONFIG_PATH, REMOTE_BASE};
 use crate::db;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -11,74 +10,6 @@ pub(crate) fn content_uri_to_physical(uri: &str) -> Option<String> {
     let decoded = tree_part.replace("%3A", ":").replace("%2F", "/");
     let (storage_id, rest) = decoded.split_once(':')?;
     Some(format!("/storage/{}/{}", storage_id, rest))
-}
-
-/// Extract the first 16-char hex title ID ending in "800" from an NSP/XCI filename,
-/// e.g. "Xenoblade … [0100FF500E34A800][v196608][UPDATE].nsp" → "0100FF500E34A800"
-pub(crate) fn extract_update_tid_from_filename(filename: &str) -> Option<String> {
-    let bytes = filename.as_bytes();
-    let mut i = 0;
-    while i + 17 < bytes.len() {
-        if bytes[i] == b'[' && bytes[i + 17] == b']' {
-            let candidate = &filename[i + 1..i + 17];
-            if candidate.chars().all(|c| c.is_ascii_hexdigit())
-                && candidate[13..].eq_ignore_ascii_case("800")
-            {
-                return Some(candidate.to_uppercase());
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Read Eden's config.ini via adb, find all configured game directories, check for
-/// a sibling "Updates" folder, and return every update title ID found in filenames.
-fn find_update_tids_android(adb_path: &str) -> Vec<String> {
-    let adb = if adb_path.is_empty() { "adb" } else { adb_path };
-    let output = std::process::Command::new(adb)
-        .args(["shell", "cat", ANDROID_CONFIG_PATH])
-        .output();
-    let Ok(output) = output else {
-        log::warn!("[games] could not spawn adb to read Eden config.ini");
-        return Vec::new();
-    };
-    if !output.status.success() {
-        log::warn!("[games] adb cat config.ini failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim());
-        return Vec::new();
-    }
-    let config_text = String::from_utf8_lossy(&output.stdout);
-
-    // Collect unique parent directories from gamedirs entries
-    let mut parents: HashSet<String> = HashSet::new();
-    for line in config_text.lines() {
-        if !line.contains("\\path=") { continue; }
-        let uri = line.splitn(2, '=').nth(1).map(|s| s.trim_matches('"')).unwrap_or("");
-        if let Some(physical) = content_uri_to_physical(uri) {
-            if let Some(parent) = std::path::Path::new(&physical).parent() {
-                parents.insert(parent.to_string_lossy().to_string());
-            }
-        }
-    }
-    log::debug!("[games] update scan parent dirs: {:?}", parents);
-
-    let mut tids = Vec::new();
-    for parent in &parents {
-        let updates_dir = format!("{}/Updates", parent);
-        let ls = std::process::Command::new(adb)
-            .args(["shell", "ls", &updates_dir])
-            .output();
-        let Ok(ls) = ls else { continue; };
-        if !ls.status.success() { continue; }
-        for filename in String::from_utf8_lossy(&ls.stdout).lines() {
-            if let Some(tid) = extract_update_tid_from_filename(filename) {
-                log::info!("[games] update found on device: {tid}  ({filename})");
-                tids.push(tid);
-            }
-        }
-    }
-    tids
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -361,59 +292,6 @@ pub(crate) fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<Stri
     }
 
     merged
-}
-
-/// Scan the Eden Android load dir for title IDs, cross-reference with the
-/// SQLite titles database, and return hierarchical game groups.
-#[tauri::command]
-pub async fn scan_eden_games_android(
-    app: AppHandle,
-    adb_path: String,
-) -> Result<Vec<GameGroup>, String> {
-    let title_ids_raw = crate::adb::adb_ls(adb_path.clone(), REMOTE_BASE.to_string())?;
-    let title_ids_raw_len = title_ids_raw.len();
-    let mut installed_ids: HashSet<String> = title_ids_raw
-        .into_iter()
-        .filter(|s| is_valid_tid(s))
-        .collect();
-
-    // Also scan the Updates folder(s) derived from Eden's config game dirs
-    let update_tids = find_update_tids_android(&adb_path);
-    log::info!("[games::android] {} update title IDs found via NSP scan", update_tids.len());
-    installed_ids.extend(update_tids);
-
-    log::info!("[games::android] raw ls returned {} ids, {} valid", title_ids_raw_len, installed_ids.len());
-    for tid in &installed_ids {
-        log::debug!("[games::android] on-device: {tid}");
-    }
-
-    let state = app.state::<db::DbState>();
-    log::debug!("[games::android] db path: {:?}", state.path);
-
-    // Collect unique base prefixes (first 12 chars — game family)
-    let mut seen_prefixes = HashSet::new();
-    for tid in &installed_ids {
-        if tid.len() >= 12 {
-            seen_prefixes.insert(tid[..12].to_string());
-        }
-    }
-    log::debug!("[games::android] unique 12-char prefixes: {:?}", seen_prefixes);
-
-    let mut all_rows = Vec::new();
-    for prefix in &seen_prefixes {
-        match db::query_base_prefix(&state, prefix) {
-            Ok(rows) => {
-                log::debug!("[games::android] prefix {} -> {} rows", prefix, rows.len());
-                all_rows.extend(rows);
-            }
-            Err(e) => log::warn!("[games::android] prefix {} query error: {}", prefix, e),
-        }
-    }
-
-    let groups = build_groups(all_rows, &installed_ids);
-    log::info!("[games::android] {} groups built", groups.len());
-    save_game_cache(&app, "android", &groups);
-    Ok(groups)
 }
 
 /// Scan the Eden PC load dir for title IDs, cross-reference with the

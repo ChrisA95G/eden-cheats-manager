@@ -91,7 +91,6 @@ pub fn run() {
             cheatslips::clear_api_cheats,
             cheatslips::fetch_cheats_online,
             // games
-            games::scan_eden_games_android,
             games::scan_eden_games_pc,
             games::get_cached_games_pc,
             games::get_cached_games_android,
@@ -101,9 +100,6 @@ pub fn run() {
             rom_cache::set_rom_path_manual,
             rom_cache::scan_and_update_rom_cache,
             // cheats
-            cheats::install_cheat_android,
-            cheats::list_installed_cheats_android,
-            cheats::delete_cheat_android,
             cheats::install_cheat_pc,
             cheats::list_installed_cheats_pc,
             cheats::delete_cheat_pc,
