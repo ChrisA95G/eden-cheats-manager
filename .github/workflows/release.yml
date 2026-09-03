@@ -93,7 +93,20 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.2.12479018"
+          echo "y" | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
+
+          PINNED_ANDROID_SDK="$RUNNER_TEMP/android-sdk-ndk27"
+          mkdir -p "$PINNED_ANDROID_SDK/ndk"
+          for SDK_DIR in build-tools cmdline-tools licenses platform-tools platforms; do
+            ln -s "$ANDROID_SDK_ROOT/$SDK_DIR" "$PINNED_ANDROID_SDK/$SDK_DIR"
+          done
+          ln -s "$ANDROID_SDK_ROOT/ndk/27.2.12479018" "$PINNED_ANDROID_SDK/ndk/27.2.12479018"
+
+          {
+            echo "ANDROID_HOME=$PINNED_ANDROID_SDK"
+            echo "ANDROID_SDK_ROOT=$PINNED_ANDROID_SDK"
+            echo "NDK_HOME=$PINNED_ANDROID_SDK/ndk/27.2.12479018"
+          } >> "$GITHUB_ENV"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -112,13 +125,11 @@ jobs:
       - name: Build Android APK (release)
         working-directory: gui
         run: npm run tauri android build -- --apk
-        env:
-          NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
 
       - name: Verify JNI methods not renamed by R8
         run: |
           APK=gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
-          APKANALYZER=$(find $ANDROID_SDK_ROOT/cmdline-tools -name apkanalyzer 2>/dev/null | sort -V | tail -1)
+          APKANALYZER=$(find -L "$ANDROID_SDK_ROOT/cmdline-tools" -name apkanalyzer 2>/dev/null | sort -V | tail -1)
           if [ -z "$APKANALYZER" ]; then
             echo "apkanalyzer not found, skipping method check"
             exit 0
@@ -137,7 +148,7 @@ jobs:
       - name: Sign APK
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > keystore.jks
-          APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools -name apksigner | sort -V | tail -1)
+          APKSIGNER=$(find -L "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)
           $APKSIGNER sign \
             --ks keystore.jks \
             --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
