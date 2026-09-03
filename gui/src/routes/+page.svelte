@@ -12,7 +12,6 @@
   let appSettings = $state(/** @type {any} */ (null));
   let loading = $state(true);
   let showSettings = $state(false);
-  let adbStatus = $state(/** @type {any} */ (null));
   /** @type {'android' | 'desktop'} */
   let platform = $state('desktop');
   let isMobile = $derived((/** @type {string} */ (platform)) === 'android');
@@ -37,28 +36,9 @@
         }
         appSettings = {
           ...(appSettings ?? {}),
-          targetMode: 'androidNative',
           onboardingDone: nativeSafStatus?.ready === true,
         };
         try { await saveSettings(appSettings); } catch (_) {}
-      } else if (appSettings?.targetMode === 'android') {
-        try {
-          const usbDevices = await invoke('get_usb_devices', { adbPath: appSettings.adbPath });
-          if (usbDevices.length > 0) {
-            appSettings = {
-              ...appSettings,
-              activeDevice: { type: 'usb', serial: usbDevices[0], label: null },
-            };
-            try {
-              await saveSettings(appSettings);
-            } catch (e) {
-              console.error('Failed to persist active device:', e);
-            }
-          }
-        } catch (_) {}
-        try {
-          adbStatus = await invoke('get_adb_status', { adbPath: appSettings.adbPath });
-        } catch (_) {}
       }
     } finally {
       loading = false;
@@ -72,7 +52,6 @@
     nativeSafStatus = status;
     appSettings = {
       ...(appSettings ?? {}),
-      targetMode: 'androidNative',
       onboardingDone: true,
     };
     try {
@@ -91,22 +70,12 @@
       saveError = String(e);
       console.error('[Page] saveSettings failed:', e);
     }
-    if (appSettings?.targetMode === 'android') {
-      try {
-        adbStatus = await invoke('get_adb_status', { adbPath: appSettings.adbPath });
-      } catch (_) {}
-    }
   }
 
   /** @param {any} local */
   async function handleSettingsClose(local) {
     if (local) {
       appSettings = local;
-      if (appSettings.targetMode === 'android') {
-        try {
-          adbStatus = await invoke('get_adb_status', { adbPath: appSettings.adbPath });
-        } catch (_) {}
-      }
     }
     showSettings = false;
   }
@@ -129,7 +98,7 @@
   {#if saveError}<div style="position:fixed;bottom:1rem;left:1rem;right:1rem;background:#c00;color:#fff;padding:.5rem .75rem;border-radius:4px;font-size:.8rem;z-index:999">{saveError}</div>{/if}
 {:else if isMobile}
   {#if !$selectedGame}
-    <Sidebar settings={appSettings} {adbStatus} {platform} {isMobile} onopenSettings={() => showSettings = true} />
+    <Sidebar settings={appSettings} {platform} {isMobile} onopenSettings={() => showSettings = true} />
   {:else}
     <CheatPanel settings={appSettings} {platform} {isMobile} />
   {/if}
@@ -144,7 +113,7 @@
   {/if}
 {:else}
   <div class="app-layout">
-    <Sidebar settings={appSettings} {adbStatus} {platform} onopenSettings={() => showSettings = true} />
+    <Sidebar settings={appSettings} {platform} onopenSettings={() => showSettings = true} />
     <CheatPanel settings={appSettings} {platform} />
   </div>
 

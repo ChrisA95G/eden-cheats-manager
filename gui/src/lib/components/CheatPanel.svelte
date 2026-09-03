@@ -123,7 +123,7 @@
 
   /** @param {any} game */
   async function detectBuildIds(game) {
-    if (settings.targetMode === 'androidNative') {
+    if (platform === 'android') {
       detectedBuildIds = [];
       detectingBuildIds = false;
       return;
@@ -131,18 +131,10 @@
 
     detectingBuildIds = true;
     try {
-      let result;
-      if (settings.targetMode === 'android') {
-        result = await invoke('detect_build_ids_android', {
-          adbPath: settings.adbPath,
-          titleId: game.titleId,
-        });
-      } else {
-        result = await invoke('detect_build_ids_pc', {
-          loadDir: settings.pcLoadDir,
-          titleId: game.titleId,
-        });
-      }
+      const result = /** @type {string[]} */ (await invoke('detect_build_ids_pc', {
+        loadDir: settings.pcLoadDir,
+        titleId: game.titleId,
+      }));
       detectedBuildIds = (result ?? []).map(/** @param {string} id */ id => id.toUpperCase());
     } catch (e) {
       // Detection is best-effort; errors are non-fatal
@@ -160,27 +152,17 @@
   }
 
   async function scanBuildId() {
-    if (!$selectedGame || settings.targetMode === 'androidNative') return;
+    if (!$selectedGame || platform === 'android') return;
     scanningBuildId = true;
     scanBuildIdError = '';
     try {
-      let bid;
-      if (settings.targetMode === 'android') {
-        bid = await invoke('scan_build_id_android', {
-          adbPath: settings.adbPath,
-          titleId: $selectedGame.titleId,
-          baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
-          gameName: $selectedGame.name ?? '',
-        });
-      } else {
-        bid = await invoke('scan_build_id_pc', {
-          loadDir: settings.pcLoadDir,
-          titleId: $selectedGame.titleId,
-          baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
-          gameName: $selectedGame.name ?? '',
-          edenExePath: settings.edenExePath ?? '',
-        });
-      }
+      const bid = /** @type {string} */ (await invoke('scan_build_id_pc', {
+        loadDir: settings.pcLoadDir,
+        titleId: $selectedGame.titleId,
+        baseTitleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
+        gameName: $selectedGame.name ?? '',
+        edenExePath: settings.edenExePath ?? '',
+      }));
       const upper = bid.toUpperCase();
       if (!detectedBuildIds.includes(upper)) {
         detectedBuildIds = [...detectedBuildIds, upper];
@@ -227,12 +209,10 @@
     installedLoadError = '';
     try {
       let result;
-      if (settings.targetMode === 'androidNative') {
+      if (platform === 'android') {
         result = await invoke('list_installed_cheats_android_native', {
           titleId: game.titleId,
         });
-      } else if (settings.targetMode === 'android') {
-        result = await invoke('list_installed_cheats_android', { adbPath: settings.adbPath, titleId: game.titleId });
       } else {
         result = await invoke('list_installed_cheats_pc', { loadDir: settings.pcLoadDir, titleId: game.titleId });
       }
@@ -296,16 +276,8 @@
     installMsg[key] = '';
     try {
       const cheatName = toCheatName(section.name) || `cheat_${buildId}`;
-      if (settings.targetMode === 'androidNative') {
+      if (platform === 'android') {
         await invoke('install_cheat_android_native', {
-          titleId: $selectedGame.titleId,
-          cheatName,
-          buildId,
-          content: section.content,
-        });
-      } else if (settings.targetMode === 'android') {
-        await invoke('install_cheat_android', {
-          adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
           cheatName,
           buildId,
@@ -417,15 +389,8 @@
     const key = `del_${ic.cheatName}__${ic.buildId}`;
     deleting[key] = true;
     try {
-      if (settings.targetMode === 'androidNative') {
+      if (platform === 'android') {
         await invoke('delete_cheat_android_native', {
-          titleId: $selectedGame.titleId,
-          cheatName: ic.cheatName,
-          buildId: ic.buildId,
-        });
-      } else if (settings.targetMode === 'android') {
-        await invoke('delete_cheat_android', {
-          adbPath: settings.adbPath,
           titleId: $selectedGame.titleId,
           cheatName: ic.cheatName,
           buildId: ic.buildId,
@@ -501,7 +466,7 @@
       </div>
     </div>
 
-    {#if settings.targetMode === 'androidNative'}
+    {#if platform === 'android'}
       <div class="native-package-discovery">
         <PackageDiscovery
           expectedBaseTitleId={$selectedGame.baseTitleId ?? $selectedGame.titleId}
@@ -517,25 +482,19 @@
         >
           {scanningBuildId ? '[ SCANNING... ]' : '[ SCAN BUILD ID ]'}
         </button>
-        {#if settings.targetMode === 'pc'}
-          <button
-            class="btn-set-rom"
-            disabled={settingRomPath}
-            onclick={setRomPath}
-            title="Manually set the ROM file path for this game"
-          >
-            {settingRomPath ? '...' : '[ SET ROM PATH ]'}
-          </button>
-        {/if}
+        <button
+          class="btn-set-rom"
+          disabled={settingRomPath}
+          onclick={setRomPath}
+          title="Manually set the ROM file path for this game"
+        >
+          {settingRomPath ? '...' : '[ SET ROM PATH ]'}
+        </button>
         {#if scanBuildIdError}
           <span class="scan-build-error">{scanBuildIdError}</span>
         {/if}
       </div>
-      {#if settings.targetMode === 'android'}
-        <p class="scan-build-hint">Device screen must be unlocked and on for scanning to work.</p>
-      {:else}
-        <p class="scan-build-hint">Eden launches automatically, reads the Build ID, then closes. Set the Eden executable path in Settings if not detected. Use [ SET ROM PATH ] if the game ROM is not auto-detected.</p>
-      {/if}
+      <p class="scan-build-hint">Eden launches automatically, reads the Build ID, then closes. Set the Eden executable path in Settings if not detected. Use [ SET ROM PATH ] if the game ROM is not auto-detected.</p>
     {/if}
 
     {#if cheatsError}
