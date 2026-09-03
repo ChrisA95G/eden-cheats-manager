@@ -1,43 +1,20 @@
 <script>
-  import { invoke } from '@tauri-apps/api/core';
   import { onMount } from 'svelte';
   import { games, gamesLoading, gamesError, scanGames, loadCachedGamesThenRescan, selectedGame } from '../stores/games.js';
 
-  /** @type {{ settings: any, adbStatus: any, platform: string, isMobile?: boolean, onopenSettings: function }} */
-  let { settings, adbStatus, platform, isMobile = false, onopenSettings } = $props();
+  /** @type {{ settings: any, platform: 'android' | 'desktop', isMobile?: boolean, onopenSettings: function }} */
+  let { settings, platform, isMobile = false, onopenSettings } = $props();
 
   let expandedGroups = $state(/** @type {Set<string>} */ (new Set()));
-  let usbDevices = $state(/** @type {string[]} */ ([]));
 
-  let modeBadge = $derived(
-    settings?.targetMode === 'pc' ? 'PC' :
-    settings?.targetMode === 'androidNative' ? 'ANDROID' :
-    'ADB'
-  );
-  let deviceStatusColor = $derived(
-    settings?.targetMode === 'pc' ? 'ok' :
-    settings?.targetMode === 'androidNative' ? 'ok' :
-    (adbStatus?.connected ? 'ok' : 'warn')
-  );
+  let modeBadge = $derived(platform === 'android' ? 'ANDROID' : 'PC');
   let deviceStatusLabel = $derived(
-    settings?.targetMode === 'pc' ? (settings?.pcLoadDir || 'No load dir set') :
-    settings?.targetMode === 'androidNative' ? 'On-device' :
-    (adbStatus?.connected ? adbStatus.deviceId : 'No device')
+    platform === 'android' ? 'On-device' : (settings?.pcLoadDir || 'No load dir set')
   );
-
-  let savedConnections = $derived(settings?.savedConnections ?? []);
-  let showConnPicker = $state(false);
-  let connecting = $state(false);
 
   onMount(async () => {
-    if (settings?.targetMode === 'android') {
-      try {
-        usbDevices = await invoke('get_usb_devices', { adbPath: settings.adbPath });
-      } catch (_) {}
-    }
-    // Show cached games instantly for all modes, rescan in background for changes.
-    // ADB rescan may fail silently if no device is connected.
-    loadCachedGamesThenRescan(settings);
+    // Show cached games instantly on both platforms, then rescan for changes.
+    loadCachedGamesThenRescan(settings, platform);
   });
 
   function selectGame(/** @type {import('../stores/games.js').TitleEntry} */ entry) {
@@ -54,25 +31,6 @@
     expandedGroups = next;
   }
 
-  async function switchConnection(/** @type {any} */ conn) {
-    showConnPicker = false;
-    connecting = true;
-    try {
-      if (conn.type === 'usb') {
-        settings.activeDevice = { type: 'usb', serial: conn.serial, label: null };
-      } else {
-        await invoke('adb_connect', {
-          adbPath: settings?.adbPath ?? '',
-          ipPort: `${conn.ip}:${conn.port}`,
-        });
-        settings.activeDevice = { type: 'wireless', serial: `${conn.ip}:${conn.port}`, label: conn.label };
-      }
-    } catch (_) {}
-    connecting = false;
-  }
-
-  let hasUsb = $derived(usbDevices.length > 0);
-  let activeDeviceId = $derived(settings?.activeDevice?.serial ?? '');
 </script>
 
 <aside class="sidebar" class:mobile={isMobile}>
@@ -81,52 +39,16 @@
     <span class="brand-sep">//</span>
     <span class="mode-badge">{modeBadge}</span>
     <div class="status-group">
-      <div class="status-dot {deviceStatusColor}"></div>
+      <div class="status-dot ok"></div>
       <span class="status-label">{deviceStatusLabel}</span>
     </div>
     <button class="btn-icon" title="Settings" onclick={() => onopenSettings?.()}>SYS</button>
   </div>
 
-  {#if settings?.targetMode === 'android' && (hasUsb || savedConnections.length > 0)}
-    <div class="conn-bar">
-      <button
-        class="conn-toggle"
-        onclick={() => showConnPicker = !showConnPicker}
-        disabled={connecting}
-      >
-        {connecting ? 'Connecting…' : 'Switch device'}
-        <span class="toggle-arrow">{showConnPicker ? '▴' : '▾'}</span>
-      </button>
-
-      {#if showConnPicker}
-        <div class="conn-picker">
-          {#if hasUsb}
-            <div class="conn-section-label">USB</div>
-            {#each usbDevices as serial}
-              <button class="conn-item" class:conn-active={activeDeviceId === serial} onclick={() => switchConnection({ type: 'usb', serial })}>
-                <span class="conn-name">{serial}</span>
-              </button>
-            {/each}
-          {/if}
-
-          {#if savedConnections.length > 0}
-            <div class="conn-section-label">Saved</div>
-            {#each savedConnections as conn}
-              <button class="conn-item" class:conn-active={activeDeviceId === `${conn.ip}:${conn.port}`} onclick={() => switchConnection(conn)}>
-                <span class="conn-name">{conn.label}</span>
-                <span class="conn-addr">{conn.ip}:{conn.port}</span>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      {/if}
-    </div>
-  {/if}
-
   <button
     class="scan-btn"
     disabled={$gamesLoading}
-    onclick={() => scanGames(settings)}
+    onclick={() => scanGames(settings, platform)}
   >
     {$gamesLoading ? '[ SCANNING... ]' : '[ SCAN LIBRARY ]'}
   </button>
@@ -307,8 +229,6 @@
     border: 1px solid var(--text-muted);
   }
   .status-dot.ok   { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 4px var(--accent-glow); }
-  .status-dot.warn { background: transparent; }
-  .status-dot.err  { background: transparent; }
   .status-label {
     flex: 1;
     font-size: .72rem;
@@ -330,51 +250,6 @@
     transition: color .12s, border-color .12s;
   }
   .btn-icon:hover { color: var(--accent); border-color: var(--accent); }
-
-  /* Connection bar */
-  .conn-bar { position: relative; padding: .35rem .6rem; border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  .conn-toggle {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    font-size: .72rem;
-    padding: .2rem .5rem;
-    cursor: pointer;
-    width: 100%;
-    text-align: left;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    letter-spacing: .04em;
-    transition: color .12s, border-color .12s;
-  }
-  .conn-toggle:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
-  .conn-toggle:disabled { opacity: .4; cursor: default; }
-  .toggle-arrow { font-size: .55rem; }
-  .conn-picker {
-    position: absolute; left: .6rem; right: .6rem; top: calc(100% - .35rem);
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    z-index: 50; overflow: hidden; max-height: 220px; overflow-y: auto;
-  }
-  .conn-section-label {
-    font-size: .62rem;
-    text-transform: uppercase;
-    letter-spacing: .08em;
-    color: var(--text-dim);
-    padding: .3rem .6rem .1rem;
-  }
-  .conn-item {
-    display: flex; flex-direction: column; gap: .1rem;
-    width: 100%; background: none; border: none; border-bottom: 1px solid var(--border);
-    padding: .4rem .6rem; cursor: pointer; text-align: left; color: var(--text);
-    transition: background .1s;
-  }
-  .conn-item:last-child { border-bottom: none; }
-  .conn-item:hover { background: rgba(245, 168, 0, 0.05); }
-  .conn-item.conn-active { border-left: 2px solid var(--accent); padding-left: calc(.6rem - 2px); }
-  .conn-name { font-size: .78rem; }
-  .conn-addr { font-size: .68rem; color: var(--text-muted); }
 
   /* Scan button */
   .scan-btn {
@@ -533,5 +408,4 @@
   }
   .sidebar.mobile .game-name { font-size: .9rem; }
   .sidebar.mobile .game-tid  { font-size: .72rem; }
-  .sidebar.mobile .conn-toggle { padding: .5rem .65rem; font-size: .82rem; }
 </style>

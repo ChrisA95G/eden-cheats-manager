@@ -34,54 +34,45 @@ export const gamesError = writable('');
 
 /**
  * Load games from the on-disk cache instantly, then kick off a fresh scan in
- * the background to pick up any changes. Works for all target modes.
- * @param {Object} settings
- * @param {string} settings.targetMode
- * @param {string} [settings.adbPath]
- * @param {string} [settings.pcLoadDir]
+ * the background to pick up any changes. The runtime platform selects the
+ * local desktop or native Android backend.
+ * @param {{ pcLoadDir?: string }} settings
+ * @param {'android' | 'desktop'} platform
  */
-export async function loadCachedGamesThenRescan(settings) {
-  const mode = settings?.targetMode;
-  if (!mode) return;
+export async function loadCachedGamesThenRescan(settings, platform) {
+  const cacheCmd = platform === 'android'
+    ? 'get_cached_games_android'
+    : 'get_cached_games_pc';
 
   try {
-    const cacheCmd = (mode === 'pc') ? 'get_cached_games_pc' : 'get_cached_games_android';
     const cached = /** @type {GameGroup[]} */ (await invoke(cacheCmd));
     if (cached.length > 0) {
       games.set(cached);
     }
   } catch (_) {}
 
-  // Rescan in background — may fail silently if no ADB device connected.
-  scanGames(settings).catch(() => {});
+  scanGames(settings, platform).catch(() => {});
 }
 
-export async function scanGames(settings) {
-  debugLog('scanGames called', { targetMode: settings?.targetMode });
+/**
+ * @param {{ pcLoadDir?: string }} settings
+ * @param {'android' | 'desktop'} platform
+ */
+export async function scanGames(settings, platform) {
+  debugLog('scanGames called', { platform });
   gamesLoading.set(true);
   gamesError.set('');
   try {
-    if (settings.targetMode === 'android') {
-      const status = await invoke('get_adb_status', { adbPath: settings.adbPath });
-      if (!status.connected) {
-        games.set([]);
-        selectedGame.set(null);
-        gamesError.set(`No device connected. ${status.details}`);
-        return;
-      }
-    }
     /** @type {GameGroup[]} */
     let list;
-    if (settings.targetMode === 'androidNative') {
+    if (platform === 'android') {
       debugLog('invoking scan_eden_games_android_native');
       list = await invoke('scan_eden_games_android_native');
       debugLog('scan result', { count: list.length });
-    } else if (settings.targetMode === 'android') {
-      list = await invoke('scan_eden_games_android', { adbPath: settings.adbPath });
     } else {
-      list = await invoke('scan_eden_games_pc', { loadDir: settings.pcLoadDir });
+      list = await invoke('scan_eden_games_pc', { loadDir: settings.pcLoadDir ?? '' });
       // Fire-and-forget ROM path cache update.
-      const titleNames = list.flatMap(g =>
+      const titleNames = list.flatMap((/** @type {GameGroup} */ g) =>
         g.baseGame ? [[g.baseGame.titleId, g.baseName]] : []
       );
       if (titleNames.length > 0) {
