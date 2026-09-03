@@ -70,17 +70,11 @@ pub fn run() {
             settings::get_eden_log_path_pc,
             settings::detect_eden_exe,
             settings::get_platform,
-            // adb
-            adb::get_adb_status,
-            adb::adb_tcpip,
-            adb::adb_pair,
-            adb::adb_connect,
+            // legacy PC Build ID extraction
             adb::extract_build_ids_pc,
-            adb::adb_ls,
             // per-title build ID detection
             build_ids::detect_build_ids_pc,
             build_ids::scan_build_id_pc,
-            adb::get_usb_devices,
             // local cheats lookup + custom cheats
             cheatslips::search_cheats,
             cheatslips::save_custom_cheat,
