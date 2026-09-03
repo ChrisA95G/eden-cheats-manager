@@ -1,11 +1,11 @@
 pub use crate::package_library::GameLibraryScanResult;
-#[cfg(any(target_os = "android", test))]
-pub use crate::package_library::{GameLibraryScanError, GameVersionGroup, GameVersionPackage};
+#[cfg(test)]
+use crate::package_library::{
+    group_versions, GameLibraryScanError, GameVersionGroup, GameVersionPackage,
+};
 #[cfg(target_os = "android")]
-use crate::package_metadata::PackageMetadata;
+use crate::package_library::{scan_package_library, PackageLibraryEntry};
 use serde::{Deserialize, Serialize};
-#[cfg(any(target_os = "android", test))]
-use std::collections::BTreeMap;
 
 #[cfg(target_os = "android")]
 use super::{
@@ -78,38 +78,19 @@ fn scan_game_package_library_inner() -> Result<GameLibraryScanResult, String> {
     let response = parse_saf_response(jni_noarg_string_call("listGameLibraryPackages")?)?;
     let documents: Vec<LibraryPackageDocument> = serde_json::from_str(&response)
         .map_err(|error| format!("Invalid game-library package list: {error}"))?;
-    let scanned_packages = documents.len();
+    let entries = documents
+        .into_iter()
+        .map(|document| PackageLibraryEntry {
+            source: document.relative_path.clone(),
+            filename: document.name,
+            relative_path: document.relative_path,
+            size: document.size,
+        })
+        .collect();
 
     let prod_keys = file_from_jni_fd("openProdKeysReadFd", "prod.keys")?;
-    let keys = crate::package_metadata::load_package_keys(prod_keys)?;
-    let mut matched = Vec::new();
-    let mut skipped_packages = 0;
-    let mut errors = Vec::new();
-
-    for document in documents {
-        let parsed = open_library_package(&document.relative_path).and_then(|package| {
-            crate::package_metadata::discover_package_metadata_with_keys(&keys, package)
-        });
-        match parsed {
-            Ok(metadata) => matched.push(version_package(document, metadata)),
-            Err(message) if crate::package_metadata::is_package_without_build_id(&message) => {
-                skipped_packages += 1;
-            }
-            Err(message) => errors.push(GameLibraryScanError {
-                filename: document.name,
-                relative_path: document.relative_path,
-                message,
-            }),
-        }
-    }
-
-    let matched_packages = matched.len();
-    Ok(GameLibraryScanResult {
-        scanned_packages,
-        matched_packages,
-        skipped_packages,
-        games: group_versions(matched),
-        errors,
+    scan_package_library(prod_keys, entries, |relative_path| {
+        open_library_package(relative_path)
     })
 }
 
@@ -117,63 +98,6 @@ fn scan_game_package_library_inner() -> Result<GameLibraryScanResult, String> {
 fn open_library_package(relative_path: &str) -> Result<std::fs::File, String> {
     let fd = jni_string_int_call("openGameLibraryPackageReadFd", relative_path)?;
     file_from_jni_result(fd, relative_path)
-}
-
-#[cfg(target_os = "android")]
-fn version_package(
-    document: LibraryPackageDocument,
-    metadata: PackageMetadata,
-) -> GameVersionPackage {
-    GameVersionPackage {
-        content_kind: metadata.content_kind,
-        title_id: metadata.title_id,
-        base_title_id: metadata.base_title_id,
-        version: metadata.version,
-        build_id: metadata.build_id,
-        module_id: metadata.module_id,
-        package_format: metadata.package_format,
-        filename: document.name,
-        relative_path: document.relative_path,
-        size: document.size,
-    }
-}
-
-#[cfg(any(target_os = "android", test))]
-fn group_versions(packages: Vec<GameVersionPackage>) -> Vec<GameVersionGroup> {
-    let mut groups: BTreeMap<String, Vec<GameVersionPackage>> = BTreeMap::new();
-    for package in packages {
-        groups
-            .entry(package.base_title_id.clone())
-            .or_default()
-            .push(package);
-    }
-
-    groups
-        .into_iter()
-        .map(|(base_title_id, mut versions)| {
-            versions.sort_by(|left, right| {
-                let left_kind = if left.content_kind == "application" {
-                    0
-                } else {
-                    1
-                };
-                let right_kind = if right.content_kind == "application" {
-                    0
-                } else {
-                    1
-                };
-                (left_kind, left.version, &left.filename).cmp(&(
-                    right_kind,
-                    right.version,
-                    &right.filename,
-                ))
-            });
-            GameVersionGroup {
-                base_title_id,
-                versions,
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -204,7 +128,7 @@ mod tests {
 
     #[test]
     fn groups_versions_deterministically_without_deduplicating_candidates() {
-        let groups = group_versions(vec![
+        let groups: Vec<GameVersionGroup> = group_versions(vec![
             package(
                 "0100000000002000",
                 "0100000000002800",
