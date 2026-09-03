@@ -1,4 +1,7 @@
-use crate::package_metadata::{self, PackageMetadata};
+use crate::{
+    games::EdenPresenceRecord,
+    package_metadata::{self, PackageMetadata},
+};
 use serde::Serialize;
 use std::{collections::BTreeMap, fs::File};
 
@@ -40,6 +43,33 @@ pub struct GameLibraryScanResult {
     pub skipped_packages: usize,
     pub games: Vec<GameVersionGroup>,
     pub errors: Vec<GameLibraryScanError>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdenPackageCorrelationEntry {
+    pub observed_title_id: String,
+    pub resolved_base_title_id: Option<String>,
+    pub package_candidates: Vec<GameVersionPackage>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdenPackageCorrelationIssue {
+    pub observed_title_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EdenPackageCorrelationResult {
+    pub scanned_packages: usize,
+    pub matched_packages: usize,
+    pub skipped_packages: usize,
+    pub eden_entries: Vec<EdenPackageCorrelationEntry>,
+    pub unmatched_package_groups: Vec<GameVersionGroup>,
+    pub package_scan_errors: Vec<GameLibraryScanError>,
+    pub correlation_issues: Vec<EdenPackageCorrelationIssue>,
 }
 
 pub(crate) struct PackageLibraryEntry<S> {
@@ -156,6 +186,84 @@ pub(crate) fn group_versions(packages: Vec<GameVersionPackage>) -> Vec<GameVersi
         .collect()
 }
 
+#[allow(dead_code)] // Consumed by the separately deferred frontend/backend orchestration.
+pub(crate) fn correlate_eden_package_inventory(
+    mut presence: Vec<EdenPresenceRecord>,
+    packages: GameLibraryScanResult,
+) -> EdenPackageCorrelationResult {
+    presence.sort_by(|left, right| left.observed_title_id.cmp(&right.observed_title_id));
+
+    let GameLibraryScanResult {
+        scanned_packages,
+        matched_packages,
+        skipped_packages,
+        games,
+        errors,
+    } = packages;
+    let mut package_groups: BTreeMap<String, Vec<GameVersionPackage>> = BTreeMap::new();
+    for group in games {
+        package_groups
+            .entry(group.base_title_id)
+            .or_default()
+            .extend(group.versions);
+    }
+
+    let mut matched_base_title_ids = std::collections::BTreeSet::new();
+    let mut eden_entries = Vec::with_capacity(presence.len());
+    let mut correlation_issues = Vec::new();
+    for record in presence {
+        let EdenPresenceRecord {
+            observed_title_id,
+            resolved_base_title_id,
+            resolution_issue,
+        } = record;
+        let package_candidates = resolved_base_title_id
+            .as_ref()
+            .and_then(|base_title_id| {
+                package_groups.get(base_title_id).map(|versions| {
+                    matched_base_title_ids.insert(base_title_id.clone());
+                    versions.clone()
+                })
+            })
+            .unwrap_or_default();
+
+        if resolved_base_title_id.is_none() {
+            correlation_issues.push(EdenPackageCorrelationIssue {
+                observed_title_id: observed_title_id.clone(),
+                message: resolution_issue.unwrap_or_else(|| {
+                    format!(
+                        "No authoritative base Title ID was found for observed Eden title {observed_title_id}."
+                    )
+                }),
+            });
+        }
+        eden_entries.push(EdenPackageCorrelationEntry {
+            observed_title_id,
+            resolved_base_title_id,
+            package_candidates,
+        });
+    }
+
+    let unmatched_package_groups = package_groups
+        .into_iter()
+        .filter(|(base_title_id, _)| !matched_base_title_ids.contains(base_title_id))
+        .map(|(base_title_id, versions)| GameVersionGroup {
+            base_title_id,
+            versions,
+        })
+        .collect();
+
+    EdenPackageCorrelationResult {
+        scanned_packages,
+        matched_packages,
+        skipped_packages,
+        eden_entries,
+        unmatched_package_groups,
+        package_scan_errors: errors,
+        correlation_issues,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +290,28 @@ mod tests {
             module_id: format!("MODULE{version}"),
             has_bktr: content_kind == "patch",
             matched_program_content_id: true,
+        }
+    }
+
+    fn package(
+        base_title_id: &str,
+        title_id: &str,
+        content_kind: &str,
+        version: u32,
+        filename: &str,
+        size: u64,
+    ) -> GameVersionPackage {
+        GameVersionPackage {
+            content_kind: content_kind.into(),
+            title_id: title_id.into(),
+            base_title_id: base_title_id.into(),
+            version,
+            build_id: format!("BUILD{version}"),
+            module_id: format!("MODULE{version}"),
+            package_format: "NSP".into(),
+            filename: filename.into(),
+            relative_path: format!("games/{filename}"),
+            size,
         }
     }
 
@@ -270,6 +400,195 @@ mod tests {
                     50,
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn correlation_preserves_both_inventories_and_matches_only_exact_base_ids() {
+        let presence = vec![
+            EdenPresenceRecord {
+                observed_title_id: "0100DDDD00000800".into(),
+                resolved_base_title_id: None,
+                resolution_issue: Some(
+                    "Multiple authoritative base Title IDs match observed Eden title 0100DDDD00000800."
+                        .into(),
+                ),
+            },
+            EdenPresenceRecord {
+                observed_title_id: "0100CCCC00000000".into(),
+                resolved_base_title_id: None,
+                resolution_issue: Some(
+                    "No authoritative base Title ID was found for observed Eden title 0100CCCC00000000."
+                        .into(),
+                ),
+            },
+            EdenPresenceRecord {
+                observed_title_id: "0100BBBB00000000".into(),
+                resolved_base_title_id: Some("0100BBBB00000000".into()),
+                resolution_issue: None,
+            },
+            EdenPresenceRecord {
+                observed_title_id: "0100AAAA00000800".into(),
+                resolved_base_title_id: Some("0100AAAA00000000".into()),
+                resolution_issue: None,
+            },
+        ];
+        let packages = GameLibraryScanResult {
+            scanned_packages: 6,
+            matched_packages: 4,
+            skipped_packages: 1,
+            games: vec![
+                GameVersionGroup {
+                    base_title_id: "0100CCCC00000000".into(),
+                    versions: vec![package(
+                        "0100CCCC00000000",
+                        "0100CCCC00000000",
+                        "application",
+                        4,
+                        "c.nsp",
+                        40,
+                    )],
+                },
+                GameVersionGroup {
+                    base_title_id: "0100AAAA00001000".into(),
+                    versions: vec![package(
+                        "0100AAAA00001000",
+                        "0100AAAA00001000",
+                        "application",
+                        3,
+                        "near.nsp",
+                        30,
+                    )],
+                },
+                GameVersionGroup {
+                    base_title_id: "0100AAAA00000000".into(),
+                    versions: vec![
+                        package(
+                            "0100AAAA00000000",
+                            "0100AAAA00000000",
+                            "application",
+                            9,
+                            "base.nsp",
+                            10,
+                        ),
+                        package(
+                            "0100AAAA00000000",
+                            "0100AAAA00000800",
+                            "patch",
+                            1,
+                            "update.nsp",
+                            20,
+                        ),
+                    ],
+                },
+            ],
+            errors: vec![GameLibraryScanError {
+                filename: "broken.nsp".into(),
+                relative_path: "games/broken.nsp".into(),
+                message: "could not parse package".into(),
+            }],
+        };
+
+        let result = correlate_eden_package_inventory(presence, packages);
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "scannedPackages": 6,
+                "matchedPackages": 4,
+                "skippedPackages": 1,
+                "edenEntries": [
+                    {
+                        "observedTitleId": "0100AAAA00000800",
+                        "resolvedBaseTitleId": "0100AAAA00000000",
+                        "packageCandidates": [
+                            {
+                                "contentKind": "application",
+                                "titleId": "0100AAAA00000000",
+                                "baseTitleId": "0100AAAA00000000",
+                                "version": 9,
+                                "buildId": "BUILD9",
+                                "moduleId": "MODULE9",
+                                "packageFormat": "NSP",
+                                "filename": "base.nsp",
+                                "relativePath": "games/base.nsp",
+                                "size": 10,
+                            },
+                            {
+                                "contentKind": "patch",
+                                "titleId": "0100AAAA00000800",
+                                "baseTitleId": "0100AAAA00000000",
+                                "version": 1,
+                                "buildId": "BUILD1",
+                                "moduleId": "MODULE1",
+                                "packageFormat": "NSP",
+                                "filename": "update.nsp",
+                                "relativePath": "games/update.nsp",
+                                "size": 20,
+                            }
+                        ]
+                    },
+                    {
+                        "observedTitleId": "0100BBBB00000000",
+                        "resolvedBaseTitleId": "0100BBBB00000000",
+                        "packageCandidates": []
+                    },
+                    {
+                        "observedTitleId": "0100CCCC00000000",
+                        "resolvedBaseTitleId": null,
+                        "packageCandidates": []
+                    },
+                    {
+                        "observedTitleId": "0100DDDD00000800",
+                        "resolvedBaseTitleId": null,
+                        "packageCandidates": []
+                    }
+                ],
+                "unmatchedPackageGroups": [
+                    {
+                        "baseTitleId": "0100AAAA00001000",
+                        "versions": [{
+                            "contentKind": "application",
+                            "titleId": "0100AAAA00001000",
+                            "baseTitleId": "0100AAAA00001000",
+                            "version": 3,
+                            "buildId": "BUILD3",
+                            "moduleId": "MODULE3",
+                            "packageFormat": "NSP",
+                            "filename": "near.nsp",
+                            "relativePath": "games/near.nsp",
+                            "size": 30,
+                        }]
+                    },
+                    {
+                        "baseTitleId": "0100CCCC00000000",
+                        "versions": [{
+                            "contentKind": "application",
+                            "titleId": "0100CCCC00000000",
+                            "baseTitleId": "0100CCCC00000000",
+                            "version": 4,
+                            "buildId": "BUILD4",
+                            "moduleId": "MODULE4",
+                            "packageFormat": "NSP",
+                            "filename": "c.nsp",
+                            "relativePath": "games/c.nsp",
+                            "size": 40,
+                        }]
+                    }
+                ],
+                "packageScanErrors": [{
+                    "filename": "broken.nsp",
+                    "relativePath": "games/broken.nsp",
+                    "message": "could not parse package",
+                }],
+                "correlationIssues": [{
+                    "observedTitleId": "0100CCCC00000000",
+                    "message": "No authoritative base Title ID was found for observed Eden title 0100CCCC00000000."
+                }, {
+                    "observedTitleId": "0100DDDD00000800",
+                    "message": "Multiple authoritative base Title IDs match observed Eden title 0100DDDD00000800."
+                }]
+            })
         );
     }
 }

@@ -55,7 +55,8 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
             }
         }
 
-        let groups = crate::games::build_groups(all_rows, &installed_ids);
+        let (groups, _presence) =
+            crate::games::build_groups_with_presence(all_rows, &installed_ids);
         log::info!("[games::native] {} groups built", groups.len());
         crate::games::save_game_cache(&app, "android", &groups);
         Ok(groups)
