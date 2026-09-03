@@ -6,6 +6,8 @@ mod cheatslips;
 mod db;
 mod games;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+mod package_library;
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod package_metadata;
 mod rom_cache;
 mod settings;
