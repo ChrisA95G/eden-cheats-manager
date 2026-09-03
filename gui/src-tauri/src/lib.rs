@@ -101,6 +101,7 @@ pub fn run() {
             android_native::select_prod_keys_document,
             android_native::select_game_package_document,
             android_native::discover_package_metadata,
+            android_native::discover_package_metadata_for_title,
             android_native::select_game_library_directory,
             android_native::get_game_library_status,
             android_native::scan_game_package_library,
