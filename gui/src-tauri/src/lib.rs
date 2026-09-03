@@ -91,7 +91,6 @@ pub fn run() {
             cheatslips::clear_api_cheats,
             cheatslips::fetch_cheats_online,
             // games
-            games::scan_eden_games_android,
             games::scan_eden_games_pc,
             games::get_cached_games_pc,
             games::get_cached_games_android,
