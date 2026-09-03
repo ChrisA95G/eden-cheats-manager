@@ -222,3 +222,69 @@ pub fn detect_pc_load_dir() -> String {
     }
     String::new()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{Settings, TargetMode};
+
+    fn released_android_settings(target_mode: &str) -> String {
+        format!(
+            r#"{{
+                "targetMode": "{target_mode}",
+                "apiToken": " retained token ",
+                "adbPath": "/opt/android/platform-tools/adb",
+                "pcLoadDir": " /kept/eden/load ",
+                "edenExePath": "/Applications/eden",
+                "onboardingDone": true,
+                "savedConnections": [{{
+                    "label": "Living room",
+                    "ip": "192.0.2.10",
+                    "port": "5555"
+                }}],
+                "activeDevice": {{
+                    "type": "wireless",
+                    "serial": "192.0.2.10:5555",
+                    "label": "Living room"
+                }}
+            }}"#
+        )
+    }
+
+    fn assert_retained_values(settings: &Settings) {
+        assert_eq!(settings.api_token, " retained token ");
+        assert_eq!(settings.pc_load_dir, " /kept/eden/load ");
+        assert_eq!(settings.eden_exe_path, "/Applications/eden");
+        assert!(settings.onboarding_done);
+    }
+
+    #[test]
+    fn released_android_modes_deserialize_with_retained_values() {
+        for target_mode in ["android", "Android", "ANDROID"] {
+            let settings: Settings =
+                serde_json::from_str(&released_android_settings(target_mode)).unwrap();
+            assert!(matches!(settings.target_mode, TargetMode::Android));
+            assert_retained_values(&settings);
+        }
+    }
+
+    #[test]
+    fn pre_eden_executable_settings_deserialize() {
+        let settings: Settings = serde_json::from_str(
+            r#"{
+                "targetMode": "android",
+                "apiToken": "token",
+                "adbPath": "adb",
+                "pcLoadDir": "load",
+                "onboardingDone": true,
+                "savedConnections": [],
+                "activeDevice": null
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.api_token, "token");
+        assert_eq!(settings.pc_load_dir, "load");
+        assert_eq!(settings.eden_exe_path, "");
+        assert!(settings.onboarding_done);
+    }
+}
