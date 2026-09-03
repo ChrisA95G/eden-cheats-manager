@@ -217,34 +217,146 @@ fn group_versions(packages: Vec<GameVersionPackage>) -> Vec<GameVersionGroup> {
 mod tests {
     use super::*;
 
-    fn package(base_title_id: &str, kind: &str, version: u32) -> GameVersionPackage {
+    fn package(
+        base_title_id: &str,
+        title_id: &str,
+        kind: &str,
+        version: u32,
+        filename: &str,
+        size: u64,
+    ) -> GameVersionPackage {
         GameVersionPackage {
             content_kind: kind.into(),
-            title_id: base_title_id.into(),
+            title_id: title_id.into(),
             base_title_id: base_title_id.into(),
             version,
             build_id: format!("BUILD{version}"),
-            module_id: String::new(),
+            module_id: "MODULE".into(),
             package_format: "NSP".into(),
-            filename: format!("{kind}-{version}.nsp"),
-            relative_path: format!("games/{kind}-{version}.nsp"),
-            size: 1,
+            filename: filename.into(),
+            relative_path: format!("games/{filename}"),
+            size,
         }
     }
 
     #[test]
-    fn groups_versions_by_base_title_and_sorts_base_first() {
+    fn groups_versions_deterministically_without_deduplicating_candidates() {
         let groups = group_versions(vec![
-            package("0100000000002000", "patch", 2),
-            package("0100000000000000", "application", 0),
-            package("0100000000002000", "application", 0),
-            package("0100000000002000", "patch", 1),
+            package(
+                "0100000000002000",
+                "0100000000002800",
+                "patch",
+                2,
+                "z-patch.nsp",
+                5,
+            ),
+            package(
+                "0100000000000000",
+                "0100000000000000",
+                "application",
+                4,
+                "only-base.nsp",
+                1,
+            ),
+            package(
+                "0100000000002000",
+                "0100000000002800",
+                "patch",
+                1,
+                "old-patch.nsp",
+                2,
+            ),
+            package(
+                "0100000000002000",
+                "0100000000002000",
+                "application",
+                9,
+                "base.nsp",
+                3,
+            ),
+            package(
+                "0100000000002000",
+                "0100000000002800",
+                "patch",
+                2,
+                "a-patch.nsp",
+                4,
+            ),
         ]);
 
         assert_eq!(groups.len(), 2);
+        assert_eq!(groups[0].base_title_id, "0100000000000000");
+        assert_eq!(groups[0].versions.len(), 1);
+        assert_eq!(groups[0].versions[0].filename, "only-base.nsp");
         assert_eq!(groups[1].base_title_id, "0100000000002000");
-        assert_eq!(groups[1].versions[0].content_kind, "application");
-        assert_eq!(groups[1].versions[1].version, 1);
-        assert_eq!(groups[1].versions[2].version, 2);
+        assert_eq!(
+            groups[1]
+                .versions
+                .iter()
+                .map(|package| (
+                    package.content_kind.as_str(),
+                    package.version,
+                    package.filename.as_str(),
+                    package.size,
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("application", 9, "base.nsp", 3),
+                ("patch", 1, "old-patch.nsp", 2),
+                ("patch", 2, "a-patch.nsp", 4),
+                ("patch", 2, "z-patch.nsp", 5),
+            ]
+        );
+    }
+
+    #[test]
+    fn serializes_the_existing_android_library_result_contract() {
+        let result = GameLibraryScanResult {
+            scanned_packages: 3,
+            matched_packages: 1,
+            skipped_packages: 1,
+            games: group_versions(vec![package(
+                "0100000000002000",
+                "0100000000002800",
+                "patch",
+                7,
+                "update.nsp",
+                42,
+            )]),
+            errors: vec![GameLibraryScanError {
+                filename: "broken.xci".into(),
+                relative_path: "games/broken.xci".into(),
+                message: "broken package".into(),
+            }],
+        };
+
+        assert_eq!(
+            serde_json::to_value(result).unwrap(),
+            serde_json::json!({
+                "scannedPackages": 3,
+                "matchedPackages": 1,
+                "skippedPackages": 1,
+                "games": [{
+                    "baseTitleId": "0100000000002000",
+                    "versions": [{
+                        "contentKind": "patch",
+                        "titleId": "0100000000002800",
+                        "baseTitleId": "0100000000002000",
+                        "version": 7,
+                        "buildId": "BUILD7",
+                        "moduleId": "MODULE",
+                        "packageFormat": "NSP",
+                        "filename": "update.nsp",
+                        "relativePath": "games/update.nsp",
+                        "size": 42
+                    }]
+                }],
+                "errors": [{
+                    "filename": "broken.xci",
+                    "relativePath": "games/broken.xci",
+                    "message": "broken package"
+                }]
+            })
+        );
     }
 }
