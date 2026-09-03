@@ -106,3 +106,43 @@ fn discover_package_metadata_inner(
         matched_program_content_id: true,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_metadata_keeps_distinct_identity_fields_in_its_json_contract() {
+        let metadata = PackageMetadata {
+            package_format: "NSP".into(),
+            content_kind: "patch".into(),
+            title_id: "0100ABCD12345800".into(),
+            base_title_id: "0100ABCD12345000".into(),
+            program_title_id: "0100ABCD12345801".into(),
+            version: 65_536,
+            build_id: "0011223344556677".into(),
+            module_id: "00112233445566778899AABBCCDDEEFF".into(),
+            has_bktr: true,
+            matched_program_content_id: true,
+        };
+
+        assert_eq!(
+            serde_json::to_value(metadata.clone()).unwrap(),
+            serde_json::json!({
+                "packageFormat": "NSP",
+                "contentKind": "patch",
+                "titleId": "0100ABCD12345800",
+                "baseTitleId": "0100ABCD12345000",
+                "programTitleId": "0100ABCD12345801",
+                "version": 65_536,
+                "buildId": "0011223344556677",
+                "moduleId": "00112233445566778899AABBCCDDEEFF",
+                "hasBktr": true,
+                "matchedProgramContentId": true,
+            })
+        );
+        assert_eq!(metadata.title_id, "0100ABCD12345800");
+        assert_eq!(metadata.base_title_id, "0100ABCD12345000");
+        assert_eq!(metadata.program_title_id, "0100ABCD12345801");
+    }
+}
