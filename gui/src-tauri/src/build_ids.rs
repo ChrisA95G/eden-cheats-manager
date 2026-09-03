@@ -2,7 +2,6 @@ use crate::adb::loader_build_id_re;
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::OnceLock;
 
 // Looser regex used for contextual log window: no `name=main` requirement.
@@ -300,7 +299,7 @@ fn find_rom_path_pc(title_id: &str, game_name: &str) -> Option<PathBuf> {
             p.display(), p.exists()
         );
 
-        // Add parent dir first, then the game dir itself — mirrors find_rom_path_android.
+        // Add the parent dir first, then the game dir itself.
         // This lets us find ROMs that sit next to (not inside) a configured game dir.
         if let Some(parent) = p.parent() {
             let parent_key = parent.to_string_lossy().to_string();
@@ -531,7 +530,7 @@ pub async fn scan_build_id_pc(
     }
 }
 
-// ── Scan Build ID (Launch + Log Poll) ───────────────────────────────────────
+// ── PC scan timing ──────────────────────────────────────────────────────────
 
 /// How long to poll the log file before giving up.
 /// The build_id line appears as soon as the NSO loader runs (very early in boot),
@@ -539,178 +538,3 @@ pub async fn scan_build_id_pc(
 const SCAN_TIMEOUT_SECS: u64 = 5;
 /// Interval between log-file polls.
 const POLL_INTERVAL_SECS: u64 = 2;
-/// Percent-encode a string as a URI path component, following Android's `Uri.encode()` rules.
-/// Preserves letters, digits, and `-_!.~'()*`; encodes everything else (including `:`, `/`,
-/// space, `[`, `]`) which is required for document IDs used in content:// URIs.
-fn percent_encode_doc_id(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'!' | b'.' | b'~' | b'\'' | b'(' | b')' | b'*' => {
-                out.push(b as char);
-            }
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
-}
-
-/// Build a `content://com.android.externalstorage.documents/tree/…/document/…` URI
-/// from a physical file path and the (raw_tree_uri, physical_base) pairs from config.ini.
-///
-/// Eden scans ROMs via the Storage Access Framework and stores them as content:// URIs.
-/// `GameMetadata.getIsValid()` opens files through Android's ContentResolver using the
-/// content:// URI.  Raw `file:///storage/<sdcard>/…` paths fail on external SD cards
-/// because the FUSE layer requires SAF / ContentResolver access.
-pub(crate) fn physical_to_content_uri(physical_path: &str, tree_entries: &[(String, String)]) -> Option<String> {
-    // /storage/primary is an alias for /storage/emulated/0 on many devices.
-    let normalise = |p: &str| -> String {
-        if p.starts_with("/storage/primary") {
-            p.replacen("/storage/primary", "/storage/emulated/0", 1)
-        } else {
-            p.to_string()
-        }
-    };
-    let norm_file = normalise(physical_path);
-
-    log::debug!(
-        "[build_ids] physical_to_content_uri: file={physical_path} tree_entries={}",
-        tree_entries.len()
-    );
-    for (raw_tree_uri, physical_base) in tree_entries {
-        let norm_base = normalise(physical_base);
-        let matches = norm_file.starts_with(norm_base.as_str());
-        log::debug!(
-            "[build_ids] physical_to_content_uri: check base={physical_base} matches={matches}"
-        );
-        if !matches {
-            continue;
-        }
-        // The tree document ID is the already-encoded segment after `/tree/` in the URI
-        // (e.g. `4A21-0000%3ARoms%2FSwitch`).
-        let tree_doc_id_enc = match raw_tree_uri.split("/tree/").nth(1) {
-            Some(s) => s,
-            None => {
-                log::warn!("[build_ids] physical_to_content_uri: no /tree/ in URI {raw_tree_uri}");
-                continue;
-            }
-        };
-
-        // File document ID: "{volumeId}:{relativePathFromVolumeRoot}"
-        let result = (|| -> Option<(&str, &str)> {
-            if physical_path.starts_with("/storage/emulated/0/") {
-                Some(("primary", &physical_path["/storage/emulated/0/".len()..]))
-            } else {
-                let after = physical_path.strip_prefix("/storage/")?;
-                let slash = after.find('/')?;
-                Some((&after[..slash], &after[slash + 1..]))
-            }
-        })();
-
-        let (volume_id, rel) = match result {
-            Some(v) => v,
-            None => {
-                log::warn!("[build_ids] physical_to_content_uri: cannot parse volume from {physical_path}");
-                continue;
-            }
-        };
-
-        let file_doc_id = format!("{}:{}", volume_id, rel);
-        let file_doc_id_enc = percent_encode_doc_id(&file_doc_id);
-        let uri = format!(
-            "content://com.android.externalstorage.documents/tree/{}/document/{}",
-            tree_doc_id_enc, file_doc_id_enc
-        );
-        log::info!("[build_ids] physical_to_content_uri: -> {uri}");
-        return Some(uri);
-    }
-    log::warn!(
-        "[build_ids] physical_to_content_uri: no matching tree entry for {physical_path} \
-         (tree_entries={}) — will fall back to file:// URI",
-        tree_entries.len()
-    );
-    None
-}
-
-/// Search Eden's configured game directories on the Android device for a ROM
-/// file whose filename contains `[{title_id}]` (the standard NSP naming convention).
-///
-/// Returns a `content://com.android.externalstorage.documents/…` URI for games on
-/// external SD cards (required for Eden to open them via ContentResolver), or a
-/// `file://` URI as a fallback for internal storage.
-fn find_rom_path_android(adb: &str, title_id: &str, game_name: &str) -> Option<String> {
-    use crate::adb::ANDROID_CONFIG_PATH;
-    let config_out = Command::new(adb)
-        .args(["shell", "cat", ANDROID_CONFIG_PATH])
-        .output()
-        .ok()?;
-    if !config_out.status.success() {
-        log::debug!("[build_ids] find_rom: config.ini unavailable");
-        return None;
-    }
-    let config = String::from_utf8_lossy(&config_out.stdout);
-    let tid_lower = title_id.to_lowercase();
-    let name_norm = crate::rom_cache::normalize(game_name);
-
-    // Collect (raw_tree_uri, physical_base) pairs and ordered search directories.
-    let mut tree_entries: Vec<(String, String)> = Vec::new();
-    let mut search_dirs: Vec<String> = Vec::new();
-    let mut seen_dirs: HashSet<String> = HashSet::new();
-
-    for line in config.lines() {
-        if !line.contains("\\path=") {
-            continue;
-        }
-        let raw_uri = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
-        if let Some(physical) = crate::games::content_uri_to_physical(raw_uri) {
-            if let Some(parent) = std::path::Path::new(&physical).parent() {
-                let p = parent.to_string_lossy().to_string();
-                if seen_dirs.insert(p.clone()) {
-                    search_dirs.push(p);
-                }
-            }
-            if seen_dirs.insert(physical.clone()) {
-                search_dirs.push(physical.clone());
-            }
-            tree_entries.push((raw_uri.to_string(), physical));
-        }
-    }
-    log::debug!("[build_ids] find_rom: searching {} dirs", search_dirs.len());
-
-    for dir in &search_dirs {
-        for ext in &["*.nsp", "*.xci"] {
-            let cmd = format!("find '{}' -maxdepth 2 -name '{}'", dir, ext);
-            if let Ok(find_out) = Command::new(adb).args(["shell", &cmd]).output() {
-                for line in String::from_utf8_lossy(&find_out.stdout).lines() {
-                    let p = line.trim();
-                    if p.is_empty() {
-                        continue;
-                    }
-                    let p_lower = p.to_lowercase();
-                    let fname = std::path::Path::new(p).file_name()
-                        .map(|f| f.to_string_lossy().to_lowercase())
-                        .unwrap_or_default();
-                    let by_tid = p_lower.contains(&format!("[{}]", tid_lower));
-                    let by_name = !name_norm.is_empty()
-                        && crate::rom_cache::normalize(&fname).contains(&name_norm)
-                        && !is_non_base_filename(&fname);
-                    if by_tid || by_name {
-                        if by_name && !by_tid {
-                            log::info!("[build_ids] find_rom: fuzzy match '{fname}' for name_norm='{name_norm}'");
-                        }
-                        log::info!("[build_ids] find_rom physical: {p}");
-                        if let Some(uri) = physical_to_content_uri(p, &tree_entries) {
-                            log::info!("[build_ids] find_rom content_uri: {uri}");
-                            return Some(uri);
-                        }
-                        let uri = format!("file://{}", p);
-                        log::info!("[build_ids] find_rom file_uri (fallback): {uri}");
-                        return Some(uri);
-                    }
-                }
-            }
-        }
-    }
-    None
-}

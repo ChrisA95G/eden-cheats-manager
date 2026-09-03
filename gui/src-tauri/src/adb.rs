@@ -3,9 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::OnceLock;
 
-pub(crate) const ANDROID_CONFIG_PATH: &str =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
-
 pub(crate) const EDEN_VIRTUAL_DIRS: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
 
 static LOADER_BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();

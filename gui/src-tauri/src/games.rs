@@ -3,15 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::{AppHandle, Manager};
 
-/// Convert a content:// URI used by Eden's config to a physical /storage/… path.
-/// e.g. content://…/tree/4A21-0000%3ARoms%2FSwitch%2FRoms → /storage/4A21-0000/Roms/Switch/Roms
-pub(crate) fn content_uri_to_physical(uri: &str) -> Option<String> {
-    let tree_part = uri.split("/tree/").nth(1)?;
-    let decoded = tree_part.replace("%3A", ":").replace("%2F", "/");
-    let (storage_id, rest) = decoded.split_once(':')?;
-    Some(format!("/storage/{}/{}", storage_id, rest))
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TitleEntry {
