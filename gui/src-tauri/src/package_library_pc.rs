@@ -1,7 +1,10 @@
 use crate::package_library::GameLibraryScanResult;
+use crate::package_metadata::PackageMetadata;
 
 #[cfg(not(target_os = "android"))]
 use crate::package_library::{scan_package_library, PackageLibraryEntry};
+#[cfg(not(target_os = "android"))]
+use crate::package_metadata;
 #[cfg(not(target_os = "android"))]
 use std::{
     fs::{self, File},
@@ -12,6 +15,43 @@ use std::{
 const MAX_SCAN_DEPTH: usize = 5;
 #[cfg(not(target_os = "android"))]
 const MAX_PACKAGES: usize = 2_000;
+
+#[tauri::command]
+pub async fn discover_package_metadata_for_title_pc(
+    prod_keys_path: String,
+    package_path: String,
+    expected_base_title_id: String,
+) -> Result<PackageMetadata, String> {
+    #[cfg(not(target_os = "android"))]
+    {
+        return tauri::async_runtime::spawn_blocking(move || {
+            let prod_keys_path = PathBuf::from(prod_keys_path);
+            let package_path = PathBuf::from(package_path);
+            let prod_keys = File::open(&prod_keys_path).map_err(|error| {
+                format!(
+                    "Could not open prod.keys '{}': {error}",
+                    prod_keys_path.display()
+                )
+            })?;
+            let package = File::open(&package_path).map_err(|error| {
+                format!(
+                    "Could not open game package '{}': {error}",
+                    package_path.display()
+                )
+            })?;
+            let metadata = package_metadata::discover_package_metadata(prod_keys, package)?;
+            package_metadata::validate_package_identity(&expected_base_title_id, metadata)
+        })
+        .await
+        .map_err(|error| format!("Package parser task failed: {error}"))?;
+    }
+
+    #[cfg(target_os = "android")]
+    {
+        let _ = (prod_keys_path, package_path, expected_base_title_id);
+        Err("Desktop package discovery is not available on Android.".into())
+    }
+}
 
 #[tauri::command]
 pub async fn scan_game_package_library_pc(

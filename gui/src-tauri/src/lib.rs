@@ -95,6 +95,7 @@ pub fn run() {
             cheats::delete_cheat_pc,
             // desktop package library
             package_library_pc::scan_game_package_library_pc,
+            package_library_pc::discover_package_metadata_for_title_pc,
             // android native (SAF — no ADB)
             android_native::get_eden_load_access_status,
             android_native::select_eden_load_directory,
