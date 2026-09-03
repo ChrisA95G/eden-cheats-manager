@@ -3,14 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use std::sync::OnceLock;
 
-pub(crate) const REMOTE_BASE: &str =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/load";
-
-pub(crate) const ANDROID_CONFIG_PATH: &str =
-    "/storage/emulated/0/Android/data/dev.eden.eden_emulator/files/config/config.ini";
-
-pub(crate) const EDEN_PKG: &str = "dev.eden.eden_emulator";
-
 pub(crate) const EDEN_VIRTUAL_DIRS: &[&str] = &["SDMC", "UserNAND", "SysNAND"];
 
 static LOADER_BUILD_ID_RE: OnceLock<Regex> = OnceLock::new();
@@ -145,61 +137,6 @@ pub fn adb_connect(adb_path: String, ip_port: String) -> Result<String, String> 
         Ok(combined)
     } else {
         Err(combined)
-    }
-}
-
-#[tauri::command]
-pub fn extract_build_ids_android(adb_path: String) -> Result<Vec<String>, String> {
-    let adb = adb_bin(&adb_path);
-    let log_candidates = [
-        "/sdcard/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt",
-        "/sdcard/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt.old.txt",
-        "/sdcard/eden.log",
-    ];
-
-    // Try each candidate log path
-    for remote in &log_candidates {
-        match Command::new(&adb).args(["shell", "cat", remote]).output() {
-            Ok(out) if out.status.success() => {
-                let text = String::from_utf8_lossy(&out.stdout).to_string();
-                if text.contains("build_id=") {
-                    return Ok(parse_build_ids(&text));
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Dynamic search fallback
-    match Command::new(&adb)
-        .args([
-            "shell",
-            "find",
-            "/sdcard/Android/data/dev.eden.eden_emulator",
-            "-name",
-            "*.log",
-            "-type",
-            "f",
-        ])
-        .output()
-    {
-        Ok(out) => {
-            let paths = String::from_utf8_lossy(&out.stdout).to_string();
-            for path in paths.lines() {
-                let p = path.trim();
-                if p.is_empty() {
-                    continue;
-                }
-                if let Ok(cat) = Command::new(&adb).args(["shell", "cat", p]).output() {
-                    let text = String::from_utf8_lossy(&cat.stdout).to_string();
-                    if text.contains("build_id=") {
-                        return Ok(parse_build_ids(&text));
-                    }
-                }
-            }
-            Err("No Eden log found with build IDs on device.".to_string())
-        }
-        Err(e) => Err(format!("ADB shell error: {}", e)),
     }
 }
 
