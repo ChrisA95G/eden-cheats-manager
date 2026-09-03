@@ -1,4 +1,4 @@
-use crate::adb::{adb_bin, adb_ls, loader_build_id_re, REMOTE_BASE};
+use crate::adb::{adb_bin, loader_build_id_re};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -89,112 +89,6 @@ pub(crate) fn find_build_ids_for_title_in_log(text: &str, title_id: &str) -> Vec
     }
 
     out
-}
-
-// ── Android ───────────────────────────────────────────────────────────────────
-
-/// Detect build IDs for a specific title on an Android device.
-///
-/// Strategy 1 — Installed cheat files (instant, offline):
-///   Scans `{REMOTE_BASE}/{title_id}/*/cheats/*.txt`; the filename stem *is*
-///   the build ID.  Works whenever at least one cheat has been installed.
-///
-/// Strategy 2 — Eden log (per-title contextual search):
-///   Greps the Eden log files for lines containing `title_id` and extracts
-///   build IDs from the surrounding context window.
-///
-/// // TODO Strategy 3 — NSO binary header parsing:
-///   Pull the first 0x100 bytes of the game executable NSO file from
-///   `{eden_data}/cache/game_cache/{title_id}/exefs/main` and parse the
-///   build-id Note segment.  Implement when Strategies 1 & 2 are insufficient.
-#[tauri::command]
-pub fn detect_build_ids_android(
-    adb_path: String,
-    title_id: String,
-) -> Result<Vec<String>, String> {
-    log::info!("[build_ids] detect_android title={title_id}");
-    let adb = adb_bin(&adb_path);
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut ids: Vec<String> = Vec::new();
-
-    // ── Strategy 1: installed cheat filenames ─────────────────────────────
-    let title_dir = format!("{}/{}", REMOTE_BASE, title_id);
-    if let Ok(cheat_names) = adb_ls(adb_path.clone(), title_dir.clone()) {
-        for name in &cheat_names {
-            let cheats_dir = format!("{}/{}/cheats", title_dir, name);
-            if let Ok(files) = adb_ls(adb_path.clone(), cheats_dir) {
-                for file in files {
-                    if file.ends_with(".txt") {
-                        let bid = file.trim_end_matches(".txt").to_uppercase();
-                        if bid.len() == 16 && seen.insert(bid.clone()) {
-                            log::debug!("[build_ids] installed-cheat strategy: {bid}");
-                            ids.push(bid);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    log::debug!("[build_ids] after strategy 1: {} ids", ids.len());
-
-    // ── Strategy 2: Eden log (contextual window around title_id) ──────────
-    let log_candidates = [
-        "/sdcard/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt",
-        "/sdcard/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt.old.txt",
-        "/sdcard/eden.log",
-    ];
-
-    for remote in &log_candidates {
-        match Command::new(&adb).args(["shell", "cat", remote]).output() {
-            Ok(out) if out.status.success() => {
-                let text = String::from_utf8_lossy(&out.stdout);
-                for bid in find_build_ids_for_title_in_log(&text, &title_id) {
-                    if bid.len() == 16 && seen.insert(bid.clone()) {
-                        log::debug!("[build_ids] log strategy ({remote}): {bid}");
-                        ids.push(bid);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // Dynamic fallback: search for any .log files if none of the above had results
-    if ids.is_empty() {
-        if let Ok(out) = Command::new(&adb)
-            .args([
-                "shell",
-                "find",
-                "/sdcard/Android/data/dev.eden.eden_emulator",
-                "-name",
-                "*.log",
-                "-type",
-                "f",
-            ])
-            .output()
-        {
-            let paths = String::from_utf8_lossy(&out.stdout);
-            for path in paths.lines() {
-                let p = path.trim();
-                if p.is_empty() {
-                    continue;
-                }
-                if let Ok(cat) = Command::new(&adb).args(["shell", "cat", p]).output() {
-                    let text = String::from_utf8_lossy(&cat.stdout);
-                    for bid in find_build_ids_for_title_in_log(&text, &title_id) {
-                        if bid.len() == 16 && seen.insert(bid.clone()) {
-                            log::debug!("[build_ids] log fallback ({p}): {bid}");
-                            ids.push(bid);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    ids.sort();
-    log::info!("[build_ids] detect_android title={title_id} -> {:?}", ids);
-    Ok(ids)
 }
 
 // ── PC ────────────────────────────────────────────────────────────────────────

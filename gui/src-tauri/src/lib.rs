@@ -75,11 +75,9 @@ pub fn run() {
             adb::adb_tcpip,
             adb::adb_pair,
             adb::adb_connect,
-            adb::extract_build_ids_android,
             adb::extract_build_ids_pc,
             adb::adb_ls,
             // per-title build ID detection
-            build_ids::detect_build_ids_android,
             build_ids::detect_build_ids_pc,
             build_ids::scan_build_id_android,
             build_ids::scan_build_id_pc,
