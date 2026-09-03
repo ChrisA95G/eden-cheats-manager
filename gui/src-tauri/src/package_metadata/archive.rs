@@ -1,12 +1,23 @@
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
-    os::unix::fs::FileExt,
     sync::Arc,
 };
 
 const MAX_ARCHIVE_ENTRIES: u32 = 16_384;
 const MAX_STRING_TABLE_SIZE: u32 = 16 * 1024 * 1024;
+
+#[cfg(unix)]
+fn positioned_read(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<usize> {
+    use std::os::unix::fs::FileExt;
+    file.read_at(buffer, offset)
+}
+
+#[cfg(windows)]
+fn positioned_read(file: &File, buffer: &mut [u8], offset: u64) -> io::Result<usize> {
+    use std::os::windows::fs::FileExt;
+    file.seek_read(buffer, offset)
+}
 
 #[derive(Clone)]
 pub(super) struct ReadAtFile {
@@ -39,9 +50,7 @@ impl ReadAtFile {
         }
 
         while !buffer.is_empty() {
-            let read = self
-                .file
-                .read_at(buffer, offset)
+            let read = positioned_read(self.file.as_ref(), buffer, offset)
                 .map_err(|error| format!("Could not read selected document: {error}"))?;
             if read == 0 {
                 return Err("Selected document ended unexpectedly.".into());
@@ -99,10 +108,11 @@ impl Read for BoundedReader {
         if read_len == 0 {
             return Ok(0);
         }
-        let read = self
-            .source
-            .file
-            .read_at(&mut buffer[..read_len], self.start + self.position)?;
+        let read = positioned_read(
+            self.source.file.as_ref(),
+            &mut buffer[..read_len],
+            self.start + self.position,
+        )?;
         self.position += read as u64;
         Ok(read)
     }
@@ -351,6 +361,24 @@ mod tests {
         reader.read_exact(&mut data).unwrap();
         assert_eq!(&data, b"2345");
         assert!(reader.seek(SeekFrom::Start(5)).is_err());
+    }
+
+    #[test]
+    fn positioned_reads_honor_offsets_when_interleaved() {
+        let source = ReadAtFile::new(temporary_file(b"0123456789")).unwrap();
+        let mut direct = [0; 2];
+        source.read_exact_at(8, &mut direct).unwrap();
+        assert_eq!(&direct, b"89");
+
+        let mut left = source.bounded(1, 4).unwrap();
+        let mut right = source.bounded(6, 4).unwrap();
+        let mut data = [0; 2];
+        left.read_exact(&mut data).unwrap();
+        assert_eq!(&data, b"12");
+        right.read_exact(&mut data).unwrap();
+        assert_eq!(&data, b"67");
+        left.read_exact(&mut data).unwrap();
+        assert_eq!(&data, b"34");
     }
 
     #[test]
