@@ -119,8 +119,6 @@ pub fn run() {
             android_native::select_game_library_directory,
             android_native::get_game_library_status,
             android_native::scan_game_package_library,
-            android_native::select_eden_root_directory,
-            android_native::inspect_eden_installation,
             android_native::scan_eden_games_android_native,
             android_native::install_cheat_android_native,
             android_native::list_installed_cheats_android_native,
