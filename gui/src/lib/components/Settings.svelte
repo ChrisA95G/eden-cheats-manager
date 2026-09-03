@@ -22,9 +22,6 @@
   let edenLogPath = $state('');
   let safTestResult = $state('');
   let testingSaf = $state(false);
-  let edenDiscoveryReport = $state(/** @type {any} */ (null));
-  let edenDiscoveryMessage = $state('');
-  let inspectingEden = $state(false);
 
   // New connection form
   let newConnLabel = $state('');
@@ -158,39 +155,6 @@
     }
   }
 
-  async function selectEdenRootDirectory() {
-    edenDiscoveryReport = null;
-    edenDiscoveryMessage = '';
-    try {
-      await invoke('select_eden_root_directory');
-      edenDiscoveryMessage = 'After selecting Eden’s top-level directory, tap Inspect Eden.';
-    } catch (e) {
-      edenDiscoveryMessage = `ERROR: ${e}`;
-    }
-  }
-
-  async function inspectEdenInstallation() {
-    inspectingEden = true;
-    edenDiscoveryMessage = '';
-    try {
-      edenDiscoveryReport = await invoke('inspect_eden_installation');
-    } catch (e) {
-      edenDiscoveryReport = null;
-      edenDiscoveryMessage = `ERROR: ${e}`;
-    } finally {
-      inspectingEden = false;
-    }
-  }
-
-  /** @param {any} report @returns {any[]} */
-  function disabledSelections(report) {
-    const selections = [];
-    for (const entry of report?.disabledAddOns ?? []) {
-      if (entry.disabled.length) selections.push(entry);
-    }
-    return selections;
-  }
-
   async function save() {
     saving = true;
     try {
@@ -259,99 +223,6 @@
         <fieldset>
           <legend>Package Build ID</legend>
           <PackageDiscovery />
-        </fieldset>
-
-        <fieldset>
-          <legend>Eden Installation Discovery — Read-only</legend>
-          <p class="hint">
-            Experimental: select Eden's <strong>top-level directory</strong>, not <strong>load</strong>.
-            ECM will only read <code>config/config.ini</code> and inspect likely NAND/SDMC locations.
-          </p>
-          <div class="saf-actions">
-            <button class="btn-secondary sm" onclick={selectEdenRootDirectory}>[ SELECT EDEN ROOT ]</button>
-            <button class="btn-secondary sm" onclick={inspectEdenInstallation} disabled={inspectingEden}>
-              {inspectingEden ? '[ INSPECTING... ]' : '[ INSPECT EDEN ]'}
-            </button>
-          </div>
-
-          {#if edenDiscoveryMessage}
-            <div class="status-badge warn">{edenDiscoveryMessage}</div>
-          {/if}
-
-          {#if edenDiscoveryReport}
-            <div
-              class="status-badge"
-              class:ok={edenDiscoveryReport.status.ready}
-              class:warn={!edenDiscoveryReport.status.ready}
-            >
-              {edenDiscoveryReport.status.message}
-            </div>
-
-            {#if edenDiscoveryReport.status.ready}
-              <div class="discovery-report">
-                <div class="discovery-section">
-                  <strong>CONFIG</strong>
-                  <span>{edenDiscoveryReport.configFound ? 'config.ini found' : `Not readable: ${edenDiscoveryReport.configError ?? 'unknown error'}`}</span>
-                </div>
-
-                <div class="discovery-section">
-                  <strong>GAME DIRECTORIES ({edenDiscoveryReport.gameDirectories.length})</strong>
-                  {#each edenDiscoveryReport.gameDirectories as directory}
-                    <code class="discovery-path">{directory.path}</code>
-                    <span class="discovery-meta">deep scan: {directory.deepScan ?? 'unknown'}</span>
-                  {:else}
-                    <span>None found in config.</span>
-                  {/each}
-                </div>
-
-                <div class="discovery-section">
-                  <strong>EXTERNAL CONTENT ({edenDiscoveryReport.externalContentDirectories.length})</strong>
-                  {#each edenDiscoveryReport.externalContentDirectories as path}
-                    <code class="discovery-path">{path}</code>
-                  {:else}
-                    <span>None found in config.</span>
-                  {/each}
-                </div>
-
-                <div class="discovery-section">
-                  <strong>DISABLED SELECTIONS ({disabledSelections(edenDiscoveryReport).length})</strong>
-                  <span class="discovery-meta">{edenDiscoveryReport.disabledAddOns.length} title-state records exist in Eden's config.</span>
-                  {#each disabledSelections(edenDiscoveryReport) as addOns}
-                    <code>{addOns.titleId}</code>
-                    <span>{addOns.disabled.join(', ')}</span>
-                  {/each}
-                  {#if !disabledSelections(edenDiscoveryReport).length}
-                    <span>No disabled updates or add-ons found.</span>
-                  {/if}
-                </div>
-
-                <div class="discovery-section">
-                  <strong>CONFIGURED STORAGE PATHS</strong>
-                  <span>NAND: <code>{edenDiscoveryReport.configuredPaths.nandDirectory ?? 'default'}</code></span>
-                  <span>SDMC: <code>{edenDiscoveryReport.configuredPaths.sdmcDirectory ?? 'default'}</code></span>
-                  <span>Saves: <code>{edenDiscoveryReport.configuredPaths.saveDirectory ?? 'default'}</code></span>
-                </div>
-
-                <div class="discovery-section">
-                  <strong>PROVIDER LAYOUT</strong>
-                  {#each edenDiscoveryReport.directories as directory}
-                    <details>
-                      <summary>
-                        <code>{directory.path}</code> —
-                        {directory.exists ? `${directory.entries.length}${directory.truncated ? '+' : ''} entries` : `not found${directory.error ? `: ${directory.error}` : ''}`}
-                      </summary>
-                      {#each directory.entries.slice(0, 12) as entry}
-                        <span class="discovery-entry">{entry.directory ? '[DIR]' : '[FILE]'} {entry.name}</span>
-                      {/each}
-                      {#if directory.entries.length > 12}
-                        <span class="discovery-meta">Only the first 12 entries are shown.</span>
-                      {/if}
-                    </details>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-          {/if}
         </fieldset>
 
       {/if}
@@ -658,14 +529,6 @@
   .status-badge.ok   { background: rgba(74,222,128,.08); color: var(--success); border-left-color: var(--success); }
   .status-badge.warn { background: rgba(245,168,0,.08); color: var(--accent); border-left-color: var(--accent); }
   .saf-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
-  .discovery-report { display: flex; flex-direction: column; gap: .75rem; margin-top: .7rem; }
-  .discovery-section { display: flex; flex-direction: column; gap: .25rem; font-size: .7rem; color: var(--text-muted); }
-  .discovery-section strong { color: var(--text); font-size: .68rem; letter-spacing: .08em; }
-  .discovery-path { overflow-wrap: anywhere; white-space: normal; }
-  .discovery-meta { color: var(--text-dim); font-size: .65rem; }
-  .discovery-section details { border-left: 1px solid var(--border); padding-left: .45rem; }
-  .discovery-section summary { cursor: pointer; line-height: 1.5; }
-  .discovery-entry { display: block; padding: .1rem 0 .1rem .5rem; overflow-wrap: anywhere; }
 
   .btn-primary, .btn-secondary {
     padding: .42rem 1rem;
