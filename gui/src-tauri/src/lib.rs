@@ -70,8 +70,6 @@ pub fn run() {
             settings::get_eden_log_path_pc,
             settings::detect_eden_exe,
             settings::get_platform,
-            // legacy PC Build ID extraction
-            adb::extract_build_ids_pc,
             // per-title build ID detection
             build_ids::detect_build_ids_pc,
             build_ids::scan_build_id_pc,
@@ -87,7 +85,6 @@ pub fn run() {
             games::get_cached_games_android,
             games::get_eden_game_dirs_pc,
             // rom cache
-            rom_cache::get_rom_cache,
             rom_cache::set_rom_path_manual,
             rom_cache::scan_and_update_rom_cache,
             // cheats

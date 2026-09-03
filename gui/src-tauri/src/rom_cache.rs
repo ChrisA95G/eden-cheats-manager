@@ -169,11 +169,6 @@ pub fn scan_rom_paths(
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn get_rom_cache(app: AppHandle) -> RomCache {
-    load_cache(&app)
-}
-
-#[tauri::command]
 pub fn set_rom_path_manual(app: AppHandle, title_id: String, path: String) -> Result<(), String> {
     let mut cache = load_cache(&app);
     cache.insert(title_id.clone(), RomCacheEntry { path: path.clone(), manual: true });
