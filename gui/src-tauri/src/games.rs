@@ -1,6 +1,6 @@
 use crate::db;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +39,92 @@ fn category_from_tid(tid: &str) -> &str {
 
 pub(crate) fn is_valid_tid(s: &str) -> bool {
     s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EdenPresenceRecord {
+    pub(crate) observed_title_id: String,
+    pub(crate) resolved_base_title_id: Option<String>,
+    pub(crate) resolution_issue: Option<String>,
+}
+
+pub(crate) fn extract_eden_presence(
+    rows: &[db::TitleRow],
+    installed_ids: &HashSet<String>,
+) -> Vec<EdenPresenceRecord> {
+    let mut base_candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for row in rows {
+        if !is_valid_tid(&row.title_id) {
+            continue;
+        }
+        let title_id = row.title_id.to_ascii_uppercase();
+        if title_id.ends_with("000") {
+            base_candidates
+                .entry(title_id[..12].to_string())
+                .or_default()
+                .insert(title_id);
+        }
+    }
+
+    let observed_ids: BTreeSet<String> = installed_ids
+        .iter()
+        .filter(|title_id| is_valid_tid(title_id))
+        .map(|title_id| title_id.to_ascii_uppercase())
+        .collect();
+
+    observed_ids
+        .into_iter()
+        .map(|observed_title_id| {
+            let candidates = base_candidates.get(&observed_title_id[..12]);
+            let (resolved_base_title_id, resolution_issue) = if observed_title_id
+                .ends_with("000")
+            {
+                if candidates.is_some_and(|candidates| candidates.contains(&observed_title_id)) {
+                    (Some(observed_title_id.clone()), None)
+                } else {
+                    (
+                        None,
+                        Some(format!(
+                            "No authoritative base Title ID was found for observed Eden title {observed_title_id}."
+                        )),
+                    )
+                }
+            } else {
+                match candidates {
+                    Some(candidates) if candidates.len() == 1 => {
+                        (candidates.first().cloned(), None)
+                    }
+                    Some(candidates) if candidates.len() > 1 => (
+                        None,
+                        Some(format!(
+                            "Multiple authoritative base Title IDs match observed Eden title {observed_title_id}."
+                        )),
+                    ),
+                    _ => (
+                        None,
+                        Some(format!(
+                            "No authoritative base Title ID was found for observed Eden title {observed_title_id}."
+                        )),
+                    ),
+                }
+            };
+
+            EdenPresenceRecord {
+                observed_title_id,
+                resolved_base_title_id,
+                resolution_issue,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn build_groups_with_presence(
+    rows: Vec<db::TitleRow>,
+    installed_ids: &HashSet<String>,
+) -> (Vec<GameGroup>, Vec<EdenPresenceRecord>) {
+    let presence = extract_eden_presence(&rows, installed_ids);
+    let groups = build_groups(rows, installed_ids);
+    (groups, presence)
 }
 
 /// Group SQLite title rows into GameGroups keyed by the first 12 chars of
@@ -336,7 +422,7 @@ pub async fn scan_eden_games_pc(
         }
     }
 
-    let groups = build_groups(all_rows, &installed_ids);
+    let (groups, _presence) = build_groups_with_presence(all_rows, &installed_ids);
     log::info!("[games::pc] {} groups built", groups.len());
     save_game_cache(&app, "pc", &groups);
     Ok(groups)
@@ -519,6 +605,96 @@ mod tests {
                     "installed": false,
                 }]
             }])
+        );
+    }
+
+    #[test]
+    fn presence_normalizes_orders_and_resolves_only_authoritative_base_rows() {
+        let rows = vec![
+            row("0100AAAA00000000", "A", ""),
+            row("0100aaaa00000000", "A duplicate", ""),
+            row("0100AAAA00001000", "A sibling", ""),
+            row("0100BBBB00000000", "B", ""),
+            row("0100BBBB00001000", "B sibling", ""),
+            row("0100CCCC00000000", "C", ""),
+            row("0100CCCC00000800", "C update", ""),
+            row("0100DDDD00000G00", "Malformed", ""),
+            row("0100EEEE00001000", "E sibling", ""),
+        ];
+        let installed_ids = HashSet::from([
+            "0100aaaa00000000".to_string(),
+            "0100AAAA00000000".to_string(),
+            "0100BBBB00000800".to_string(),
+            "0100cccc00000800".to_string(),
+            "0100DDDD00000800".to_string(),
+            "0100EEEE00000000".to_string(),
+            "not-a-title-id".to_string(),
+        ]);
+
+        assert_eq!(
+            extract_eden_presence(&rows, &installed_ids),
+            vec![
+                EdenPresenceRecord {
+                    observed_title_id: "0100AAAA00000000".into(),
+                    resolved_base_title_id: Some("0100AAAA00000000".into()),
+                    resolution_issue: None,
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100BBBB00000800".into(),
+                    resolved_base_title_id: None,
+                    resolution_issue: Some(
+                        "Multiple authoritative base Title IDs match observed Eden title 0100BBBB00000800."
+                            .into(),
+                    ),
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100CCCC00000800".into(),
+                    resolved_base_title_id: Some("0100CCCC00000000".into()),
+                    resolution_issue: None,
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100DDDD00000800".into(),
+                    resolved_base_title_id: None,
+                    resolution_issue: Some(
+                        "No authoritative base Title ID was found for observed Eden title 0100DDDD00000800."
+                            .into(),
+                    ),
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100EEEE00000000".into(),
+                    resolved_base_title_id: None,
+                    resolution_issue: Some(
+                        "No authoritative base Title ID was found for observed Eden title 0100EEEE00000000."
+                            .into(),
+                    ),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn presence_wrapper_preserves_the_legacy_group_payload() {
+        fn rows() -> Vec<db::TitleRow> {
+            vec![
+                row("0100BBBB00000000", "Shared", "b.png"),
+                row("0100BBBB00000800", "", "b-update.png"),
+                row("0100AAAA00000000", "Shared", "a.png"),
+                row("0100AAAA00000001", "", "a-dlc.png"),
+            ]
+        }
+
+        let installed_ids = HashSet::from(["0100bbbb00000000".to_string()]);
+        let legacy = serde_json::to_vec(&build_groups(rows(), &installed_ids)).unwrap();
+        let (groups, presence) = build_groups_with_presence(rows(), &installed_ids);
+
+        assert_eq!(serde_json::to_vec(&groups).unwrap(), legacy);
+        assert_eq!(
+            presence,
+            vec![EdenPresenceRecord {
+                observed_title_id: "0100BBBB00000000".into(),
+                resolved_base_title_id: Some("0100BBBB00000000".into()),
+                resolution_issue: None,
+            }]
         );
     }
 }
