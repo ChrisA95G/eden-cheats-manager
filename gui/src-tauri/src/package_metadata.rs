@@ -29,6 +29,25 @@ pub(crate) fn is_package_without_build_id(message: &str) -> bool {
     message == NO_BUILD_ID_CONTENT_ERROR
 }
 
+pub(crate) fn validate_package_identity(
+    expected_base_title_id: &str,
+    metadata: PackageMetadata,
+) -> Result<PackageMetadata, String> {
+    let expected = expected_base_title_id.trim().to_ascii_uppercase();
+    if expected.len() != 16 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(
+            "Expected base Title ID must be exactly 16 ASCII hexadecimal characters.".into(),
+        );
+    }
+    if metadata.base_title_id != expected {
+        return Err(format!(
+            "Package belongs to {}, not selected game {}.",
+            metadata.base_title_id, expected
+        ));
+    }
+    Ok(metadata)
+}
+
 pub(crate) struct PackageKeys {
     keyset: Keyset,
 }
@@ -105,4 +124,91 @@ fn discover_package_metadata_inner(
         has_bktr: program.has_bktr,
         matched_program_content_id: true,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn patch_metadata() -> PackageMetadata {
+        PackageMetadata {
+            package_format: "NSP".into(),
+            content_kind: "patch".into(),
+            title_id: "0100ABCD12345800".into(),
+            base_title_id: "0100ABCD12345000".into(),
+            program_title_id: "0100ABCD12345801".into(),
+            version: 65_536,
+            build_id: "0011223344556677".into(),
+            module_id: "00112233445566778899AABBCCDDEEFF".into(),
+            has_bktr: true,
+            matched_program_content_id: true,
+        }
+    }
+
+    #[test]
+    fn package_metadata_keeps_distinct_identity_fields_in_its_json_contract() {
+        let metadata = patch_metadata();
+
+        assert_eq!(
+            serde_json::to_value(metadata.clone()).unwrap(),
+            serde_json::json!({
+                "packageFormat": "NSP",
+                "contentKind": "patch",
+                "titleId": "0100ABCD12345800",
+                "baseTitleId": "0100ABCD12345000",
+                "programTitleId": "0100ABCD12345801",
+                "version": 65_536,
+                "buildId": "0011223344556677",
+                "moduleId": "00112233445566778899AABBCCDDEEFF",
+                "hasBktr": true,
+                "matchedProgramContentId": true,
+            })
+        );
+        assert_eq!(metadata.title_id, "0100ABCD12345800");
+        assert_eq!(metadata.base_title_id, "0100ABCD12345000");
+        assert_eq!(metadata.program_title_id, "0100ABCD12345801");
+    }
+
+    #[test]
+    fn package_identity_normalizes_the_expected_id_and_returns_metadata_unchanged() {
+        let metadata = patch_metadata();
+        let before = serde_json::to_value(metadata.clone()).unwrap();
+
+        let validated = validate_package_identity("  0100abcd12345000\n", metadata).unwrap();
+
+        assert_eq!(serde_json::to_value(validated).unwrap(), before);
+    }
+
+    #[test]
+    fn package_identity_rejects_malformed_expected_ids() {
+        let invalid = [
+            "",
+            "0100ABCD1234500",
+            "0100ABCD123450000",
+            "0100ABCD12345G00",
+            "0100 ABCD1234500",
+            "0X00ABCD12345000",
+            "０100ABCD12345000",
+        ];
+
+        for expected in invalid {
+            assert_eq!(
+                validate_package_identity(expected, patch_metadata()).unwrap_err(),
+                "Expected base Title ID must be exactly 16 ASCII hexadecimal characters.",
+                "expected {expected:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn package_identity_compares_only_the_authoritative_base_id() {
+        let mut metadata = patch_metadata();
+        metadata.title_id = "0100DEAD00000000".into();
+        metadata.program_title_id = "0100DEAD00000000".into();
+
+        assert_eq!(
+            validate_package_identity("0100dead00000000", metadata).unwrap_err(),
+            "Package belongs to 0100ABCD12345000, not selected game 0100DEAD00000000."
+        );
+    }
 }

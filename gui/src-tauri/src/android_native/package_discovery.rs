@@ -81,6 +81,29 @@ pub async fn discover_package_metadata() -> Result<PackageMetadata, String> {
     }
 }
 
+#[tauri::command]
+pub async fn discover_package_metadata_for_title(
+    expected_base_title_id: String,
+) -> Result<PackageMetadata, String> {
+    #[cfg(target_os = "android")]
+    {
+        let prod_keys = file_from_jni_fd("openProdKeysReadFd", "prod.keys")?;
+        let package = file_from_jni_fd("openGamePackageReadFd", "game package")?;
+        return tauri::async_runtime::spawn_blocking(move || {
+            let metadata = crate::package_metadata::discover_package_metadata(prod_keys, package)?;
+            crate::package_metadata::validate_package_identity(&expected_base_title_id, metadata)
+        })
+        .await
+        .map_err(|error| format!("Package parser task failed: {error}"))?;
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = expected_base_title_id;
+        Err("Native package discovery is only available on Android.".into())
+    }
+}
+
 #[cfg(target_os = "android")]
 pub(super) fn file_from_jni_fd(method: &str, label: &str) -> Result<std::fs::File, String> {
     let fd = jni_noarg_int_call(method)?;
