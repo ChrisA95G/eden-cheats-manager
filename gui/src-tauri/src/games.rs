@@ -404,3 +404,121 @@ pub fn get_eden_game_dirs_pc() -> Vec<String> {
     }
     dirs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn row(title_id: &str, name: &str, image: &str) -> db::TitleRow {
+        db::TitleRow {
+            title_id: title_id.into(),
+            name: name.into(),
+            image: image.into(),
+        }
+    }
+
+    #[test]
+    fn build_groups_keeps_current_prefix_shape_and_synthetic_entries() {
+        let rows = vec![
+            row("0100AAAA00000800", "", "update.png"),
+            row("0100AAAA00000000", "Alpha", "base.png"),
+            row("0100AAAA00000001", "", "dlc.png"),
+        ];
+        let installed_ids = HashSet::from([
+            "0100AAAA00000000".to_string(),
+            "0100AAAA00000800".to_string(),
+            "0100AAAA00001800".to_string(),
+            "0100FFFF00000800".to_string(),
+        ]);
+
+        assert_eq!(
+            serde_json::to_value(build_groups(rows, &installed_ids)).unwrap(),
+            json!([{
+                "baseTitleId": "0100AAAA00000000",
+                "baseName": "Alpha",
+                "baseImage": "base.png",
+                "baseInstalled": true,
+                "baseGame": {
+                    "titleId": "0100AAAA00000000",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Alpha",
+                    "image": "base.png",
+                    "category": "base",
+                    "installed": true,
+                },
+                "updates": [
+                    {
+                        "titleId": "0100AAAA00000800",
+                        "baseTitleId": "0100AAAA00000000",
+                        "name": "Alpha",
+                        "image": "update.png",
+                        "category": "update",
+                        "installed": true,
+                    },
+                    {
+                        "titleId": "0100AAAA00001800",
+                        "baseTitleId": "0100AAAA00000000",
+                        "name": "Alpha",
+                        "image": "",
+                        "category": "update",
+                        "installed": true,
+                    }
+                ],
+                "dlcs": [{
+                    "titleId": "0100AAAA00000001",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Alpha",
+                    "image": "dlc.png",
+                    "category": "dlc",
+                    "installed": false,
+                }]
+            }])
+        );
+    }
+
+    #[test]
+    fn build_groups_name_merges_distinct_families_for_display() {
+        let rows = vec![
+            row("0100BBBB00000000", "Shared", "b.png"),
+            row("0100BBBB00000800", "", "b-update.png"),
+            row("0100AAAA00000000", "Shared", "a.png"),
+            row("0100AAAA00000001", "", "a-dlc.png"),
+        ];
+        let installed_ids = HashSet::from(["0100BBBB00000000".to_string()]);
+
+        assert_eq!(
+            serde_json::to_value(build_groups(rows, &installed_ids)).unwrap(),
+            json!([{
+                "baseTitleId": "0100AAAA00000000",
+                "baseName": "Shared",
+                "baseImage": "a.png",
+                "baseInstalled": true,
+                "baseGame": {
+                    "titleId": "0100AAAA00000000",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Shared",
+                    "image": "a.png",
+                    "category": "base",
+                    "installed": false,
+                },
+                "updates": [{
+                    "titleId": "0100BBBB00000800",
+                    "baseTitleId": "0100BBBB00000000",
+                    "name": "Shared",
+                    "image": "b-update.png",
+                    "category": "update",
+                    "installed": false,
+                }],
+                "dlcs": [{
+                    "titleId": "0100AAAA00000001",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Shared",
+                    "image": "a-dlc.png",
+                    "category": "dlc",
+                    "installed": false,
+                }]
+            }])
+        );
+    }
+}
