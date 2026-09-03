@@ -5,6 +5,7 @@ mod cheats;
 mod cheatslips;
 mod db;
 mod games;
+mod package_library;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod package_metadata;
 mod rom_cache;
