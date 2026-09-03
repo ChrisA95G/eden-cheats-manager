@@ -85,7 +85,6 @@ pub fn run() {
             games::get_cached_games_android,
             games::get_eden_game_dirs_pc,
             // rom cache
-            rom_cache::get_rom_cache,
             rom_cache::set_rom_path_manual,
             rom_cache::scan_and_update_rom_cache,
             // cheats
