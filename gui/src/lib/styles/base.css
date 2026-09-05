@@ -15,8 +15,9 @@ body {
 }
 
 html {
-  font-family: Roboto, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 100%;
+  /* Preserve legacy metrics until the Material application replaces it. */
+  font-family: 'Share Tech Mono', ui-monospace, 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 87.5%;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
