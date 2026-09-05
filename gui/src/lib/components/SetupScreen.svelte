@@ -107,10 +107,6 @@
       localError = 'Select the Eden load directory before continuing.';
       return;
     }
-    if (packagePairIncomplete) {
-      localError = 'Select both package-matching paths, or leave both blank.';
-      return;
-    }
     if (!onsubmit) {
       localError = 'Setup cannot be saved right now.';
       return;
@@ -278,7 +274,7 @@
           {#if packagePairIncomplete}
             <p class="pair-note" role="status">
               <Icon name="info" size={18} />
-              Add the other path to enable package version matching, or leave both blank.
+              Bulk matching needs both paths. A keys file alone can be used to inspect one package.
             </p>
           {/if}
         </section>
@@ -308,7 +304,7 @@
         </section>
 
         <footer class="form-actions">
-          <button class="md-button md-button--filled" type="submit" disabled={componentBusy || packagePairIncomplete}>
+          <button class="md-button md-button--filled" type="submit" disabled={componentBusy}>
             <Icon name="check" size={20} />
             {activeAction === 'submit' || busy ? 'Saving…' : 'Finish setup'}
           </button>

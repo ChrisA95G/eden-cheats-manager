@@ -176,10 +176,6 @@
       localError = 'Select the Eden load directory before saving.';
       return;
     }
-    if (packagePairIncomplete) {
-      localError = 'Select both prod.keys and a package-library directory, or leave both blank.';
-      return;
-    }
     if (!onsave) {
       localError = 'Settings cannot be saved right now.';
       return;
@@ -196,7 +192,7 @@
   }
 
   function requestClose() {
-    if (!busy) onclose();
+    onclose();
   }
 
   function prodKeysMessage() {
@@ -315,7 +311,7 @@
 
         {#if packagePairIncomplete}
           <p id="settings-package-pair-error" class="md-error-text" role="alert">
-            Select both package-matching paths, or leave both blank.
+            Bulk matching needs both paths. A keys file alone can be used to inspect one package.
           </p>
         {/if}
       </section>
@@ -487,7 +483,7 @@
   </form>
 
   {#snippet actions()}
-    <button class="md-button md-button--text" type="button" disabled={busy} onclick={requestClose}>
+    <button class="md-button md-button--text" type="button" onclick={requestClose}>
       Cancel
     </button>
     <button

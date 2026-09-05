@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy, tick } from 'svelte';
+  import { onDestroy, onMount, tick } from 'svelte';
   import Icon from './Icon.svelte';
 
   /**
@@ -44,7 +44,7 @@
 
     const candidates = [
       ...target.querySelectorAll('[autofocus]:not(:disabled)'),
-      ...target.querySelectorAll(`.dialog__content ${focusableSelector}`),
+      ...(target.querySelector('.dialog__content')?.querySelectorAll(focusableSelector) ?? []),
       ...target.querySelectorAll(focusableSelector),
     ];
     const focusTarget = candidates.find(
@@ -81,8 +81,19 @@
 
   /** @param {MouseEvent} event */
   function handleBackdropClick(event) {
-    if (event.target === dialog) requestClose();
+    if (event.target !== dialog || !dialog) return;
+    const rect = dialog.getBoundingClientRect();
+    if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) requestClose();
   }
+
+  function releaseHistory() {
+    if (history.state?.ecmDialog === id) history.back();
+  }
+  onMount(() => {
+    const back = () => { if (dialog?.open && history.state?.ecmDialog !== id) requestClose(); };
+    window.addEventListener('popstate', back);
+    return () => window.removeEventListener('popstate', back);
+  });
 
   $effect(() => {
     const target = dialog;
@@ -93,13 +104,18 @@
         ? document.activeElement
         : null;
       target.showModal();
+      history.pushState({...history.state, ecmDialog: id}, '');
       void focusInitialControl(target);
     } else if (!open && target.open) {
       target.close();
+      releaseHistory();
     }
   });
 
-  onDestroy(restoreOpenerFocus);
+  onDestroy(() => {
+    if (typeof history !== 'undefined' && dialog?.open) releaseHistory();
+    restoreOpenerFocus();
+  });
 </script>
 
 <dialog
