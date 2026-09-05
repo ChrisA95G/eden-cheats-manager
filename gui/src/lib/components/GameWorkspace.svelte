@@ -207,8 +207,9 @@
         <div class="empty"><Icon name="info" size={36} /><h2>Cheats are not supported for DLC</h2><p>Choose a base game or update from the library.</p><button class="md-button md-button--tonal" onclick={onback}>Back to library</button></div>
       {:else}
         {#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
-        <section class="package-section" aria-labelledby="package-title">
-          <div class="section-heading"><h2 id="package-title">Choose a package version</h2><button class="md-button md-button--text" onclick={onsettings}>Configure</button></div>
+        <details class="package-section" open={!chosen}>
+          <summary><span>{chosenBuild ? `Comparing build ${chosenBuild}` : 'Choose a package version'}<small>{chosenBuild ? 'Selected package · not necessarily active in Eden' : 'Optional compatibility comparison'}</small></span><Icon name="expand" /></summary>
+          <button class="md-button md-button--text" onclick={onsettings}>Configure package discovery</button>
           <p class="support">Compare cheats with a package you own. This does not identify which version Eden is running.</p>
           {#if candidates.length}
             <fieldset class="candidates"><legend class="md-sr-only">Package version to compare</legend>
@@ -228,7 +229,7 @@
               <p class="support">{androidPackageStatus?.packageName || 'No single package selected'}</p>
             {:else}<button class="md-button md-button--outlined" disabled={inspecting || !settings.prodKeysPath} onclick={inspect}>{inspecting ? 'Inspecting…' : 'Inspect one package'}</button>{/if}
           </div>
-        </section>
+        </details>
 
         <section aria-labelledby="installed-title" aria-busy={installedLoading}>
           <div class="section-heading"><h2 id="installed-title" tabindex="-1" bind:this={installedHeading}>Installed files <span>{installed.length}</span></h2><button class="md-icon-button" aria-label="Refresh installed cheats" disabled={installedLoading || working} onclick={()=>read('installed',context())}><Icon name="refresh" /></button></div>
@@ -291,7 +292,8 @@
   .app-bar > div { flex:1; min-width:0; } h1 { font-size:22px; font-weight:400; overflow-wrap:anywhere; } h2 { font-size:20px; font-weight:500; } h2 span { color:var(--md-sys-color-on-surface-variant); font-size:14px; }
   .app-bar p, small, .support { color:var(--md-sys-color-on-surface-variant); font-size:14px; overflow-wrap:anywhere; } small { display:block; font-size:12px; } .support { margin-block:8px 16px; }
   .workspace-scroll { flex:1; min-height:0; overflow:auto; padding:8px var(--md-sys-layout-gutter) max(24px,env(safe-area-inset-bottom)); overscroll-behavior:contain; }
-  .workspace-scroll > section { margin-bottom:24px; } .package-section { padding:16px; border-radius:16px; background:var(--md-sys-color-surface-container); }
+  .workspace-scroll > section, .package-section { margin-bottom:24px; } .package-section { padding:16px; border-radius:16px; background:var(--md-sys-color-surface-container); }
+  .package-section > summary { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:20px; }
   .section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; } .actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
   .candidates { margin:16px 0; border:0; padding:0; } .candidate { display:flex; align-items:center; gap:12px; min-height:56px; padding:10px 8px; cursor:pointer; border-bottom:1px solid var(--md-sys-color-outline-variant); } .candidate input { flex:none; accent-color:var(--md-sys-color-primary); width:20px; height:20px; } .candidate span { min-width:0; overflow-wrap:anywhere; }
   .file-row, .cheat-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--md-sys-color-outline-variant); } .file-row > div,.file-row > details,.cheat-row > details { flex:1; min-width:0; overflow-wrap:anywhere; }

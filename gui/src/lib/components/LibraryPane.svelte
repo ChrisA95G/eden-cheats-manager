@@ -185,9 +185,12 @@
     {:else}
       <div class="game-grid" role="list" aria-label="Games">
         {#each filteredGames as group}
-          {@const entries = entriesForGroup(group)}
+          {@const entries = entriesForGroup(group).filter(item => item.entry.category !== 'base')}
           <article class="game-card md-card md-card--outlined" role="listitem">
-            <header class="game-card__header">
+            <button type="button" class="game-card__header md-list-item"
+              disabled={!group.baseGame} data-title-id={group.baseGame?.titleId}
+              aria-current={selectedTitleId === group.baseGame?.titleId ? 'true' : undefined}
+              onclick={() => { if (group.baseGame) onselect(group.baseGame.titleId); }}>
               {#if group.baseImage}
                 <img class="game-cover" src={group.baseImage} alt="" loading="lazy" decoding="async" />
               {:else}
@@ -203,10 +206,12 @@
                   <span class="installed-label"><Icon name="check" size={14} /> In Eden load</span>
                 {/if}
               </div>
-            </header>
+            </button>
 
             {#if entries.length > 0}
-              <div class="version-list">
+              <details class="related-titles">
+                <summary>{group.updates.length} updates · {group.dlcs.length} DLC titles</summary>
+                <div class="version-list">
                 {#each entries as item (item.entry.titleId)}
                   <button
                     type="button"
@@ -231,9 +236,8 @@
                     {/if}
                   </button>
                 {/each}
-              </div>
-            {:else}
-              <p class="no-versions">No selectable versions were found for this title.</p>
+                </div>
+              </details>
             {/if}
           </article>
         {/each}
@@ -474,7 +478,6 @@
 
   .game-heading h2,
   .version-name,
-  .no-versions,
   .empty-state p {
     overflow-wrap: anywhere;
   }
@@ -558,12 +561,7 @@
     flex: 0 0 auto;
   }
 
-  .no-versions {
-    padding: 1rem;
-    color: var(--md-sys-color-on-surface-variant);
-    font-size: var(--md-sys-typescale-body-medium-size);
-    line-height: 1.25rem;
-  }
+  .related-titles > summary { min-height:48px; padding:12px 16px; cursor:pointer; font-size:14px; color:var(--md-sys-color-on-surface-variant); }
 
   .empty-state {
     display: flex;
