@@ -75,8 +75,10 @@
   let logResult = $state('');
   let submitting = $state(false);
   let wasOpen = false;
+  let session = 0;
 
   $effect(() => {
+    if (open !== wasOpen) session++;
     if (open && !wasOpen) {
       draft = copySettings(settings);
       activeAction = '';
@@ -114,15 +116,17 @@
    */
   async function runAction(name, action) {
     if (activeAction) return undefined;
+    const revision = session;
     activeAction = name;
     localError = '';
     try {
-      return await action();
+      const result = await action();
+      return revision === session && open ? result : undefined;
     } catch (cause) {
-      localError = errorMessage(cause);
+      if (revision === session && open) localError = errorMessage(cause);
       return undefined;
     } finally {
-      activeAction = '';
+      if (revision === session) activeAction = '';
     }
   }
 
@@ -171,6 +175,8 @@
   }
 
   async function submit() {
+    if (busy) return;
+    const revision = session;
     localError = '';
     if (loadDirectoryMissing) {
       localError = 'Select the Eden load directory before saving.';
@@ -185,7 +191,7 @@
     try {
       await onsave(copySettings(draft));
     } catch (cause) {
-      localError = errorMessage(cause);
+      if (revision === session && open) localError = errorMessage(cause);
     } finally {
       submitting = false;
     }

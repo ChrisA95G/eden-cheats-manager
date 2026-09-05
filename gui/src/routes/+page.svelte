@@ -64,6 +64,7 @@
     }
   }
   function backToLibrary() { if (pane === 'workspace') history.back(); }
+  function openSettings() { if (!saving) settingsOpen = true; }
   /** @param {PopStateEvent} event */
   async function navigateBack(event) {
     if (event.state?.ecm !== 1) return;
@@ -218,10 +219,10 @@
 {:else}
   <main class="app-shell" class:show-workspace={pane === 'workspace'}>
     <div class="library-slot"><LibraryPane games={library.games} packageLibrary={library.packageLibrary} {refreshPhase}
-      refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={()=>settingsOpen=true}/></div>
+      refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
     <div class="workspace-slot"><GameWorkspace {target} {platform} {settings} packageLibrary={library.packageLibrary}
       androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
-      onsettings={()=>settingsOpen=true} onpickandroid={pickAndroid} onnotify={notify}/></div>
+      onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
   </main>
   <SettingsDialog open={settingsOpen} {platform} {settings} {edenAccess} {packageStatus} {gameLibraryStatus}
     {pendingPicker} {saving} error={statusError} onsave={save} onclose={()=>settingsOpen=false}
