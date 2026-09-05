@@ -2,14 +2,12 @@
   import Icon from './ui/Icon.svelte';
 
   /** @typedef {import('../api/types.js').GameGroup} GameGroup */
-  /** @typedef {import('../api/types.js').ManagedPackageLibrary} ManagedPackageLibrary */
   /** @typedef {import('../api/types.js').TitleEntry} TitleEntry */
   /** @typedef {'idle' | 'loading' | 'error'} RefreshPhase */
 
   /**
    * @typedef {Object} Props
    * @property {GameGroup[]} games
-   * @property {ManagedPackageLibrary | null} packageLibrary
    * @property {RefreshPhase} refreshPhase
    * @property {string} refreshError
    * @property {string} selectedTitleId
@@ -21,7 +19,6 @@
   /** @type {Props} */
   let {
     games,
-    packageLibrary,
     refreshPhase,
     refreshError,
     selectedTitleId,
@@ -124,42 +121,6 @@
       <div class="refresh-error" role="alert">
         <Icon name="warning" size={20} />
         <span>{refreshError || 'The game library could not be refreshed. Showing the last available games.'}</span>
-      </div>
-    {/if}
-
-    {#if packageLibrary}
-      <div
-        class="package-banner"
-        class:ready={packageLibrary.state === 'ready'}
-        class:error={packageLibrary.state === 'error'}
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        <span class="banner-icon" aria-hidden="true">
-          <Icon
-            name={packageLibrary.state === 'ready' ? 'check' : packageLibrary.state === 'error' ? 'warning' : 'info'}
-            size={20}
-          />
-        </span>
-        <div>
-          {#if packageLibrary.state === 'ready'}
-            <strong>Package matching ready</strong>
-            <span>
-              {packageLibrary.correlation.matchedPackages} of {packageLibrary.correlation.scannedPackages}
-              scanned package{packageLibrary.correlation.scannedPackages === 1 ? '' : 's'} matched.
-              {#if packageLibrary.correlation.packageScanErrors.length > 0}
-                {packageLibrary.correlation.packageScanErrors.length} file{packageLibrary.correlation.packageScanErrors.length === 1 ? '' : 's'} could not be read.
-              {/if}
-            </span>
-          {:else if packageLibrary.state === 'notConfigured'}
-            <strong>Package matching is optional</strong>
-            <span>{packageLibrary.message || 'Connect prod.keys and a package-library folder in Settings when you want automatic build matching.'}</span>
-          {:else}
-            <strong>Package matching unavailable</strong>
-            <span>{packageLibrary.message}</span>
-          {/if}
-        </div>
       </div>
     {/if}
 
@@ -361,8 +322,7 @@
   }
 
   .refresh-status,
-  .refresh-error,
-  .package-banner {
+  .refresh-error {
     flex: 0 0 auto;
   }
 
@@ -373,8 +333,7 @@
     font-size: var(--md-sys-typescale-body-small-size);
   }
 
-  .refresh-error,
-  .package-banner {
+  .refresh-error {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
     align-items: start;
@@ -388,45 +347,10 @@
     background: var(--md-sys-color-error-container);
   }
 
-  .package-banner {
-    color: var(--md-sys-color-on-secondary-container);
-    background: var(--md-sys-color-secondary-container);
-  }
-
-  .package-banner.ready {
-    color: var(--md-sys-color-on-tertiary-container);
-    background: var(--md-sys-color-tertiary-container);
-  }
-
-  .package-banner.error {
-    color: var(--md-sys-color-on-error-container);
-    background: var(--md-sys-color-error-container);
-  }
-
-  .package-banner > div {
-    display: grid;
-    min-width: 0;
-    gap: 0.125rem;
-  }
-
-  .package-banner strong {
-    font-size: var(--md-sys-typescale-body-medium-size);
-    font-weight: 500;
-    line-height: 1.25rem;
-  }
-
-  .package-banner span,
   .refresh-error span {
     overflow-wrap: anywhere;
     font-size: var(--md-sys-typescale-body-small-size);
     line-height: 1rem;
-  }
-
-  .banner-icon {
-    display: grid;
-    width: 2rem;
-    height: 2rem;
-    place-items: center;
   }
 
   .game-grid {

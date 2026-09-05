@@ -218,7 +218,7 @@
     onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
 {:else}
   <main class="app-shell" class:show-workspace={pane === 'workspace'}>
-    <div class="library-slot"><LibraryPane games={library.games} packageLibrary={library.packageLibrary} {refreshPhase}
+    <div class="library-slot"><LibraryPane games={library.games} {refreshPhase}
       refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
     <div class="workspace-slot"><GameWorkspace {target} {platform} {settings} packageLibrary={library.packageLibrary}
       androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
