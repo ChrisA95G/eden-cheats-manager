@@ -129,43 +129,6 @@
 
 
 <style>
-  :global(*) { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :global(:root) {
-    --bg: #080600;
-    --surface: #111006;
-    --surface2: #1a1808;
-    --border: #352510;
-    --text: #f2e4a8;
-    --text-muted: #9a7c4a;
-    --text-bright: #fde68a;
-    --text-dim: #3a2c10;
-    --accent: #f5a800;
-    --accent-dim: rgba(245, 168, 0, 0.08);
-    --accent-glow: rgba(245, 168, 0, 0.2);
-    --accent-rgb: 245, 168, 0;
-    --error: #ef4444;
-    --success: #c8860c;
-    font-family: 'Share Tech Mono', ui-monospace, 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
-    font-size: 14px;
-    line-height: 1.5;
-    color-scheme: dark;
-  }
-
-  :global(body) {
-    background: var(--bg);
-    color: var(--text);
-    overflow: hidden;
-    height: 100vh;
-    width: 100vw;
-  }
-
-  :global(::-webkit-scrollbar) { width: 5px; }
-  :global(::-webkit-scrollbar-track) { background: var(--surface); }
-  :global(::-webkit-scrollbar-thumb) { background: var(--border); border-radius: 0; }
-  :global(::-webkit-scrollbar-thumb:hover) { background: var(--text-muted); }
-  :global(select) { outline: none; }
-
   .scanlines {
     position: fixed;
     inset: 0;

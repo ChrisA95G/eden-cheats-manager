@@ -1,0 +1,105 @@
+:root {
+  color-scheme: dark;
+
+  /* Material 3 color roles anchored to ECM's amber application mark. */
+  --md-sys-color-primary: #ffb951;
+  --md-sys-color-on-primary: #442b00;
+  --md-sys-color-primary-container: #624000;
+  --md-sys-color-on-primary-container: #ffddb0;
+  --md-sys-color-secondary: #ddc2a1;
+  --md-sys-color-on-secondary: #3e2e16;
+  --md-sys-color-secondary-container: #57442b;
+  --md-sys-color-on-secondary-container: #fadebd;
+  --md-sys-color-tertiary: #b9c994;
+  --md-sys-color-on-tertiary: #26340d;
+  --md-sys-color-tertiary-container: #3c4b22;
+  --md-sys-color-on-tertiary-container: #d5e6ae;
+  --md-sys-color-error: #ffb4ab;
+  --md-sys-color-on-error: #690005;
+  --md-sys-color-error-container: #93000a;
+  --md-sys-color-on-error-container: #ffdad6;
+  --md-sys-color-background: #17130e;
+  --md-sys-color-on-background: #ece1d7;
+  --md-sys-color-surface: #17130e;
+  --md-sys-color-on-surface: #ece1d7;
+  --md-sys-color-surface-variant: #504539;
+  --md-sys-color-on-surface-variant: #d4c4b5;
+  --md-sys-color-outline: #9d8f80;
+  --md-sys-color-outline-variant: #504539;
+  --md-sys-color-surface-dim: #17130e;
+  --md-sys-color-surface-bright: #3e3832;
+  --md-sys-color-surface-container-lowest: #110e0a;
+  --md-sys-color-surface-container-low: #201b16;
+  --md-sys-color-surface-container: #241f1a;
+  --md-sys-color-surface-container-high: #2f2924;
+  --md-sys-color-surface-container-highest: #3a342e;
+  --md-sys-color-inverse-surface: #ece1d7;
+  --md-sys-color-inverse-on-surface: #352f29;
+  --md-sys-color-inverse-primary: #805600;
+  --md-sys-color-scrim: #000000;
+  --md-sys-color-shadow: #000000;
+
+  /* Absolute system dimensions stay correct during the 14px legacy bridge. */
+  --md-sys-typescale-display-large-size: 57px;
+  --md-sys-typescale-display-medium-size: 45px;
+  --md-sys-typescale-display-small-size: 36px;
+  --md-sys-typescale-headline-large-size: 32px;
+  --md-sys-typescale-headline-medium-size: 28px;
+  --md-sys-typescale-headline-small-size: 24px;
+  --md-sys-typescale-title-large-size: 22px;
+  --md-sys-typescale-title-medium-size: 16px;
+  --md-sys-typescale-title-small-size: 14px;
+  --md-sys-typescale-body-large-size: 16px;
+  --md-sys-typescale-body-medium-size: 14px;
+  --md-sys-typescale-body-small-size: 12px;
+  --md-sys-typescale-label-large-size: 14px;
+  --md-sys-typescale-label-medium-size: 12px;
+  --md-sys-typescale-label-small-size: 11px;
+
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 12px;
+  --md-sys-shape-corner-large: 16px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 999rem;
+
+  --md-sys-state-hover-opacity: 0.08;
+  --md-sys-state-focus-opacity: 0.12;
+  --md-sys-state-pressed-opacity: 0.12;
+  --md-sys-state-dragged-opacity: 0.16;
+
+  --md-sys-elevation-level-1: 0 1px 2px rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+  --md-sys-elevation-level-2: 0 1px 2px rgb(0 0 0 / 0.3), 0 2px 6px 2px rgb(0 0 0 / 0.15);
+  --md-sys-elevation-level-3: 0 1px 3px rgb(0 0 0 / 0.3), 0 4px 8px 3px rgb(0 0 0 / 0.15);
+
+  --md-sys-motion-duration-short: 100ms;
+  --md-sys-motion-duration-medium: 250ms;
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  --md-sys-size-touch: 48px;
+  --md-sys-size-top-app-bar: 64px;
+  --md-sys-layout-gutter: 16px;
+  --md-sys-layout-content-max: 1440px;
+
+  /* Temporary compatibility aliases. Delete with the legacy UI. */
+  --bg: var(--md-sys-color-background);
+  --surface: var(--md-sys-color-surface-container-low);
+  --surface2: var(--md-sys-color-surface-container);
+  --border: var(--md-sys-color-outline-variant);
+  --text: var(--md-sys-color-on-surface);
+  --text-muted: var(--md-sys-color-on-surface-variant);
+  --text-bright: var(--md-sys-color-on-background);
+  --text-dim: var(--md-sys-color-outline);
+  --accent: var(--md-sys-color-primary);
+  --accent-dim: rgb(255 185 81 / 0.12);
+  --accent-glow: rgb(255 185 81 / 0.24);
+  --accent-rgb: 255, 185, 81;
+  --error: var(--md-sys-color-error);
+  --success: var(--md-sys-color-tertiary);
+}
+
+@media (min-width: 600px) {
+  :root {
+    --md-sys-layout-gutter: 24px;
+  }
+}
