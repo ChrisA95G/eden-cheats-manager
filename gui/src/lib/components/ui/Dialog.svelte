@@ -5,6 +5,7 @@
   /**
    * @type {{
    *   open?: boolean,
+   *   fullScreen?: boolean,
    *   title: string,
    *   children?: import('svelte').Snippet,
    *   actions?: import('svelte').Snippet,
@@ -13,6 +14,7 @@
    */
   let {
     open = false,
+    fullScreen = false,
     title,
     children,
     actions,
@@ -121,6 +123,7 @@
 <dialog
   bind:this={dialog}
   class="dialog md-dialog"
+  class:full-screen={fullScreen}
   aria-labelledby={titleId}
   tabindex="-1"
   oncancel={handleCancel}
@@ -165,8 +168,11 @@
     display: none;
   }
 
+  dialog[open] { animation:dialog-enter var(--md-sys-motion-duration-enter) var(--md-sys-motion-easing-standard); }
+  @keyframes dialog-enter { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
   dialog::backdrop {
-    background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
+    background: rgb(0 0 0 / 0.32);
   }
 
   .dialog__header {
@@ -202,7 +208,7 @@
   }
 
   @media (max-width: 599px), (max-height: 599px) {
-    dialog.dialog {
+    dialog.dialog.full-screen {
       width: 100%;
       max-width: none;
       height: 100dvh;

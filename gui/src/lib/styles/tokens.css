@@ -4,6 +4,9 @@
  */
 :root {
   color-scheme: light;
+  /* RGB channels keep alpha state layers compatible with Thor's WebView 109. */
+  --md-sys-color-on-surface-rgb: 29 27 32;
+  --md-sys-color-primary-rgb: 103 80 164;
   --md-sys-color-primary: #6750a4;
   --md-sys-color-on-primary: #fff;
   --md-sys-color-primary-container: #eaddff;
@@ -119,6 +122,8 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --md-sys-color-on-surface-rgb: 230 224 233;
+  --md-sys-color-primary-rgb: 208 188 255;
   --md-sys-color-primary: #d0bcff;
   --md-sys-color-on-primary: #381e72;
   --md-sys-color-primary-container: #4f378b;
