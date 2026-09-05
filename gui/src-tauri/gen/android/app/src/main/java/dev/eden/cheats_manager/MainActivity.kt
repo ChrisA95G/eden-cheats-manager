@@ -1,7 +1,12 @@
 package dev.eden.cheats_manager
 
 import android.os.Bundle
+import android.graphics.Color
+import android.view.View
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import java.lang.ref.WeakReference
 
 class MainActivity : TauriActivity() {
@@ -112,8 +117,25 @@ class MainActivity : TauriActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         super.onCreate(savedInstanceState)
+        // Older WebViews do not expose system-bar insets through CSS env().
+        // Own them here so the web viewport and native dialogs stay unobscured.
+        val content = findViewById<View>(android.R.id.content)
+        // Neutral baseline chrome; white system icons remain legible in either app theme.
+        content.setBackgroundColor(Color.rgb(20, 18, 24))
+        ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
+            val safe = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or
+                    WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
+            )
+            view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
+        ViewCompat.requestApplyInsets(content)
         instance = WeakReference(this)
     }
 
