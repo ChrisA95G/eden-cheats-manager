@@ -96,20 +96,13 @@
     } catch (cause) {
       if (!alive || revision !== scanRevision) return;
       library = reduceLibraryState(library,{type:'refreshFailed',error:errorMessage(cause)});
-      refreshPhase = 'error';
+      refreshPhase = 'error'; reconcileTitle();
     }
   }
   async function startLibrary() {
     if (started) return;
     started = true;
-    const revision = ++scanRevision;
-    refreshPhase = 'loading';
-    try {
-      const games = await backend.getCachedGames(platform);
-      if (!alive || revision !== scanRevision) return;
-      library = reduceLibraryState(library,{type:'cacheLoaded',games});
-    } catch { /* An unreadable cache does not prevent a fresh scan. */ }
-    if (alive && revision === scanRevision) await refreshLibrary();
+    await refreshLibrary();
   }
   $effect(()=>{
     if (ready && !loading) untrack(()=>{void startLibrary();});
@@ -220,6 +213,7 @@
 {:else}
   <main class="app-shell" class:show-workspace={pane === 'workspace'}>
     <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase}
+      packageLibrary={library.packageLibrary}
       refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
     <div class="workspace-slot"><GameWorkspace {game} {platform} {settings} packageLibrary={library.packageLibrary}
       androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}

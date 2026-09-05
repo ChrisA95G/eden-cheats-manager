@@ -7,8 +7,7 @@ import {
   createLibraryState,
   fallbackCandidate,
   gameCheatTarget,
-  findPresenceByObservedId,
-  libraryCandidatesForTitle,
+  libraryCandidatesForGame,
   reconcileCandidate,
   reduceLibraryState,
 } from './library.js';
@@ -37,6 +36,7 @@ test('cheat library drops DLC-only groups and preserves base/update identities',
   assert.equal(gameCheatTarget(updateOnly), update, 'update-only groups retain the actual observed Title ID');
   assert.equal(gameCheatTarget(dlcOnly), null);
   assert.equal(gameCheatTarget(null), null);
+  assert.equal(gameCheatTarget({...group, baseGame:{...base, installed:false}}), update);
 });
 
 /** @typedef {import('../api/types.js').EdenPackageCorrelationEntry} EdenPackageCorrelationEntry */
@@ -44,12 +44,12 @@ test('cheat library drops DLC-only groups and preserves base/update identities',
 /** @typedef {import('../api/types.js').GameVersionPackage} GameVersionPackage */
 /** @typedef {import('../api/types.js').ManagedPackageLibrary} ManagedPackageLibrary */
 
-/** @param {string} relativePath @param {string} [buildId] @returns {GameVersionPackage} */
-function packageRecord(relativePath, buildId = 'BUILD') {
+/** @param {string} relativePath @param {string} [buildId] @param {string} [baseTitleId] @returns {GameVersionPackage} */
+function packageRecord(relativePath, buildId = 'BUILD', baseTitleId = '0100000000000000') {
   return {
     contentKind: 'application',
     titleId: '0100000000000800',
-    baseTitleId: '0100000000000000',
+    baseTitleId,
     version: 1,
     buildId,
     moduleId: buildId,
@@ -80,13 +80,13 @@ function readyLibrary(entries, unmatchedPackageGroups = []) {
   };
 }
 
-test('candidate lookup uses only exact normalized observed Title ID', () => {
-  const sameNameCandidate = packageRecord('wrong/game.nsp', 'WRONG');
+test('game candidates include package-only games and deduplicate Eden correlations by exact identity', () => {
+  const sameNameCandidate = packageRecord('wrong/game.nsp', 'WRONG', '0100AAAA00000000');
   const exactCandidates = [
-    packageRecord('first/game.nsp', 'SAME'),
-    packageRecord('second/game.nsp', 'SAME'),
+    packageRecord('first/game.nsp', 'SAME', '0100BBBB00000000'),
+    packageRecord('second/game.nsp', 'SAME', '0100BBBB00000000'),
   ];
-  const packageOnly = packageRecord('package-only/game.nsp', 'PACKAGE');
+  const packageOnly = packageRecord('package-only/game.nsp', 'PACKAGE', '0100BBBB00000000');
   const library = readyLibrary(
     [
       {
@@ -100,20 +100,23 @@ test('candidate lookup uses only exact normalized observed Title ID', () => {
         packageCandidates: exactCandidates,
       },
       {
-        observedTitleId: '0100BBBB00000001',
+        observedTitleId: '0100BBBB00000000',
         resolvedBaseTitleId: null,
-        packageCandidates: [],
+        packageCandidates: exactCandidates,
       },
     ],
     [{ baseTitleId: '0100BBBB00000000', versions: [packageOnly] }],
   );
 
-  assert.equal(findPresenceByObservedId(library, ' 0100bbbb00000800 ')?.observedTitleId, '0100BBBB00000800');
   assert.deepEqual(
-    libraryCandidatesForTitle(library, '0100BBBB00000800').map((item) => item.package.relativePath),
-    ['first/game.nsp', 'second/game.nsp'],
+    libraryCandidatesForGame(library, ' 0100bbbb00000000 ').map((item) => item.package.relativePath),
+    ['first/game.nsp', 'second/game.nsp', 'package-only/game.nsp'],
   );
-  assert.deepEqual(libraryCandidatesForTitle(library, '0100BBBB00000000'), []);
+  assert.deepEqual(libraryCandidatesForGame(library, '0100CCCC00000000'), []);
+  assert.equal(libraryCandidatesForGame(readyLibrary([], [{baseTitleId:packageOnly.baseTitleId, versions:[packageOnly]}]), packageOnly.baseTitleId).length, 1);
+  assert.deepEqual(libraryCandidatesForGame({state:'notConfigured', message:''}, packageOnly.baseTitleId), []);
+  const dlc = {...packageOnly, contentKind:'add_on_content'};
+  assert.deepEqual(libraryCandidatesForGame(readyLibrary([], [{baseTitleId:dlc.baseTitleId, versions:[dlc]}]), dlc.baseTitleId), []);
 });
 
 test('candidate reconciliation preserves duplicates and never auto-selects', () => {
@@ -155,32 +158,35 @@ test('fallback candidates remain tagged separately from library records', () => 
   assert.match(candidateKey(candidate), /^\["fallback"/);
 });
 
-test('library reducer paints cache, accepts nested setup errors, and keeps games on rejection', () => {
-  const cachedGames = [{ baseTitleId: 'CACHE' }];
+test('library reducer never falls back to Eden-only or stale games after setup or scan errors', () => {
   const freshGames = [{ baseTitleId: 'FRESH' }];
   const initial = createLibraryState();
   assert.equal(initial.packageLibrary, null);
 
   let state = reduceLibraryState(initial, {
-    type: 'cacheLoaded',
-    games: /** @type {any} */ (cachedGames),
-  });
-  assert.equal(state.games, cachedGames);
-
-  state = reduceLibraryState(state, {
     type: 'refreshSucceeded',
     snapshot: {
       games: /** @type {any} */ (freshGames),
-      packageLibrary: { state: 'error', message: 'Keys could not be read' },
+      packageLibrary: readyLibrary([]),
     },
   });
   assert.equal(state.games, freshGames);
-  assert.equal(state.packageLibrary?.state, 'error');
+  assert.equal(state.packageLibrary?.state, 'ready');
+
+  for (const packageLibrary of [
+    {state: /** @type {const} */ ('error'), message:'Keys could not be read'},
+    {state: /** @type {const} */ ('notConfigured'), message:'Choose a package folder'},
+  ]) {
+    const unavailable = reduceLibraryState(state, {type:'refreshSucceeded', snapshot:{games:state.games, packageLibrary}});
+    assert.deepEqual(unavailable.games, []);
+    assert.equal(unavailable.packageLibrary, packageLibrary);
+  }
 
   const failed = reduceLibraryState(state, {
     type: 'refreshFailed',
     error: 'Eden scan failed',
   });
-  assert.equal(failed.games, freshGames);
+  assert.deepEqual(failed.games, []);
+  assert.equal(failed.packageLibrary, null);
   assert.equal(failed.refreshError, 'Eden scan failed');
 });

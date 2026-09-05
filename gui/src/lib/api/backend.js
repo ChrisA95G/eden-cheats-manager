@@ -5,7 +5,6 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 /** @typedef {import('./types.js').AppSettings} AppSettings */
 /** @typedef {import('./types.js').BootstrapResult} BootstrapResult */
 /** @typedef {import('./types.js').EdenLoadAccessStatus} EdenLoadAccessStatus */
-/** @typedef {import('./types.js').GameGroup} GameGroup */
 /** @typedef {import('./types.js').GameInfo} GameInfo */
 /** @typedef {import('./types.js').GameLibraryStatus} GameLibraryStatus */
 /** @typedef {import('./types.js').InstalledCheat} InstalledCheat */
@@ -62,16 +61,6 @@ export async function saveSettings(settings) {
 /** @returns {Promise<string>} */
 export async function detectPcLoadDir() {
   return /** @type {string} */ (await invoke('detect_pc_load_dir'));
-}
-
-/** @param {Platform} platform @returns {Promise<GameGroup[]>} */
-export async function getCachedGames(platform) {
-  const command = platformCommand(
-    platform,
-    'get_cached_games_android',
-    'get_cached_games_pc',
-  );
-  return /** @type {GameGroup[]} */ (await invoke(command));
 }
 
 /** @param {Platform} platform @returns {Promise<ManagedLibrarySnapshot>} */

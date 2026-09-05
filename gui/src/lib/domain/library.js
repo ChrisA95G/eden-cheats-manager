@@ -18,23 +18,12 @@ export function cheatLibraryGroups(games) {
     .map(group => ({ ...group, dlcs: [] }));
 }
 
-/** Use an observed entry, never synthesize a cheat-directory Title ID.
+/** Prefer an existing Eden target, otherwise browse the scanned game's base ID.
  * @param {GameGroup | null} game
  */
 export function gameCheatTarget(game) {
-  return game?.baseGame ?? game?.updates[0] ?? null;
-}
-
-/**
- * @param {ManagedPackageLibrary} packageLibrary
- * @param {string} observedTitleId
- */
-export function findPresenceByObservedId(packageLibrary, observedTitleId) {
-  if (packageLibrary.state !== 'ready') return null;
-  const expected = normalizeTitleId(observedTitleId);
-  return packageLibrary.correlation.edenEntries.find(
-    (entry) => normalizeTitleId(entry.observedTitleId) === expected,
-  ) ?? null;
+  return (game?.baseGame?.installed ? game.baseGame : game?.updates.find(entry => entry.installed))
+    ?? game?.baseGame ?? game?.updates[0] ?? null;
 }
 
 /**
@@ -45,15 +34,24 @@ export function findPresenceByObservedId(packageLibrary, observedTitleId) {
 
 /**
  * @param {ManagedPackageLibrary} packageLibrary
- * @param {string} observedTitleId
+ * @param {string} baseTitleId
  * @returns {LibraryCandidate[]}
  */
-export function libraryCandidatesForTitle(packageLibrary, observedTitleId) {
-  const presence = findPresenceByObservedId(packageLibrary, observedTitleId);
-  return presence?.packageCandidates.map((candidate) => ({
-    source: /** @type {const} */ ('library'),
-    package: candidate,
-  })) ?? [];
+export function libraryCandidatesForGame(packageLibrary, baseTitleId) {
+  if (packageLibrary.state !== 'ready') return [];
+  const correlation = packageLibrary.correlation;
+  const packages = [
+    ...correlation.edenEntries.flatMap(entry => entry.packageCandidates),
+    ...correlation.unmatchedPackageGroups.flatMap(group => group.versions),
+  ];
+  const candidates = new Map();
+  for (const value of packages) {
+    if (normalizeTitleId(value.baseTitleId) !== normalizeTitleId(baseTitleId)
+      || !['application', 'patch'].includes(value.contentKind)) continue;
+    const candidate = { source: /** @type {const} */ ('library'), package: value };
+    candidates.set(candidateKey(candidate), candidate);
+  }
+  return [...candidates.values()];
 }
 
 /** @param {PackageMetadata} metadata @param {string} [label] @returns {FallbackCandidate} */
@@ -119,23 +117,20 @@ export function createLibraryState() {
 
 /**
  * @param {LibraryState} state
- * @param {{ type: 'cacheLoaded', games: GameGroup[] }
- *   | { type: 'refreshSucceeded', snapshot: ManagedLibrarySnapshot }
+ * @param {{ type: 'refreshSucceeded', snapshot: ManagedLibrarySnapshot }
  *   | { type: 'refreshFailed', error: string }} action
  * @returns {LibraryState}
  */
 export function reduceLibraryState(state, action) {
   switch (action.type) {
-    case 'cacheLoaded':
-      return action.games.length > 0 ? { ...state, games: action.games } : state;
     case 'refreshSucceeded':
       return {
-        games: action.snapshot.games,
+        games: action.snapshot.packageLibrary.state === 'ready' ? action.snapshot.games : [],
         packageLibrary: action.snapshot.packageLibrary,
         refreshError: '',
       };
     case 'refreshFailed':
-      return { ...state, refreshError: action.error };
+      return { games: [], packageLibrary: null, refreshError: action.error };
     default:
       return state;
   }

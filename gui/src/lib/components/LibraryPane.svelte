@@ -9,6 +9,7 @@
    * @typedef {Object} Props
    * @property {GameGroup[]} games
    * @property {RefreshPhase} refreshPhase
+   * @property {import('../api/types.js').ManagedPackageLibrary|null} packageLibrary
    * @property {string} refreshError
    * @property {string} selectedTitleId
    * @property {(titleId: string) => void} onselect
@@ -20,6 +21,7 @@
   let {
     games,
     refreshPhase,
+    packageLibrary,
     refreshError,
     selectedTitleId,
     onselect,
@@ -59,6 +61,10 @@
     ? games.filter((group) => groupMatches(group, normalizedQuery))
     : games);
   let refreshing = $derived(refreshPhase === 'loading');
+  let needsSetup = $derived(packageLibrary?.state === 'notConfigured');
+  let libraryError = $derived(refreshError || (packageLibrary?.state === 'error' ? packageLibrary.message : '')
+    || (packageLibrary?.state === 'ready' && !games.length && packageLibrary.correlation.packageScanErrors.length
+      ? `No games could be read. ${packageLibrary.correlation.packageScanErrors[0].message}` : ''));
   let groupCountLabel = $derived(
     `${games.length} game${games.length === 1 ? '' : 's'}`,
   );
@@ -114,24 +120,29 @@
     {#if refreshing}
       <div class="refresh-status" role="status" aria-live="polite">
         <div class="md-progress" role="progressbar" aria-label="Refreshing game library"></div>
-        <span>Refreshing installed games and package matches…</span>
+        <span>Scanning game packages…</span>
       </div>
-    {:else if refreshPhase === 'error'}
+    {:else if libraryError}
       <div class="refresh-error" role="alert">
         <Icon name="warning" size={20} />
-        <span>{refreshError || 'The game library could not be refreshed. Showing the last available games.'}</span>
+        <span>{libraryError}</span>
       </div>
     {/if}
 
     {#if games.length === 0 && !refreshing}
       <div class="empty-state" role="status">
         <span class="empty-icon" aria-hidden="true"><Icon name="game" size={32} /></span>
-        <h2>No games found</h2>
-        <p>Refresh after adding games to Eden. Package setup is not required to list installed games.</p>
+        <h2>{needsSetup ? 'Connect your game library' : libraryError ? 'Unable to load game library' : 'No games found'}</h2>
+        <p>{needsSetup ? 'Select prod.keys and the folder containing your NSP/XCI games in Settings.'
+          : libraryError ? 'Check your package folder and prod.keys, then try again.'
+          : 'Add base games or updates to your NSP/XCI folder, then refresh. DLC is not listed.'}</p>
+        <button type="button" class="md-button md-button--tonal" onclick={onsettings}>Open Settings</button>
+        {#if !needsSetup}
         <button type="button" class="md-button md-button--tonal" onclick={onrefresh}>
           <Icon name="refresh" size={18} />
           Refresh library
         </button>
+        {/if}
       </div>
     {:else if !refreshing && normalizedQuery && filteredGames.length === 0}
       <div class="empty-state search-empty" role="status" aria-live="polite">
@@ -163,6 +174,8 @@
                 <code>{group.baseTitleId}</code>
                 {#if group.baseInstalled || group.updates.some(entry => entry.installed)}
                   <span class="installed-label"><Icon name="check" size={14} /> Present in Eden</span>
+                {:else}
+                  <span class="absent-label">Not present in Eden</span>
                 {/if}
               </div>
             </button>
@@ -401,6 +414,8 @@
     line-height: 1rem;
     white-space: nowrap;
   }
+
+  .absent-label { color:var(--md-sys-color-on-surface-variant); font-size:12px; }
 
   .empty-state {
     display: flex;

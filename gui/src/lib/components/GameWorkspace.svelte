@@ -2,7 +2,7 @@
   import { onMount, untrack } from 'svelte';
   import * as backend from '../api/backend.js';
   import { cheatFileName, createInstalledIndex, groupCheatEntries, installedTupleKey } from '../domain/cheats.js';
-  import { candidateKey, fallbackCandidate, gameCheatTarget, libraryCandidatesForTitle, reconcileCandidate } from '../domain/library.js';
+  import { candidateKey, fallbackCandidate, gameCheatTarget, libraryCandidatesForGame, reconcileCandidate } from '../domain/library.js';
   import { createRequestRevisions } from '../domain/request-revisions.js';
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
@@ -58,7 +58,7 @@
   let catalogHeading = $state(/** @type {HTMLElement|null} */ (null));
   let installedHeading = $state(/** @type {HTMLElement|null} */ (null));
   let candidates = $derived([
-    ...(target && packageLibrary ? libraryCandidatesForTitle(packageLibrary, target.titleId) : []),
+    ...(game && packageLibrary ? libraryCandidatesForGame(packageLibrary, game.baseTitleId) : []),
     ...(fallback ? [fallback] : []),
   ]);
   let groups = $derived(groupCheatEntries(catalog?.cheats ?? []));
@@ -87,7 +87,7 @@
   /** @param {unknown} error */
   function message(error) { return error instanceof Error ? error.message : String(error); }
   function context() {
-    return { titleId: target?.titleId ?? '', expectedBaseTitleId: target?.baseTitleId ?? '', platform, settings: {...settings} };
+    return { titleId: target?.titleId ?? '', expectedBaseTitleId: target?.baseTitleId ?? '', edenPresent: target?.installed === true, platform, settings: {...settings} };
   }
   /** @param {'catalog'|'installed'} resource @param {ReturnType<typeof context>} ctx */
   async function read(resource, ctx) {
@@ -99,7 +99,7 @@
         const result = await backend.searchCheats(ctx.titleId);
         if (requests.isCurrent(token)) catalog = result;
       } else {
-        const result = await backend.listInstalledCheats(ctx.platform, ctx.settings, ctx.titleId);
+        const result = ctx.edenPresent ? await backend.listInstalledCheats(ctx.platform, ctx.settings, ctx.titleId) : [];
         if (requests.isCurrent(token)) installed = result;
       }
     } catch (error) {
@@ -117,6 +117,7 @@
 
   $effect(() => {
     const titleId = target?.titleId;
+    const edenPresent = target?.installed;
     const revision = contextRevision;
     untrack(() => {
       requests.beginSelection();
@@ -165,6 +166,7 @@
 
   /** @param {string} buildId @param {import('../domain/cheats.js').CheatSection} section */
   function install(buildId, section) {
+    if (!target?.installed) return;
     const ctx = context();
     const cheatName = cheatFileName(section.name, buildId);
     const action = () => mutate('installed', async () => {
@@ -245,6 +247,7 @@
         <p>{game.baseTitleId}</p>
         {#if game.baseInstalled || game.updates.some(entry => entry.installed)}
           <span class="presence"><Icon name="check" size={14} />Present in Eden</span>
+        {:else}<small>Not present in Eden</small>
         {/if}
       </div>
       <details class="options-menu" bind:this={optionsMenu} bind:open={optionsOpen}>
@@ -297,6 +300,7 @@
             <button class="md-icon-button refresh-catalog" aria-label="Refresh cheat catalog" disabled={catalogLoading || working} onclick={()=>read('catalog',context())}><Icon name="refresh" /></button>
           </div>
           {#if !settings.apiToken}<p class="support"><button class="text-link" onclick={onsettings}>Connect Cheatslips</button> to fetch online.</p>{/if}
+          {#if !target.installed}<p class="support">Open this game in Eden before installing cheats.</p>{/if}
           {#if catalogError}<p class="error" role="alert">{catalogError}</p>{/if}
           {#if catalogLoading || working}<div class="md-progress" role="progressbar" aria-label={working ? 'Saving changes' : 'Loading cheat catalog'}></div>{/if}
           {#each visibleGroups as group (group.buildId)}
@@ -306,7 +310,7 @@
               {#each group.sections as section}
                 {@const present = installedIndex.has(installedTupleKey(group.buildId,cheatFileName(section.name,group.buildId)))}
                 <div class="cheat-row"><details><summary>{section.name}{section.custom ? ' · Custom' : ''}</summary><pre>{section.content}</pre></details>
-                  <button class="md-button md-button--text" disabled={working || installedLoading || !!installedError} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
+                  <button class="md-button md-button--text" disabled={!target.installed || working || installedLoading || !!installedError} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
               {/each}
               {#each group.customEntries as entry (entry.entryId)}
                 <div class="file-row"><details><summary>Custom entry #{entry.entryId}</summary><pre>{entry.content}</pre></details><button class="md-icon-button" aria-label={`Delete custom entry ${entry.entryId}`} disabled={working} onclick={()=>removeCustom(entry.entryId)}><Icon name="delete" /></button></div>

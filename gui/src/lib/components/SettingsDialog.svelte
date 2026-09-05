@@ -264,8 +264,8 @@
         <div class="section-heading">
           <Icon name="game" size={22} />
           <div>
-            <h3 id="settings-packages-title">Package matching</h3>
-            <p>Optional. Use your game library to find compatible builds.</p>
+            <h3 id="settings-packages-title">Game library</h3>
+            <p>Scan NSP/XCI games and updates to populate your library and detect builds.</p>
           </div>
         </div>
 
@@ -386,8 +386,8 @@
         <div class="section-heading">
           <Icon name="game" size={22} />
           <div>
-            <h3 id="settings-android-packages-title">Package matching</h3>
-            <p>Optional. Connect keys and a package-library folder.</p>
+            <h3 id="settings-android-packages-title">Game library</h3>
+            <p>Connect prod.keys and your NSP/XCI folder to populate the library.</p>
           </div>
         </div>
 

@@ -215,17 +215,17 @@
           <div class="section-heading">
             <Icon name="key" size={22} />
             <div>
-              <h2 id="package-matching-heading">Package version matching</h2>
+              <h2 id="package-matching-heading">Game library</h2>
               <p>
-                Optional. Select both prod.keys and a package-library folder to match installed
-                games to exact versions. Leave both blank to set this up later.
+                Select prod.keys and your NSP/XCI folder to list games and detect their builds.
+                You can connect them later in Settings; the library stays empty until then.
               </p>
             </div>
           </div>
 
           <div class="field-grid">
             <label class="md-field" for="setup-prod-keys">
-              <span>prod.keys file <span class="optional">(optional)</span></span>
+              <span>prod.keys file</span>
               <span class="path-control">
                 <input
                   id="setup-prod-keys"
@@ -248,7 +248,7 @@
             </label>
 
             <label class="md-field" for="setup-package-library">
-              <span>Package-library directory <span class="optional">(optional)</span></span>
+              <span>NSP/XCI library directory</span>
               <span class="path-control">
                 <input
                   id="setup-package-library"
@@ -274,7 +274,7 @@
           {#if packagePairIncomplete}
             <p class="pair-note" role="status">
               <Icon name="info" size={18} />
-              Bulk matching needs both paths. A keys file alone can be used to inspect one package.
+              Scanning your game library needs both paths.
             </p>
           {/if}
         </section>
