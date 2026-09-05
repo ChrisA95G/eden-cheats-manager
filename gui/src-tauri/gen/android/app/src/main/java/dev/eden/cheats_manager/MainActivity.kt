@@ -125,7 +125,8 @@ class MainActivity : TauriActivity() {
         // Older WebViews do not expose system-bar insets through CSS env().
         // Own them here so the web viewport and native dialogs stay unobscured.
         val content = findViewById<View>(android.R.id.content)
-        content.setBackgroundColor(Color.rgb(23, 19, 14))
+        // Neutral baseline chrome; white system icons remain legible in either app theme.
+        content.setBackgroundColor(Color.rgb(20, 18, 24))
         ViewCompat.setOnApplyWindowInsetsListener(content) { view, insets ->
             val safe = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() or

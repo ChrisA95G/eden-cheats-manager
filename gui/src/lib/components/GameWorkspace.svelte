@@ -246,7 +246,7 @@
         <h1 tabindex="-1" data-workspace-heading>{game.baseName || target.name || game.baseTitleId}</h1>
         <p>{game.baseTitleId}</p>
         {#if game.baseInstalled || game.updates.some(entry => entry.installed)}
-          <span class="presence"><Icon name="check" size={14} />Present in Eden</span>
+          <span class="presence"><Icon name="check" size={20} />Present in Eden</span>
         {:else}<small>Not present in Eden</small>
         {/if}
       </div>
@@ -261,7 +261,7 @@
           <span class="version-label" id={`${id}-version-label`}>Game version</span>
           <button class="version-picker" aria-haspopup="dialog" aria-labelledby={`${id}-version-label ${id}-version-value`}
             disabled={working || !candidates.length} aria-describedby={`${id}-version-help`} onclick={()=>versionOpen=true}>
-            <span id={`${id}-version-value`}>{chosen ? versionLabel(chosen) : 'All builds'}</span><Icon name="expand" />
+            <span id={`${id}-version-value`}>{chosen ? versionLabel(chosen) : 'Please select a build'}</span><Icon name="expand" />
           </button>
           <div id={`${id}-version-help`} class="version-help">
             {#if chosenBuild}
@@ -295,8 +295,8 @@
         <div class="tab-panel" id={`${id}-catalog-panel`} role="tabpanel" tabindex="0" hidden={activeTab !== 'catalog'} aria-labelledby={`${id}-catalog-tab`} aria-busy={catalogLoading}>
           <h2 class="md-sr-only" tabindex="-1" bind:this={catalogHeading}>Available cheats</h2>
           <div class="actions catalog-actions">
-            <button class="md-button md-button--tonal" disabled={working || !settings.apiToken} onclick={fetchOnline}><Icon name="download" size={18} />Fetch online</button>
-            <button class="md-button md-button--outlined" disabled={working} onclick={()=>{customBuild=chosenBuild;customContent='';actionError='';customOpen=true;}}><Icon name="add" size={18} />Custom cheat</button>
+            <button class="md-button md-button--tonal" disabled={working || !settings.apiToken} onclick={fetchOnline}><Icon name="download" size={20} />Fetch online</button>
+            <button class="md-button md-button--outlined" disabled={working} onclick={()=>{customBuild=chosenBuild;customContent='';actionError='';customOpen=true;}}><Icon name="add" size={20} />Custom cheat</button>
             <button class="md-icon-button refresh-catalog" aria-label="Refresh cheat catalog" disabled={catalogLoading || working} onclick={()=>read('catalog',context())}><Icon name="refresh" /></button>
           </div>
           {#if !settings.apiToken}<p class="support"><button class="text-link" onclick={onsettings}>Connect Cheatslips</button> to fetch online.</p>{/if}

@@ -1,5 +1,6 @@
 <script>
   import { onMount, tick, untrack } from 'svelte';
+  import { initializeTheme } from '$lib/domain/theme.js';
   import * as backend from '$lib/api/backend.js';
   import { cheatLibraryGroups, createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
   import SetupScreen from '$lib/components/SetupScreen.svelte';
@@ -186,6 +187,7 @@
     finally { if (alive) loading=false; }
   }
   onMount(()=>{
+    const stopTheme = initializeTheme();
     alive=true;
     history.replaceState({...history.state,...navigationState()},'');
     window.addEventListener('popstate',navigateBack);
@@ -193,6 +195,7 @@
     document.addEventListener('visibilitychange',resumed);
     void bootstrap();
     return ()=>{
+      stopTheme();
       alive=false; scanRevision++; statusRevision++;
       clearTimeout(resumeTimer); clearTimeout(noticeTimer);
       window.removeEventListener('popstate',navigateBack);

@@ -1,6 +1,7 @@
 <script>
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
+  import { theme } from '../domain/theme.js';
 
   /** @typedef {import('../api/types.js').AppSettings} AppSettings */
   /** @typedef {import('../api/types.js').EdenLoadAccessStatus} EdenLoadAccessStatus */
@@ -221,10 +222,28 @@
       submit();
     }}
   >
+    <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-appearance-title">
+      <div class="section-heading">
+        <Icon name="palette" />
+        <div>
+          <h3 id="settings-appearance-title">Appearance</h3>
+          <p>Applies immediately on this device. System follows your device's theme.</p>
+        </div>
+      </div>
+      <div class="theme-options" role="radiogroup" aria-label="Colour theme">
+        {#each /** @type {const} */ (['system', 'light', 'dark']) as choice}
+          <label class="theme-option" class:selected={$theme === choice}>
+            <input type="radio" name="theme" value={choice} bind:group={$theme} />
+            <Icon name={$theme === choice ? 'check' : choice === 'system' ? 'contrast' : choice === 'light' ? 'light_mode' : 'dark_mode'} />
+            {choice === 'system' ? 'System' : choice === 'light' ? 'Light' : 'Dark'}
+          </label>
+        {/each}
+      </div>
+    </section>
     {#if isDesktop}
       <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-storage-title">
         <div class="section-heading">
-          <Icon name="folder" size={22} />
+          <Icon name="folder" size={24} />
           <div>
             <h3 id="settings-storage-title">Eden storage</h3>
             <p>ECM installs cheat files in Eden's load directory.</p>
@@ -262,7 +281,7 @@
 
       <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-packages-title">
         <div class="section-heading">
-          <Icon name="game" size={22} />
+          <Icon name="game" size={24} />
           <div>
             <h3 id="settings-packages-title">Game library</h3>
             <p>Scan NSP/XCI games and updates to populate your library and detect builds.</p>
@@ -324,7 +343,7 @@
     {:else}
       <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-android-storage-title">
         <div class="section-heading">
-          <Icon name="folder" size={22} />
+          <Icon name="folder" size={24} />
           <div>
             <h3 id="settings-android-storage-title">Eden storage</h3>
             <p>Read and write access to Eden → load.</p>
@@ -364,7 +383,7 @@
             disabled={busy}
             onclick={retryAndroid}
           >
-            <Icon name="refresh" size={18} />
+            <Icon name="refresh" size={20} />
             Refresh status
           </button>
         </div>
@@ -384,7 +403,7 @@
 
       <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-android-packages-title">
         <div class="section-heading">
-          <Icon name="game" size={22} />
+          <Icon name="game" size={24} />
           <div>
             <h3 id="settings-android-packages-title">Game library</h3>
             <p>Connect prod.keys and your NSP/XCI folder to populate the library.</p>
@@ -439,7 +458,7 @@
 
     <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-online-title">
       <div class="section-heading">
-        <Icon name="download" size={22} />
+        <Icon name="download" size={24} />
         <div>
           <h3 id="settings-online-title">Online cheat source</h3>
           <p>Optional token used only when you request an online fetch.</p>
@@ -462,7 +481,7 @@
     {#if isDesktop}
       <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-diagnostics-title">
         <div class="section-heading">
-          <Icon name="info" size={22} />
+          <Icon name="info" size={24} />
           <div>
             <h3 id="settings-diagnostics-title">Diagnostics</h3>
             <p>Reveal ECM's local application log.</p>
@@ -504,6 +523,18 @@
 </Dialog>
 
 <style>
+  .theme-options { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .theme-option {
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    position: relative; flex: 1; min-height: var(--md-sys-size-touch); padding: 0.5rem 0.75rem;
+    border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full);
+    color: var(--md-sys-color-on-surface); cursor: pointer;
+  }
+  .theme-option.selected { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); border-color: transparent; }
+  .theme-option:focus-within { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }
+  .theme-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .theme-option:hover { box-shadow: inset 0 0 0 100px color-mix(in srgb, currentColor 8%, transparent); }
+
   .settings-form {
     display: grid;
     gap: 1rem;

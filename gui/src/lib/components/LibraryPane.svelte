@@ -139,7 +139,7 @@
         <button type="button" class="md-button md-button--tonal" onclick={onsettings}>Open Settings</button>
         {#if !needsSetup}
         <button type="button" class="md-button md-button--tonal" onclick={onrefresh}>
-          <Icon name="refresh" size={18} />
+          <Icon name="refresh" size={20} />
           Refresh library
         </button>
         {/if}
@@ -165,7 +165,7 @@
                 <img class="game-cover" src={group.baseImage} alt="" loading="lazy" decoding="async" />
               {:else}
                 <span class="game-cover placeholder" aria-hidden="true">
-                  <Icon name="game" size={28} />
+                  <Icon name="game" size={32} />
                 </span>
               {/if}
 
@@ -173,7 +173,7 @@
                 <h2>{group.baseName || group.baseTitleId}</h2>
                 <code>{group.baseTitleId}</code>
                 {#if group.baseInstalled || group.updates.some(entry => entry.installed)}
-                  <span class="installed-label"><Icon name="check" size={14} /> Present in Eden</span>
+                  <span class="installed-label"><Icon name="check" size={20} /> Present in Eden</span>
                 {:else}
                   <span class="absent-label">Not present in Eden</span>
                 {/if}

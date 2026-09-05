@@ -166,7 +166,7 @@
   }
 
   dialog::backdrop {
-    background: rgb(0 0 0 / 0.64);
+    background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
   }
 
   .dialog__header {

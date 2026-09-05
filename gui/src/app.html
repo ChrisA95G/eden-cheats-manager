@@ -4,7 +4,16 @@
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#17130e" />
+    <meta name="theme-color" content="#fef7ff" />
+    <script>
+      // Restore before first paint, while the application bundle is loading.
+      let preference;
+      try { preference = localStorage.getItem('ecm-theme'); } catch {}
+      const dark = preference === 'dark' || (preference !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+      document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+      document.querySelector('meta[name="theme-color"]').content = dark ? '#141218' : '#fef7ff';
+    </script>
     <title>Eden Cheats Manager</title>
     %sveltekit.head%
   </head>

@@ -141,7 +141,7 @@
   <section class="setup-card md-card md-card--elevated" aria-labelledby="setup-title" aria-busy={componentBusy}>
     <header class="hero">
       <div class="hero-icon" aria-hidden="true">
-        <Icon name={platform === 'android' ? 'folder' : 'settings'} size={30} />
+        <Icon name={platform === 'android' ? 'folder' : 'settings'} size={32} />
       </div>
       <div>
         <p class="eyebrow">Eden Cheats Manager</p>
@@ -173,7 +173,7 @@
       <form class="desktop-form" onsubmit={submitDesktop}>
         <section class="form-section" aria-labelledby="eden-storage-heading">
           <div class="section-heading">
-            <Icon name="folder" size={22} />
+            <Icon name="folder" size={24} />
             <div>
               <h2 id="eden-storage-heading">Eden storage</h2>
               <p>Required for finding installed games and managing their cheats.</p>
@@ -200,7 +200,7 @@
                 title="Browse for Eden load directory"
                 onclick={() => pickDesktop('edenLoad', pcLoadDir)}
               >
-                <Icon name="folder" size={22} />
+                <Icon name="folder" size={24} />
               </button>
             </span>
             {#if detectedPcLoadDir}
@@ -213,7 +213,7 @@
 
         <section class="form-section" aria-labelledby="package-matching-heading">
           <div class="section-heading">
-            <Icon name="key" size={22} />
+            <Icon name="key" size={24} />
             <div>
               <h2 id="package-matching-heading">Game library</h2>
               <p>
@@ -242,7 +242,7 @@
                   title="Browse for prod.keys"
                   onclick={() => pickDesktop('prodKeys', prodKeysPath)}
                 >
-                  <Icon name="key" size={22} />
+                  <Icon name="key" size={24} />
                 </button>
               </span>
             </label>
@@ -265,7 +265,7 @@
                   title="Browse for package-library directory"
                   onclick={() => pickDesktop('packageLibrary', packageLibraryPath)}
                 >
-                  <Icon name="folder" size={22} />
+                  <Icon name="folder" size={24} />
                 </button>
               </span>
             </label>
@@ -273,7 +273,7 @@
 
           {#if packagePairIncomplete}
             <p class="pair-note" role="status">
-              <Icon name="info" size={18} />
+              <Icon name="info" size={20} />
               Scanning your game library needs both paths.
             </p>
           {/if}
@@ -283,7 +283,7 @@
 
         <section class="form-section" aria-labelledby="online-cheats-heading">
           <div class="section-heading">
-            <Icon name="download" size={22} />
+            <Icon name="download" size={24} />
             <div>
               <h2 id="online-cheats-heading">Online cheats</h2>
               <p>Add a Cheatslips token to download cheats, or leave it blank for now.</p>
@@ -314,7 +314,7 @@
       <div class="android-content">
         <div class="status-card" class:ready={androidReady} role="status" aria-live="polite" aria-atomic="true">
           <span class="status-icon" aria-hidden="true">
-            <Icon name={androidReady ? 'check' : 'folder'} size={26} />
+            <Icon name={androidReady ? 'check' : 'folder'} size={24} />
           </span>
           <div>
             <h2>{androidReady ? 'Eden storage is ready' : 'Eden storage access required'}</h2>
@@ -359,7 +359,7 @@
       max(1rem, env(safe-area-inset-left));
     color: var(--md-sys-color-on-background);
     background:
-      radial-gradient(circle at 50% 0%, rgb(255 185 81 / 0.1), transparent 34rem),
+      radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent), transparent 34rem),
       var(--md-sys-color-background);
   }
 

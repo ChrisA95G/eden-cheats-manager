@@ -275,7 +275,7 @@
   display: grid;
   place-items: center;
   padding: max(1rem, env(safe-area-inset-top)) max(1rem, env(safe-area-inset-right)) max(1rem, env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
-  background: rgb(0 0 0 / 0.64);
+  background: color-mix(in srgb, var(--md-sys-color-scrim) 32%, transparent);
 }
 
 .md-dialog {
