@@ -1,15 +1,45 @@
 name: Release
 
 on:
+  pull_request:
   push:
+    branches: [dev, main]
     tags:
       - 'v*'
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: read
+
 jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+      - run: npm ci
+        working-directory: gui
+      - name: Validate release metadata
+        env:
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+        run: node scripts/check-release-version.mjs "$RELEASE_TAG"
+      - run: npm run check && npm run test && npm run build
+        working-directory: gui
+      - run: cargo test --locked
+        working-directory: gui/src-tauri
+
   release:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     strategy:
@@ -56,7 +86,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: gui
-        run: npm install
+        run: npm ci
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
@@ -69,15 +99,19 @@ jobs:
           releaseBody: |
             See the assets below to download for your platform.
 
-            **Windows:** If SmartScreen blocks the installer, click "More info" → "Run anyway".
+            Release notes, setup and known limitations: https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md
+
+            **Windows/macOS:** Builds are not yet runtime-verified for this RC. Desktop installers are not publisher-signed/notarized; review platform security warnings before choosing to install.
             **Linux:** AppImage — make executable with `chmod +x` then run.
-            **macOS:** Unsigned. Right-click the app → Open to bypass Gatekeeper.
             **Android:** Sideload the APK — enable "Install from unknown sources" in settings.
+            Back up existing cheats/settings before testing. Do not uninstall an existing Android release to bypass a signing mismatch.
           releaseDraft: true
-          prerelease: false
-          args: ${{ matrix.args }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          args: ${{ matrix.args }} -- --locked
 
   release-android:
+    needs: validate
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
     runs-on: ubuntu-22.04
@@ -120,25 +154,26 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: gui
-        run: npm install
+        run: npm ci
 
       - name: Build Android APK (release)
         working-directory: gui
-        run: npm run tauri android build -- --apk
+        run: npm run tauri android build -- --apk -- --locked
 
       - name: Verify JNI methods not renamed by R8
         run: |
           APK=gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
           APKANALYZER=$(find -L "$ANDROID_SDK_ROOT/cmdline-tools" -name apkanalyzer 2>/dev/null | sort -V | tail -1)
           if [ -z "$APKANALYZER" ]; then
-            echo "apkanalyzer not found, skipping method check"
-            exit 0
+            echo "ERROR: apkanalyzer not found; release verification is mandatory"
+            exit 1
           fi
-          METHODS="selectEdenLoadDirectory getEdenLoadAccessStatus safListDirectory safWriteTextFile safDeleteFile safRemoveEmptyDirectory selectProdKeysDocument selectGamePackageDocument getPackageDiscoveryStatus openProdKeysReadFd openGamePackageReadFd selectGameLibraryDirectory getGameLibraryStatus listGameLibraryPackages openGameLibraryPackageReadFd"
+          METHODS='selectEdenLoadDirectory()V getEdenLoadAccessStatus()Ljava/lang/String; safListDirectory(Ljava/lang/String;)Ljava/lang/String; safWriteTextFile(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; safDeleteFile(Ljava/lang/String;)Ljava/lang/String; safRemoveEmptyDirectory(Ljava/lang/String;)Ljava/lang/String; selectProdKeysDocument()V selectGamePackageDocument()V getPackageDiscoveryStatus()Ljava/lang/String; openProdKeysReadFd()I openGamePackageReadFd()I selectGameLibraryDirectory()V getGameLibraryStatus()Ljava/lang/String; listGameLibraryPackages()Ljava/lang/String; openGameLibraryPackageReadFd(Ljava/lang/String;)I'
           FAIL=0
-          DEX_DUMP=$($APKANALYZER dex packages --defined-only "$APK" 2>/dev/null)
+          DEX_DUMP=$("$APKANALYZER" dex code --class dev.eden.cheats_manager.MainActivity "$APK")
+          DECLARATIONS=$(echo "$DEX_DUMP" | grep -E '^\.method .*public.*static ' | sed 's/.* //')
           for M in $METHODS; do
-            if ! echo "$DEX_DUMP" | grep -q "$M"; then
+            if ! echo "$DECLARATIONS" | grep -Fxq "$M"; then
               echo "ERROR: method '$M' missing from APK dex — R8 renamed or removed it"
               FAIL=1
             fi
@@ -146,19 +181,48 @@ jobs:
           [ $FAIL -eq 0 ] && echo "All JNI-called methods present in dex" || exit 1
 
       - name: Sign APK
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > keystore.jks
+          umask 077
+          KEYSTORE_PATH="$RUNNER_TEMP/ecm-release-keystore.jks"
+          trap 'rm -f "$KEYSTORE_PATH"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$KEYSTORE_PATH"
           APKSIGNER=$(find -L "$ANDROID_SDK_ROOT/build-tools" -name apksigner | sort -V | tail -1)
-          $APKSIGNER sign \
-            --ks keystore.jks \
-            --ks-key-alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
-            --ks-pass pass:"${{ secrets.ANDROID_STORE_PASSWORD }}" \
-            --key-pass pass:"${{ secrets.ANDROID_KEY_PASSWORD }}" \
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass env:ANDROID_STORE_PASSWORD \
+            --key-pass env:ANDROID_KEY_PASSWORD \
             --out eden-cheats-manager.apk \
             gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
+          "$APKSIGNER" verify --verbose --print-certs eden-cheats-manager.apk
 
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
           files: eden-cheats-manager.apk
           draft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  checksums:
+    needs: [release, release-android]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Attach checksums after all platform builds succeed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          ARTIFACT_DIR=$(mktemp -d)
+          gh release download "$RELEASE_TAG" --dir "$ARTIFACT_DIR"
+          cd "$ARTIFACT_DIR"
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
+          test -s SHA256SUMS
+          gh release upload "$RELEASE_TAG" SHA256SUMS --clobber
