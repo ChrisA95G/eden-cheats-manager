@@ -1,7 +1,7 @@
 :root {
   color-scheme: dark;
 
-  /* Material 3 color roles generated from ECM's amber application mark. */
+  /* Material 3 color roles anchored to ECM's amber application mark. */
   --md-sys-color-primary: #ffb951;
   --md-sys-color-on-primary: #442b00;
   --md-sys-color-primary-container: #624000;
