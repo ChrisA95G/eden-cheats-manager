@@ -75,7 +75,6 @@ pub fn run() {
             settings::get_platform,
             // per-title build ID detection
             build_ids::detect_build_ids_pc,
-            build_ids::scan_build_id_pc,
             // local cheats lookup + custom cheats
             cheatslips::search_cheats,
             cheatslips::save_custom_cheat,
