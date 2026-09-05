@@ -1,6 +1,4 @@
-mod adb;
 mod android_native;
-mod build_ids;
 mod cheats;
 mod cheatslips;
 mod db;
@@ -10,7 +8,6 @@ mod package_library;
 mod package_library_pc;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod package_metadata;
-mod rom_cache;
 mod settings;
 
 use simplelog::{
@@ -70,12 +67,7 @@ pub fn run() {
             settings::save_settings,
             settings::detect_pc_load_dir,
             settings::get_app_log_path,
-            settings::get_eden_log_path_pc,
-            settings::detect_eden_exe,
             settings::get_platform,
-            // per-title build ID detection
-            build_ids::detect_build_ids_pc,
-            build_ids::scan_build_id_pc,
             // local cheats lookup + custom cheats
             cheatslips::search_cheats,
             cheatslips::save_custom_cheat,
@@ -86,12 +78,8 @@ pub fn run() {
             games::scan_eden_games_pc,
             games::get_cached_games_pc,
             games::get_cached_games_android,
-            games::get_eden_game_dirs_pc,
             managed_library::scan_managed_library_pc,
             managed_library::scan_managed_library_android_native,
-            // rom cache
-            rom_cache::set_rom_path_manual,
-            rom_cache::scan_and_update_rom_cache,
             // cheats
             cheats::install_cheat_pc,
             cheats::list_installed_cheats_pc,

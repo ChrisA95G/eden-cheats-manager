@@ -11,7 +11,6 @@ pub struct Settings {
     pub pc_load_dir: String,
     pub prod_keys_path: String,
     pub package_library_path: String,
-    pub eden_exe_path: String,
     pub onboarding_done: bool,
 }
 
@@ -22,7 +21,6 @@ impl Default for Settings {
             pc_load_dir: String::new(),
             prod_keys_path: String::new(),
             package_library_path: String::new(),
-            eden_exe_path: String::new(),
             onboarding_done: false,
         }
     }
@@ -98,81 +96,6 @@ pub fn get_app_log_path(app: AppHandle) -> String {
         .app_log_dir()
         .map(|d| d.join("eden-cheats-manager.log").to_string_lossy().to_string())
         .unwrap_or_default()
-}
-
-/// Return the Eden PC log path given a `load_dir`.
-/// Returns the first existing candidate, or empty string if none exist yet.
-#[tauri::command]
-pub fn get_eden_log_path_pc(load_dir: String) -> String {
-    let load_path = PathBuf::from(&load_dir);
-    let base = load_path.parent().unwrap_or(&load_path);
-    let candidates = [
-        base.join("log/eden_log.txt"),
-        base.join("eden_log.txt"),
-        load_path.join("../log/eden_log.txt"),
-    ];
-    for p in &candidates {
-        if p.exists() {
-            return p.canonicalize()
-                .unwrap_or_else(|_| p.clone())
-                .to_string_lossy()
-                .to_string();
-        }
-    }
-    String::new()
-}
-
-/// Try to find the Eden executable via PATH and well-known install locations.
-/// Returns the first match, or an empty string if not found.
-#[tauri::command]
-pub fn detect_eden_exe() -> String {
-    // Try PATH first
-    #[cfg(unix)]
-    if let Ok(out) = std::process::Command::new("which").arg("eden").output() {
-        if out.status.success() {
-            let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            if !p.is_empty() {
-                return p;
-            }
-        }
-    }
-    #[cfg(windows)]
-    if let Ok(out) = std::process::Command::new("where").arg("eden").output() {
-        if out.status.success() {
-            if let Some(line) = String::from_utf8_lossy(&out.stdout).lines().next() {
-                let p = line.trim().to_string();
-                if !p.is_empty() {
-                    return p;
-                }
-            }
-        }
-    }
-
-    // Well-known install locations
-    let mut candidates: Vec<String> = Vec::new();
-    if cfg!(target_os = "linux") {
-        if let Some(home) = dirs_next::home_dir() {
-            candidates.push(home.join(".local/bin/eden").to_string_lossy().into_owned());
-        }
-        candidates.push("/usr/bin/eden".into());
-        candidates.push("/usr/local/bin/eden".into());
-        candidates.push("/opt/eden/eden".into());
-    } else if cfg!(target_os = "windows") {
-        if let Ok(lad) = std::env::var("LOCALAPPDATA") {
-            candidates.push(format!("{}\\Programs\\eden\\eden.exe", lad));
-        }
-        if let Ok(pf) = std::env::var("PROGRAMFILES") {
-            candidates.push(format!("{}\\eden\\eden.exe", pf));
-        }
-    } else if cfg!(target_os = "macos") {
-        candidates.push("/Applications/eden.app/Contents/MacOS/eden".into());
-    }
-    for p in candidates {
-        if PathBuf::from(&p).exists() {
-            return p;
-        }
-    }
-    String::new()
 }
 
 /// Return the current compile-time platform: "android" or "desktop".
@@ -251,7 +174,6 @@ mod tests {
         assert_eq!(settings.pc_load_dir, pc_load_dir);
         assert_eq!(settings.prod_keys_path, "");
         assert_eq!(settings.package_library_path, "");
-        assert_eq!(settings.eden_exe_path, "/Applications/eden");
     }
 
     #[test]
@@ -287,7 +209,6 @@ mod tests {
         assert_eq!(settings.pc_load_dir, "load");
         assert_eq!(settings.prod_keys_path, "");
         assert_eq!(settings.package_library_path, "");
-        assert_eq!(settings.eden_exe_path, "");
         assert!(settings.onboarding_done);
     }
 
@@ -426,7 +347,6 @@ mod tests {
 
         assert_eq!(settings.api_token, "token");
         assert_eq!(settings.pc_load_dir, "load");
-        assert_eq!(settings.eden_exe_path, "eden");
         assert!(settings.onboarding_done);
     }
 
@@ -439,13 +359,39 @@ mod tests {
     }
 
     #[test]
+    fn obsolete_executable_is_ignored_without_losing_current_settings() {
+        for platform in [SettingsPlatform::Desktop, SettingsPlatform::Android] {
+            for obsolete in [
+                json!("/old/eden"),
+                json!({"unexpected": true}),
+                json!(null),
+            ] {
+                let current = json!({
+                    "apiToken": " retained token ",
+                    "pcLoadDir": " retained load ",
+                    "prodKeysPath": " retained keys ",
+                    "packageLibraryPath": " retained packages ",
+                    "onboardingDone": true
+                });
+                let mut legacy = current.clone();
+                legacy["edenExePath"] = obsolete;
+                let settings = deserialize_settings(&legacy.to_string(), platform);
+                assert_eq!(serde_json::to_value(&settings).unwrap(), current);
+                assert_eq!(
+                    deserialize_settings(&serde_json::to_string(&settings).unwrap(), platform),
+                    settings
+                );
+            }
+        }
+    }
+
+    #[test]
     fn package_library_paths_round_trip_in_camel_case() {
         let settings = Settings {
             api_token: "token".into(),
             pc_load_dir: "load".into(),
             prod_keys_path: "keys/prod.keys".into(),
             package_library_path: "packages".into(),
-            eden_exe_path: "eden".into(),
             onboarding_done: true,
         };
 
@@ -456,7 +402,6 @@ mod tests {
                 "pcLoadDir": "load",
                 "prodKeysPath": "keys/prod.keys",
                 "packageLibraryPath": "packages",
-                "edenExePath": "eden",
                 "onboardingDone": true
             })
         );

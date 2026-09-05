@@ -6,7 +6,6 @@
  * @property {string} pcLoadDir
  * @property {string} prodKeysPath
  * @property {string} packageLibraryPath
- * @property {string} edenExePath
  * @property {boolean} onboardingDone
  */
 
