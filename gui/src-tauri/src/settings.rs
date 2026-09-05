@@ -9,6 +9,8 @@ const SETTINGS_FILE: &str = "settings.json";
 pub struct Settings {
     pub api_token: String,
     pub pc_load_dir: String,
+    pub prod_keys_path: String,
+    pub package_library_path: String,
     pub eden_exe_path: String,
     pub onboarding_done: bool,
 }
@@ -18,6 +20,8 @@ impl Default for Settings {
         Settings {
             api_token: String::new(),
             pc_load_dir: String::new(),
+            prod_keys_path: String::new(),
+            package_library_path: String::new(),
             eden_exe_path: String::new(),
             onboarding_done: false,
         }
@@ -245,6 +249,8 @@ mod tests {
     fn assert_retained_values(settings: &Settings, pc_load_dir: &str) {
         assert_eq!(settings.api_token, " retained token ");
         assert_eq!(settings.pc_load_dir, pc_load_dir);
+        assert_eq!(settings.prod_keys_path, "");
+        assert_eq!(settings.package_library_path, "");
         assert_eq!(settings.eden_exe_path, "/Applications/eden");
     }
 
@@ -279,6 +285,8 @@ mod tests {
 
         assert_eq!(settings.api_token, "token");
         assert_eq!(settings.pc_load_dir, "load");
+        assert_eq!(settings.prod_keys_path, "");
+        assert_eq!(settings.package_library_path, "");
         assert_eq!(settings.eden_exe_path, "");
         assert!(settings.onboarding_done);
     }
@@ -431,10 +439,12 @@ mod tests {
     }
 
     #[test]
-    fn serialization_contains_only_retained_fields() {
+    fn package_library_paths_round_trip_in_camel_case() {
         let settings = Settings {
             api_token: "token".into(),
             pc_load_dir: "load".into(),
+            prod_keys_path: "keys/prod.keys".into(),
+            package_library_path: "packages".into(),
             eden_exe_path: "eden".into(),
             onboarding_done: true,
         };
@@ -444,6 +454,8 @@ mod tests {
             json!({
                 "apiToken": "token",
                 "pcLoadDir": "load",
+                "prodKeysPath": "keys/prod.keys",
+                "packageLibraryPath": "packages",
                 "edenExePath": "eden",
                 "onboardingDone": true
             })

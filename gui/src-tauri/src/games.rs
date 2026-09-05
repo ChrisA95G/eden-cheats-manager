@@ -373,15 +373,14 @@ pub(crate) fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<Stri
 
 /// Scan the Eden PC load dir for title IDs, cross-reference with the
 /// SQLite titles database, and return hierarchical game groups.
-#[tauri::command]
-pub async fn scan_eden_games_pc(
-    app: AppHandle,
-    load_dir: String,
-) -> Result<Vec<GameGroup>, String> {
-    let dir = std::path::PathBuf::from(&load_dir);
+pub(crate) fn scan_eden_games_pc_with_presence(
+    app: &AppHandle,
+    load_dir: &str,
+) -> Result<(Vec<GameGroup>, Vec<EdenPresenceRecord>), String> {
+    let dir = std::path::PathBuf::from(load_dir);
     log::info!("[games::pc] load_dir={:?}, exists={}", dir, dir.exists());
     if !dir.exists() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
 
     let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
@@ -422,10 +421,18 @@ pub async fn scan_eden_games_pc(
         }
     }
 
-    let (groups, _presence) = build_groups_with_presence(all_rows, &installed_ids);
+    let (groups, presence) = build_groups_with_presence(all_rows, &installed_ids);
     log::info!("[games::pc] {} groups built", groups.len());
-    save_game_cache(&app, "pc", &groups);
-    Ok(groups)
+    save_game_cache(app, "pc", &groups);
+    Ok((groups, presence))
+}
+
+#[tauri::command]
+pub async fn scan_eden_games_pc(
+    app: AppHandle,
+    load_dir: String,
+) -> Result<Vec<GameGroup>, String> {
+    scan_eden_games_pc_with_presence(&app, &load_dir).map(|(groups, _presence)| groups)
 }
 
 // ── Game list cache ───────────────────────────────────────────────────────────

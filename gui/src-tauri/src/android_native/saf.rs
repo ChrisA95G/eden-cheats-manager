@@ -7,6 +7,8 @@ use super::jni::{
 use crate::cheats::InstalledCheat;
 #[cfg(target_os = "android")]
 use crate::db;
+#[cfg(target_os = "android")]
+use crate::games::EdenPresenceRecord;
 use crate::games::GameGroup;
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "android")]
@@ -18,6 +20,43 @@ use tauri::Manager;
 // ── Games ─────────────────────────────────────────────────────────────────────
 
 /// Scan title-ID directories exposed by Eden's selected SAF `load` directory.
+#[cfg(target_os = "android")]
+pub(crate) fn scan_eden_games_android_native_with_presence(
+    app: &AppHandle,
+) -> Result<(Vec<GameGroup>, Vec<EdenPresenceRecord>), String> {
+    let entries = jni_saf_list_directory("")?;
+    let installed_ids: HashSet<String> = entries
+        .into_iter()
+        .filter(|entry| entry.directory && crate::games::is_valid_tid(&entry.name))
+        .map(|entry| entry.name)
+        .collect();
+    log::info!(
+        "[games::native] {} valid installed IDs via SAF",
+        installed_ids.len()
+    );
+
+    let state = app.state::<db::DbState>();
+    let mut seen_prefixes: HashSet<String> = HashSet::new();
+    for tid in &installed_ids {
+        if tid.len() >= 12 {
+            seen_prefixes.insert(tid[..12].to_string());
+        }
+    }
+
+    let mut all_rows = Vec::new();
+    for prefix in &seen_prefixes {
+        match db::query_base_prefix(&state, prefix) {
+            Ok(rows) => all_rows.extend(rows),
+            Err(e) => log::warn!("[games::native] prefix {} query error: {}", prefix, e),
+        }
+    }
+
+    let (groups, presence) = crate::games::build_groups_with_presence(all_rows, &installed_ids);
+    log::info!("[games::native] {} groups built", groups.len());
+    crate::games::save_game_cache(app, "android", &groups);
+    Ok((groups, presence))
+}
+
 #[tauri::command]
 pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGroup>, String> {
     #[cfg(not(target_os = "android"))]
@@ -28,38 +67,7 @@ pub async fn scan_eden_games_android_native(app: AppHandle) -> Result<Vec<GameGr
 
     #[cfg(target_os = "android")]
     {
-        let entries = jni_saf_list_directory("")?;
-        let installed_ids: HashSet<String> = entries
-            .into_iter()
-            .filter(|entry| entry.directory && crate::games::is_valid_tid(&entry.name))
-            .map(|entry| entry.name)
-            .collect();
-        log::info!(
-            "[games::native] {} valid installed IDs via SAF",
-            installed_ids.len()
-        );
-
-        let state = app.state::<db::DbState>();
-        let mut seen_prefixes: HashSet<String> = HashSet::new();
-        for tid in &installed_ids {
-            if tid.len() >= 12 {
-                seen_prefixes.insert(tid[..12].to_string());
-            }
-        }
-
-        let mut all_rows = Vec::new();
-        for prefix in &seen_prefixes {
-            match db::query_base_prefix(&state, prefix) {
-                Ok(rows) => all_rows.extend(rows),
-                Err(e) => log::warn!("[games::native] prefix {} query error: {}", prefix, e),
-            }
-        }
-
-        let (groups, _presence) =
-            crate::games::build_groups_with_presence(all_rows, &installed_ids);
-        log::info!("[games::native] {} groups built", groups.len());
-        crate::games::save_game_cache(&app, "android", &groups);
-        Ok(groups)
+        scan_eden_games_android_native_with_presence(&app).map(|(groups, _presence)| groups)
     }
 }
 
