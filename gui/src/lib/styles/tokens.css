@@ -39,7 +39,7 @@
   --md-sys-color-scrim: #000000;
   --md-sys-color-shadow: #000000;
 
-  /* Absolute system dimensions stay correct during the 14px legacy bridge. */
+  /* Material system dimensions. */
   --md-sys-typescale-display-large-size: 57px;
   --md-sys-typescale-display-medium-size: 45px;
   --md-sys-typescale-display-small-size: 36px;
@@ -81,21 +81,6 @@
   --md-sys-layout-gutter: 16px;
   --md-sys-layout-content-max: 1440px;
 
-  /* Temporary compatibility aliases. Delete with the legacy UI. */
-  --bg: var(--md-sys-color-background);
-  --surface: var(--md-sys-color-surface-container-low);
-  --surface2: var(--md-sys-color-surface-container);
-  --border: var(--md-sys-color-outline-variant);
-  --text: var(--md-sys-color-on-surface);
-  --text-muted: var(--md-sys-color-on-surface-variant);
-  --text-bright: var(--md-sys-color-on-background);
-  --text-dim: var(--md-sys-color-outline);
-  --accent: var(--md-sys-color-primary);
-  --accent-dim: rgb(255 185 81 / 0.12);
-  --accent-glow: rgb(255 185 81 / 0.24);
-  --accent-rgb: 255, 185, 81;
-  --error: var(--md-sys-color-error);
-  --success: var(--md-sys-color-tertiary);
 }
 
 @media (min-width: 600px) {
