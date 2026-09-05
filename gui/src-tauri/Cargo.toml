@@ -1,6 +1,6 @@
 [package]
 name = "eden-cheats-manager-gui"
-version = "0.1.0"
+version = "0.2.0-rc.1"
 description = "Eden Cheats Manager — find and install Switch cheats from cheatslips.com"
 authors = ["ChrisA95G"]
 edition = "2021"

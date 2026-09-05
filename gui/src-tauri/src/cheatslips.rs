@@ -313,7 +313,7 @@ pub async fn fetch_cheats_online(
     match resp.status().as_u16() {
         429 => {
             return Err(
-                "Daily rate limit reached (3 requests/day). Try again tomorrow.".to_string(),
+                "Cheatslips request limit reached. Try again later.".to_string(),
             )
         }
         401 | 403 => {
@@ -329,16 +329,8 @@ pub async fn fetch_cheats_online(
         .await
         .map_err(|e| format!("Failed to read API response body: {}", e))?;
 
-    log::debug!(
-        "[cheatslips_api] raw response for {}: {}",
-        title_id_upper,
-        body
-    );
-
-    let game: ApiGame = serde_json::from_str(&body).map_err(|e| {
-        let preview = &body[..body.len().min(400)];
-        format!("Failed to parse API response: {} — body: {}", e, preview)
-    })?;
+    let game: ApiGame = serde_json::from_str(&body)
+        .map_err(|_| "Cheatslips returned an invalid response. Try again later.".to_string())?;
 
     // DB operations — no more .await after this point
     let cheats_db_path = ensure_cheats_db(&app)?;

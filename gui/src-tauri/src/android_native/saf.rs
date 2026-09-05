@@ -80,6 +80,7 @@ pub fn install_cheat_android_native(
     build_id: String,
     content: String,
 ) -> Result<(), String> {
+    crate::cheats::validate_cheat_target(&title_id, &cheat_name, &build_id)?;
     log::info!("[cheats::native] install title={title_id} build={build_id} name={cheat_name}");
     let relative_path = format!("{title_id}/{cheat_name}/cheats/{build_id}.txt");
 
@@ -101,6 +102,7 @@ pub fn install_cheat_android_native(
 pub fn list_installed_cheats_android_native(
     title_id: String,
 ) -> Result<Vec<InstalledCheat>, String> {
+    crate::cheats::validate_hex_id(&title_id)?;
     log::debug!("[cheats::native] list title={title_id}");
 
     #[cfg(target_os = "android")]
@@ -113,9 +115,15 @@ pub fn list_installed_cheats_android_native(
             let cheats_path = format!("{title_id}/{}/cheats", cheat.name);
             for file in jni_saf_list_directory(&cheats_path)? {
                 if !file.directory && file.name.ends_with(".txt") {
+                    let build_id = file.name.strip_suffix(".txt").unwrap().to_string();
+                    if crate::cheats::validate_cheat_target(&title_id, &cheat.name, &build_id)
+                        .is_err()
+                    {
+                        continue;
+                    }
                     result.push(InstalledCheat {
                         cheat_name: cheat.name.clone(),
-                        build_id: file.name.trim_end_matches(".txt").to_uppercase(),
+                        build_id,
                     });
                 }
             }
@@ -137,6 +145,7 @@ pub fn delete_cheat_android_native(
     cheat_name: String,
     build_id: String,
 ) -> Result<(), String> {
+    crate::cheats::validate_cheat_target(&title_id, &cheat_name, &build_id)?;
     log::info!("[cheats::native] delete title={title_id} build={build_id} name={cheat_name}");
     let cheats_path = format!("{title_id}/{cheat_name}/cheats");
     let relative_path = format!("{cheats_path}/{build_id}.txt");
