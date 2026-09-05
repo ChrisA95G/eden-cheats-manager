@@ -211,7 +211,7 @@
   }
 </script>
 
-<Dialog {open} title="Settings" onclose={requestClose}>
+<Dialog {open} fullScreen title="Settings" onclose={requestClose}>
   <form
     id="settings-form"
     class="settings-form"
@@ -222,12 +222,12 @@
       submit();
     }}
   >
-    <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-appearance-title">
+    <section class="settings-section" aria-labelledby="settings-appearance-title">
       <div class="section-heading">
         <Icon name="palette" />
         <div>
           <h3 id="settings-appearance-title">Appearance</h3>
-          <p>Applies immediately on this device. System follows your device's theme.</p>
+          <p>Choose a theme, or follow your device. Saved automatically.</p>
         </div>
       </div>
       <div class="theme-options" role="radiogroup" aria-label="Colour theme">
@@ -241,7 +241,7 @@
       </div>
     </section>
     {#if isDesktop}
-      <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-storage-title">
+      <section class="settings-section" aria-labelledby="settings-storage-title">
         <div class="section-heading">
           <Icon name="folder" size={24} />
           <div>
@@ -279,7 +279,7 @@
         </div>
       </section>
 
-      <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-packages-title">
+      <section class="settings-section" aria-labelledby="settings-packages-title">
         <div class="section-heading">
           <Icon name="game" size={24} />
           <div>
@@ -341,7 +341,7 @@
         {/if}
       </section>
     {:else}
-      <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-android-storage-title">
+      <section class="settings-section" aria-labelledby="settings-android-storage-title">
         <div class="section-heading">
           <Icon name="folder" size={24} />
           <div>
@@ -401,7 +401,7 @@
         {/if}
       </section>
 
-      <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-android-packages-title">
+      <section class="settings-section" aria-labelledby="settings-android-packages-title">
         <div class="section-heading">
           <Icon name="game" size={24} />
           <div>
@@ -456,7 +456,7 @@
       </p>
     {/if}
 
-    <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-online-title">
+    <section class="settings-section" aria-labelledby="settings-online-title">
       <div class="section-heading">
         <Icon name="download" size={24} />
         <div>
@@ -479,7 +479,7 @@
     </section>
 
     {#if isDesktop}
-      <section class="settings-section md-card md-card--outlined" aria-labelledby="settings-diagnostics-title">
+      <section class="settings-section" aria-labelledby="settings-diagnostics-title">
         <div class="section-heading">
           <Icon name="info" size={24} />
           <div>
@@ -523,28 +523,34 @@
 </Dialog>
 
 <style>
-  .theme-options { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .theme-options { display: flex; }
   .theme-option {
     display: flex; align-items: center; justify-content: center; gap: 0.5rem;
-    position: relative; flex: 1; min-height: var(--md-sys-size-touch); padding: 0.5rem 0.75rem;
-    border: 1px solid var(--md-sys-color-outline); border-radius: var(--md-sys-shape-corner-full);
+    position: relative; flex: 1; min-width:0; min-height: var(--md-sys-size-touch); padding: 0.5rem;
+    border: 1px solid var(--md-sys-color-outline);
+    font:var(--md-sys-typescale-label-large);
     color: var(--md-sys-color-on-surface); cursor: pointer;
   }
-  .theme-option.selected { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); border-color: transparent; }
-  .theme-option:focus-within { outline: 3px solid var(--md-sys-color-primary); outline-offset: 2px; }
+  .theme-option + .theme-option { border-inline-start:0; }
+  .theme-option:first-child { border-radius:24px 0 0 24px; }
+  .theme-option:last-child { border-radius:0 24px 24px 0; }
+  .theme-option.selected { background: var(--md-sys-color-secondary-container); color: var(--md-sys-color-on-secondary-container); }
+  .theme-option:has(input:focus-visible) { outline: 2px solid var(--md-sys-color-primary); outline-offset: 2px; z-index:1; }
   .theme-option input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-  .theme-option:hover { box-shadow: inset 0 0 0 100px color-mix(in srgb, currentColor 8%, transparent); }
+  .theme-option:hover { box-shadow: inset 0 0 0 100px rgb(var(--md-sys-color-on-surface-rgb) / 0.08); }
 
   .settings-form {
     display: grid;
-    gap: 1rem;
+    gap: 1.5rem;
   }
 
   .settings-section {
     display: grid;
     gap: 1rem;
-    padding: 1rem;
+    padding: 0 0 1.5rem;
+    border-bottom:1px solid var(--md-sys-color-outline-variant);
   }
+  .settings-section:last-of-type { border-bottom:0; padding-bottom:0; }
 
   .section-heading {
     display: grid;
@@ -597,8 +603,8 @@
   }
 
   .status-icon.ready {
-    color: var(--md-sys-color-on-tertiary-container);
-    background: var(--md-sys-color-tertiary-container);
+    color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container);
   }
 
   .status-copy {
@@ -644,7 +650,7 @@
   }
 
   .action-result.success {
-    color: var(--md-sys-color-tertiary);
+    color: var(--md-sys-color-on-surface-variant);
   }
 
   .action-result.error-result,
@@ -678,7 +684,7 @@
     }
 
     .settings-section {
-      padding: 0.75rem;
+      padding-bottom: 1rem;
     }
   }
 </style>

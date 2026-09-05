@@ -103,17 +103,20 @@
 
   <div class="library-scroll" aria-busy={refreshing}>
     <div class="md-field search-field">
-      <label for={searchId}>Search games</label>
+      <label class="md-sr-only" for={searchId}>Search games</label>
       <div class="search-control">
-        <span class="search-icon" aria-hidden="true"><Icon name="search" size={20} /></span>
+        <span class="search-icon" aria-hidden="true"><Icon name="search" /></span>
         <input
           id={searchId}
           type="search"
           bind:value={query}
-          placeholder="Search names or exact Title IDs"
+          placeholder="Search games"
           autocomplete="off"
           spellcheck="false"
         />
+        {#if query}
+          <button type="button" class="md-icon-button search-clear" aria-label="Clear search" onclick={() => query = ''}><Icon name="close" size={20} /></button>
+        {/if}
       </div>
     </div>
 
@@ -156,7 +159,7 @@
     {:else}
       <div class="game-grid" role="list" aria-label="Games">
         {#each filteredGames as group}
-          <article class="game-card md-card md-card--outlined" role="listitem">
+          <article class="game-card" role="listitem">
             <button type="button" class="game-card__header md-list-item"
               data-title-id={group.baseTitleId}
               aria-current={selectedTitleId === group.baseTitleId ? 'true' : undefined}
@@ -211,7 +214,7 @@
     padding-block-start: max(0.5rem, env(safe-area-inset-top));
     padding-block-end: 0.5rem;
     padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
-    background: var(--md-sys-color-surface-container);
+    background: var(--md-sys-color-surface);
   }
 
   .title-block {
@@ -285,10 +288,14 @@
   }
 
   .search-control input {
-    padding-inline-start: 3rem;
+    padding-inline: 3.5rem;
+    border: 0;
     border-radius: var(--md-sys-shape-corner-full);
     background: var(--md-sys-color-surface-container-high);
   }
+
+  .search-control input::-webkit-search-cancel-button { display: none; }
+  .search-clear { position: absolute; inset-inline-end: 4px; inset-block-start: 4px; }
 
   .search-icon {
     position: absolute;
@@ -335,14 +342,15 @@
   .game-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    align-items: start;
-    gap: 1rem;
+    align-items: stretch;
+    gap: 0.5rem;
     padding-block-end: 0.5rem;
   }
 
   .game-card {
     min-width: 0;
     overflow: hidden;
+    border-radius: var(--md-sys-shape-corner-medium);
   }
 
   .game-card__header {
@@ -351,9 +359,16 @@
     align-items: center;
     gap: 1rem;
     padding: 1rem;
-    border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    height: 100%;
     background: var(--md-sys-color-surface-container-low);
   }
+
+  .game-card__header[aria-current="true"] {
+    color: var(--md-sys-color-on-secondary-container);
+    background: var(--md-sys-color-secondary-container);
+  }
+
+  .game-card__header:focus-visible { outline-offset: -2px; border-radius: inherit; }
 
   .game-cover {
     width: 4.5rem;
@@ -385,10 +400,14 @@
   }
 
   .game-heading h2 {
-    color: var(--md-sys-color-on-surface);
-    font-size: var(--md-sys-typescale-title-medium-size);
-    font-weight: 500;
-    line-height: 1.35rem;
+    color: inherit;
+    font: var(--md-sys-typescale-title-medium);
+    letter-spacing: var(--md-sys-typescale-title-medium-tracking);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
   code {
@@ -405,13 +424,8 @@
     min-height: 1.5rem;
     align-items: center;
     gap: 0.25rem;
-    padding-inline: 0.5rem;
-    border-radius: var(--md-sys-shape-corner-full);
-    color: var(--md-sys-color-on-tertiary-container);
-    background: var(--md-sys-color-tertiary-container);
-    font-size: var(--md-sys-typescale-label-small-size);
-    font-weight: 500;
-    line-height: 1rem;
+    color: var(--md-sys-color-on-surface-variant);
+    font: var(--md-sys-typescale-body-small);
     white-space: nowrap;
   }
 
@@ -452,7 +466,7 @@
     line-height: 1.5rem;
   }
 
-  @container library (min-width: 840px) {
+  @container library (min-width: 600px) {
     .game-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -491,7 +505,6 @@
     }
 
     .game-grid {
-      grid-template-columns: minmax(0, 1fr);
       gap: 0.75rem;
     }
 

@@ -244,11 +244,12 @@
       {:else}<span class="game-art placeholder" aria-hidden="true"><Icon name="game" size={36} /></span>{/if}
       <div class="game-identity">
         <h1 tabindex="-1" data-workspace-heading>{game.baseName || target.name || game.baseTitleId}</h1>
-        <p>{game.baseTitleId}</p>
+        <div class="game-meta"><p>{game.baseTitleId}</p>
         {#if game.baseInstalled || game.updates.some(entry => entry.installed)}
           <span class="presence"><Icon name="check" size={20} />Present in Eden</span>
         {:else}<small>Not present in Eden</small>
         {/if}
+        </div>
       </div>
       <details class="options-menu" bind:this={optionsMenu} bind:open={optionsOpen}>
         <summary class="md-icon-button" aria-label="Game options"><Icon name="more" /></summary>
@@ -258,14 +259,14 @@
     <div class="workspace-scroll">
         {#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
         <div class="version-control">
-          <span class="version-label" id={`${id}-version-label`}>Game version</span>
           <button class="version-picker" aria-haspopup="dialog" aria-labelledby={`${id}-version-label ${id}-version-value`}
             disabled={working || !candidates.length} aria-describedby={`${id}-version-help`} onclick={()=>versionOpen=true}>
+            <span class="version-label" id={`${id}-version-label`}>Game version</span>
             <span id={`${id}-version-value`}>{chosen ? versionLabel(chosen) : 'Please select a build'}</span><Icon name="expand" />
           </button>
           <div id={`${id}-version-help`} class="version-help">
             {#if chosenBuild}
-              <span>Build {chosenBuild} · Cheat filter only; Eden is unchanged.</span>
+              <span>Build {chosenBuild} · Does not change the version in Eden.</span>
             {:else if candidates.length}
               <span>Choose your base game or update to show matching cheats.</span>
             {:else}
@@ -277,9 +278,9 @@
 
         <div class="tabs" role="tablist" aria-label="Game cheats">
           <button id={`${id}-catalog-tab`} type="button" role="tab" aria-selected={activeTab === 'catalog'}
-            aria-controls={`${id}-catalog-panel`} tabindex={activeTab === 'catalog' ? 0 : -1} onkeydown={navigateTabs} onclick={()=>activeTab='catalog'}>Cheats</button>
+            aria-controls={`${id}-catalog-panel`} tabindex={activeTab === 'catalog' ? 0 : -1} onkeydown={navigateTabs} onclick={()=>activeTab='catalog'}><span>Cheats</span></button>
           <button id={`${id}-installed-tab`} type="button" role="tab" aria-selected={activeTab === 'installed'}
-            aria-controls={`${id}-installed-panel`} tabindex={activeTab === 'installed' ? 0 : -1} onkeydown={navigateTabs} onclick={()=>activeTab='installed'}>Installed{installedLoading ? '' : ` (${installed.length})`}</button>
+            aria-controls={`${id}-installed-panel`} tabindex={activeTab === 'installed' ? 0 : -1} onkeydown={navigateTabs} onclick={()=>activeTab='installed'}><span>Installed{installedLoading ? '' : ` (${installed.length})`}</span></button>
         </div>
 
         <div class="tab-panel" id={`${id}-installed-panel`} role="tabpanel" tabindex="0" hidden={activeTab !== 'installed'} aria-labelledby={`${id}-installed-tab`} aria-busy={installedLoading}>
@@ -295,11 +296,14 @@
         <div class="tab-panel" id={`${id}-catalog-panel`} role="tabpanel" tabindex="0" hidden={activeTab !== 'catalog'} aria-labelledby={`${id}-catalog-tab`} aria-busy={catalogLoading}>
           <h2 class="md-sr-only" tabindex="-1" bind:this={catalogHeading}>Available cheats</h2>
           <div class="actions catalog-actions">
-            <button class="md-button md-button--tonal" disabled={working || !settings.apiToken} onclick={fetchOnline}><Icon name="download" size={20} />Fetch online</button>
+            {#if settings.apiToken}
+              <button class="md-button md-button--tonal" disabled={working} onclick={fetchOnline}><Icon name="download" size={20} />Fetch online</button>
+            {:else}
+              <button class="md-button md-button--tonal" disabled={working} onclick={onsettings} aria-label="Connect Cheatslips to fetch online"><Icon name="key" size={20} />Connect source</button>
+            {/if}
             <button class="md-button md-button--outlined" disabled={working} onclick={()=>{customBuild=chosenBuild;customContent='';actionError='';customOpen=true;}}><Icon name="add" size={20} />Custom cheat</button>
             <button class="md-icon-button refresh-catalog" aria-label="Refresh cheat catalog" disabled={catalogLoading || working} onclick={()=>read('catalog',context())}><Icon name="refresh" /></button>
           </div>
-          {#if !settings.apiToken}<p class="support"><button class="text-link" onclick={onsettings}>Connect Cheatslips</button> to fetch online.</p>{/if}
           {#if !target.installed}<p class="support">Open this game in Eden before installing cheats.</p>{/if}
           {#if catalogError}<p class="error" role="alert">{catalogError}</p>{/if}
           {#if catalogLoading || working}<div class="md-progress" role="progressbar" aria-label={working ? 'Saving changes' : 'Loading cheat catalog'}></div>{/if}
@@ -309,17 +313,17 @@
               {#if group.credits}<p class="support">Credits: {group.credits}</p>{/if}
               {#each group.sections as section}
                 {@const present = installedIndex.has(installedTupleKey(group.buildId,cheatFileName(section.name,group.buildId)))}
-                <div class="cheat-row"><details><summary>{section.name}{section.custom ? ' · Custom' : ''}</summary><pre>{section.content}</pre></details>
+                <div class="cheat-row"><details><summary><Icon name="expand" size={20} /><span>{section.name}{section.custom ? ' · Custom' : ''}</span></summary><pre>{section.content}</pre></details>
                   <button class="md-button md-button--text" disabled={!target.installed || working || installedLoading || !!installedError} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
               {/each}
               {#each group.customEntries as entry (entry.entryId)}
-                <div class="file-row"><details><summary>Custom entry #{entry.entryId}</summary><pre>{entry.content}</pre></details><button class="md-icon-button" aria-label={`Delete custom entry ${entry.entryId}`} disabled={working} onclick={()=>removeCustom(entry.entryId)}><Icon name="delete" /></button></div>
+                <div class="file-row"><details><summary><Icon name="expand" size={20} /><span>Custom entry #{entry.entryId}</span></summary><pre>{entry.content}</pre></details><button class="md-icon-button" aria-label={`Delete custom entry ${entry.entryId}`} disabled={working} onclick={()=>removeCustom(entry.entryId)}><Icon name="delete" /></button></div>
               {/each}
             </details>
           {:else}{#if !catalogLoading && !catalogError}<p class="support">{chosenBuild ? 'No cheats for this version yet. Choose All builds to browse other versions.' : 'No cheats yet. Fetch online or add a custom cheat.'}</p>{/if}{/each}
         </div>
     </div>
-  {:else}<div class="empty"><Icon name="game" size={48} /><h1>Your next game, ready to tweak</h1><p>Choose a title from your library to manage its cheats.</p></div>{/if}
+  {:else}<div class="empty"><span class="empty-art"><Icon name="game" size={48} /></span><h1>Choose a game</h1><p>Browse its versions and manage cheats in one place.</p></div>{/if}
 </section>
 
 <Dialog open={versionOpen} title="Game version" onclose={()=>versionOpen=false}>
@@ -348,7 +352,7 @@
     {#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
 {/snippet}
 
-<Dialog open={customOpen} title="Add custom cheat" onclose={()=>customOpen=false}>
+<Dialog open={customOpen} fullScreen title="Add custom cheat" onclose={()=>customOpen=false}>
   <form id="custom-cheat-form" onsubmit={(event)=>{event.preventDefault();saveCustom();}}>
     <p class="support">Save to the catalog first, then install individual named sections.</p>
     <label class="md-field">Build ID<input bind:value={customBuild} required disabled={working} /></label>
@@ -364,49 +368,81 @@
 </Dialog>
 
 <style>
-  .workspace { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; background:var(--md-sys-color-surface-container-low); }
+  .workspace { display:flex; flex-direction:column; min-width:0; min-height:0; height:100%; background:var(--md-sys-color-surface); }
   .app-bar { display:flex; flex:none; align-items:center; gap:16px; padding:24px max(24px,env(safe-area-inset-right)) 16px max(24px,env(safe-area-inset-left)); padding-top:max(24px,env(safe-area-inset-top)); }
-  .app-bar > div { flex:1; min-width:0; } h1 { font-size:22px; font-weight:400; overflow-wrap:anywhere; } h2 { font-size:20px; font-weight:500; }
-  .app-bar p, small, .support { color:var(--md-sys-color-on-surface-variant); font-size:14px; overflow-wrap:anywhere; } small { display:block; font-size:12px; } .support { margin-block:8px 16px; }
-  .workspace-scroll { flex:1; min-height:0; overflow:auto; padding:8px var(--md-sys-layout-gutter) max(24px,env(safe-area-inset-bottom)); overscroll-behavior:contain; }
+  .app-bar > div { flex:1; min-width:0; }
+  h1 { font:var(--md-sys-typescale-headline-small); overflow-wrap:anywhere; }
+  h2 { font:var(--md-sys-typescale-title-medium); }
+  .app-bar p, small, .support { color:var(--md-sys-color-on-surface-variant); font:var(--md-sys-typescale-body-medium); overflow-wrap:anywhere; }
+  small { display:block; font:var(--md-sys-typescale-body-small); }
+  .support { margin-block:8px 16px; }
+  .workspace-scroll { flex:1; min-height:0; overflow:auto; padding:8px var(--md-sys-layout-gutter) max(24px,env(safe-area-inset-bottom)); overscroll-behavior:contain; scrollbar-gutter:stable; }
+  .workspace-scroll > * { max-width:960px; margin-inline:auto; }
+  .app-bar { width:100%; max-width:1008px; margin-inline:auto; }
   .tab-panel { margin-bottom:24px; }
   .section-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; } .actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
-  .game-art { width:96px; height:96px; flex:0 0 96px; object-fit:cover; border-radius:16px; background:var(--md-sys-color-surface-container-highest); }
+  .game-art { width:80px; height:80px; flex:0 0 80px; object-fit:cover; border-radius:var(--md-sys-shape-corner-medium); background:var(--md-sys-color-surface-container-highest); }
   .placeholder { display:grid; place-items:center; color:var(--md-sys-color-on-surface-variant); }
   .game-identity { display:grid; gap:4px; }
-  .presence { display:inline-flex; align-items:center; gap:4px; justify-self:start; padding:2px 8px; font-size:12px; border-radius:16px; color:var(--md-sys-color-on-tertiary-container); background:var(--md-sys-color-tertiary-container); }
+  .game-meta { display:flex; align-items:center; flex-wrap:wrap; gap:4px 16px; }
+  .presence { display:inline-flex; align-items:center; gap:4px; font:var(--md-sys-typescale-body-small); color:var(--md-sys-color-on-surface-variant); }
   .version-control { margin-bottom:16px; }
-  .version-label { display:block; margin-bottom:6px; color:var(--md-sys-color-on-surface-variant); font-size:12px; }
-  .version-picker { display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; min-height:56px; padding:12px 16px; border:1px solid var(--md-sys-color-outline); border-radius:8px; color:var(--md-sys-color-on-surface); background:none; text-align:start; }
+  .version-label { color:var(--md-sys-color-on-surface-variant); font:var(--md-sys-typescale-label-medium); }
+  .version-picker { display:flex; align-items:center; gap:12px; width:100%; min-height:48px; padding:8px 16px; border:1px solid var(--md-sys-color-outline); border-radius:var(--md-sys-shape-corner-small); color:var(--md-sys-color-on-surface); background:none; text-align:start; font:var(--md-sys-typescale-body-large); }
+  .version-picker > span:nth-child(2) { flex:1; min-width:0; overflow-wrap:anywhere; }
+  .version-picker:hover:not(:disabled) { background:rgb(var(--md-sys-color-on-surface-rgb) / 0.08); }
+  .version-picker:disabled { color:var(--md-sys-color-on-surface-variant); border-color:var(--md-sys-color-outline-variant); }
   .version-choices { margin:0; padding:0; border:0; }
   .version-choices label { display:flex; align-items:center; gap:16px; padding:16px 0; min-height:64px; border-bottom:1px solid var(--md-sys-color-outline-variant); cursor:pointer; }
   .version-choices input { flex:none; width:20px; height:20px; accent-color:var(--md-sys-color-primary); }
   .version-choices label > span { min-width:0; overflow-wrap:anywhere; }
-  .version-help { display:flex; align-items:center; flex-wrap:wrap; gap:0 8px; min-height:32px; padding-top:4px; color:var(--md-sys-color-on-surface-variant); font-size:12px; overflow-wrap:anywhere; }
+  .version-help { display:flex; align-items:center; flex-wrap:wrap; gap:0 8px; padding-top:8px; color:var(--md-sys-color-on-surface-variant); font:var(--md-sys-typescale-body-small); overflow-wrap:anywhere; }
   .text-link { border:0; padding:0; background:none; color:var(--md-sys-color-primary); font:inherit; text-decoration:underline; text-underline-offset:3px; min-height:32px; }
   .tabs { display:flex; border-bottom:1px solid var(--md-sys-color-outline-variant); margin-bottom:16px; }
-  .tabs button { flex:1; min-height:48px; border:0; border-bottom:3px solid transparent; background:none; color:var(--md-sys-color-on-surface-variant); font-weight:500; }
-  .tabs button[aria-selected="true"] { color:var(--md-sys-color-primary); border-bottom-color:var(--md-sys-color-primary); }
+  .tabs button { flex:1; display:flex; align-items:stretch; justify-content:center; min-height:48px; border:0; padding:0 24px; background:none; color:var(--md-sys-color-on-surface-variant); font:var(--md-sys-typescale-title-small); }
+  .tabs button > span { position:relative; display:flex; align-items:center; }
+  .tabs button[aria-selected="true"] { color:var(--md-sys-color-primary); }
+  .tabs button[aria-selected="true"] > span::after { position:absolute; content:''; inset-inline:-4px; bottom:0; height:3px; border-radius:3px 3px 0 0; background:var(--md-sys-color-primary); }
+  .tabs button:hover { background:rgb(var(--md-sys-color-primary-rgb) / 0.08); }
   .catalog-actions { margin-bottom:8px; }
   .refresh-catalog { margin-inline-start:auto; }
   .options-menu { position:relative; flex:none; }
   .options-menu > summary { list-style:none; }
   .options-menu > summary::-webkit-details-marker { display:none; }
   .game-options { position:absolute; z-index:3; right:0; top:100%; display:grid; gap:4px; width:min(320px,calc(100vw - 32px)); max-height:calc(100dvh - 160px); overflow:auto; padding:12px; border-radius:12px; background:var(--md-sys-color-surface-container-high); box-shadow:var(--md-sys-elevation-level-3); }
-  .game-options > button { justify-content:flex-start; }
+  .game-options > button { justify-content:flex-start; border-radius:4px; color:var(--md-sys-color-on-surface); white-space:normal; text-align:start; }
   .file-row, .cheat-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--md-sys-color-outline-variant); } .file-row > div,.file-row > details,.cheat-row > details { flex:1; min-width:0; overflow-wrap:anywhere; }
-  .build-group { margin-top:12px; padding:0 16px 8px; border-radius:16px; background:var(--md-sys-color-surface-container); } summary { cursor:pointer; min-height:48px; align-content:center; overflow-wrap:anywhere; } .build-group > summary { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:72px; } .build-group > summary span { min-width:0; }
+  .build-group { margin-top:12px; padding:0 16px; border-radius:var(--md-sys-shape-corner-medium); background:var(--md-sys-color-surface-container-low); }
+  .build-group[open] { padding-bottom:8px; }
+  summary { cursor:pointer; min-height:48px; align-content:center; overflow-wrap:anywhere; list-style:none; }
+  summary::-webkit-details-marker { display:none; }
+  .build-group > summary { display:flex; align-items:center; justify-content:space-between; gap:8px; min-height:72px; font:var(--md-sys-typescale-title-medium); }
+  .build-group > summary span { min-width:0; }
+  .cheat-row summary, .file-row summary { display:flex; align-items:center; gap:8px; font:var(--md-sys-typescale-body-large); }
+  summary :global(svg) { color:var(--md-sys-color-on-surface-variant); transition:transform var(--md-sys-motion-duration-enter) var(--md-sys-motion-easing-standard); }
+  details[open] > summary > :global(svg) { transform:rotate(180deg); }
+  .file-row:last-child, .cheat-row:last-child { border-bottom:0; }
   pre { overflow:auto; max-height:240px; margin:8px 0; padding:12px; font:12px/1.5 ui-monospace,monospace; background:var(--md-sys-color-surface-container-lowest); border-radius:8px; }
   .empty { display:flex; flex:1; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:16px; padding:32px; color:var(--md-sys-color-on-surface-variant); }
+  .empty-art { display:grid; place-items:center; width:96px; height:96px; border-radius:28px; color:var(--md-sys-color-on-secondary-container); background:var(--md-sys-color-secondary-container); }
+  .empty p { max-width:320px; font:var(--md-sys-typescale-body-medium); }
   .error { padding:12px; margin-block:8px; overflow-wrap:anywhere; border-radius:8px; color:var(--md-sys-color-on-error-container); background:var(--md-sys-color-error-container); }
   form { display:grid; gap:16px; }
   @media (min-width:900px) and (min-height:600px) { .back-control { display:none; } }
   @media (max-width:599px), (max-height:599px) {
     .app-bar { gap:12px; padding:12px max(16px,env(safe-area-inset-right)) 12px max(8px,env(safe-area-inset-left)); padding-top:max(12px,env(safe-area-inset-top)); }
-    .game-art { width:64px; height:64px; flex-basis:64px; border-radius:12px; }
-    h1 { font-size:18px; line-height:1.3; }
+    .game-art { width:56px; height:56px; flex-basis:56px; border-radius:12px; }
+    h1 { font:var(--md-sys-typescale-title-large); }
     .app-bar p { font-size:12px; }
     .version-control { margin-bottom:8px; }
     .tabs { margin-bottom:12px; }
+  }
+  @media (max-width:599px) {
+    .catalog-actions { gap:4px; }
+    .catalog-actions .md-button { padding-inline:12px; }
+    .game-meta { gap:2px 8px; }
+    .game-identity h1 { font:var(--md-sys-typescale-title-medium); }
+    .version-label { max-width:72px; }
+    .tabs button { padding-inline:16px; }
   }
 </style>

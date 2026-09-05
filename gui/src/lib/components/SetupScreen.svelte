@@ -358,9 +358,7 @@
       max(1rem, env(safe-area-inset-bottom))
       max(1rem, env(safe-area-inset-left));
     color: var(--md-sys-color-on-background);
-    background:
-      radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--md-sys-color-primary) 10%, transparent), transparent 34rem),
-      var(--md-sys-color-background);
+    background: var(--md-sys-color-background);
   }
 
   .setup-card {
@@ -404,16 +402,14 @@
 
   h1 {
     margin-top: 0.2rem;
-    font-size: clamp(1.5rem, 5vw, var(--md-sys-typescale-headline-medium-size));
-    line-height: 1.2;
+    font:var(--md-sys-typescale-headline-medium);
   }
 
   .subtitle {
     max-width: 42rem;
     margin-top: 0.5rem;
     color: var(--md-sys-color-on-surface-variant);
-    font-size: var(--md-sys-typescale-body-medium-size);
-    line-height: 1.45;
+    font:var(--md-sys-typescale-body-medium);
   }
 
   .error-banner,

@@ -237,7 +237,7 @@
   .startup h1 { font-size:24px; font-weight:400; } .startup .md-progress { max-width:260px; }
   .md-snackbar span { flex:1; overflow-wrap:anywhere; } .md-snackbar button { color:inherit; }
   @media (min-width:900px) and (min-height:600px) {
-    .app-shell { grid-template-columns:340px minmax(0,1fr); }
+    .app-shell { grid-template-columns:360px minmax(0,1fr); }
     .app-shell .library-slot,.app-shell .workspace-slot { display:block; }
     .library-slot { border-right:1px solid var(--md-sys-color-outline-variant); }
   }
