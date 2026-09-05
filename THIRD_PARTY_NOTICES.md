@@ -1,5 +1,12 @@
 # Third-party notices
 
+## Roboto
+
+Locally bundled Roboto variable WOFF2 (weights 400–700, Latin and Latin Extended)
+is distributed by Google Fonts. Other scripts use the system font fallback.
+Copyright 2011 The Roboto Project Authors (https://github.com/googlefonts/roboto-classic).
+Licensed under the SIL Open Font License 1.1; see `LICENSES/Roboto-OFL.txt`.
+
 ## Google Material Symbols and Material 3 baseline tokens
 
 `gui/src/lib/components/ui/Icon.svelte` contains unmodified SVG paths from
