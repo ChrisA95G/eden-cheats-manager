@@ -75,7 +75,7 @@ pub async fn scan_game_package_library_pc(
 }
 
 #[cfg(not(target_os = "android"))]
-fn scan_game_package_library_pc_inner(
+pub(crate) fn scan_game_package_library_pc_inner(
     prod_keys_path: &Path,
     library_path: &Path,
 ) -> Result<GameLibraryScanResult, String> {

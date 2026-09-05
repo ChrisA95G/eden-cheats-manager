@@ -74,7 +74,7 @@ pub async fn scan_game_package_library() -> Result<GameLibraryScanResult, String
 }
 
 #[cfg(target_os = "android")]
-fn scan_game_package_library_inner() -> Result<GameLibraryScanResult, String> {
+pub(crate) fn scan_game_package_library_inner() -> Result<GameLibraryScanResult, String> {
     let response = parse_saf_response(jni_noarg_string_call("listGameLibraryPackages")?)?;
     let documents: Vec<LibraryPackageDocument> = serde_json::from_str(&response)
         .map_err(|error| format!("Invalid game-library package list: {error}"))?;

@@ -5,6 +5,7 @@ mod cheats;
 mod cheatslips;
 mod db;
 mod games;
+mod managed_library;
 mod package_library;
 mod package_library_pc;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -86,6 +87,8 @@ pub fn run() {
             games::get_cached_games_pc,
             games::get_cached_games_android,
             games::get_eden_game_dirs_pc,
+            managed_library::scan_managed_library_pc,
+            managed_library::scan_managed_library_android_native,
             // rom cache
             rom_cache::set_rom_path_manual,
             rom_cache::scan_and_update_rom_cache,
