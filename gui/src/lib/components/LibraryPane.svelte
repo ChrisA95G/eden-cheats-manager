@@ -60,7 +60,7 @@
     : games);
   let refreshing = $derived(refreshPhase === 'loading');
   let groupCountLabel = $derived(
-    `${games.length} game group${games.length === 1 ? '' : 's'}`,
+    `${games.length} game${games.length === 1 ? '' : 's'}`,
   );
 </script>
 
@@ -145,12 +145,11 @@
     {:else}
       <div class="game-grid" role="list" aria-label="Games">
         {#each filteredGames as group}
-          {@const entries = entriesForGroup(group).filter(item => item.entry.category !== 'base')}
           <article class="game-card md-card md-card--outlined" role="listitem">
             <button type="button" class="game-card__header md-list-item"
-              disabled={!group.baseGame} data-title-id={group.baseGame?.titleId}
-              aria-current={selectedTitleId === group.baseGame?.titleId ? 'true' : undefined}
-              onclick={() => { if (group.baseGame) onselect(group.baseGame.titleId); }}>
+              data-title-id={group.baseTitleId}
+              aria-current={selectedTitleId === group.baseTitleId ? 'true' : undefined}
+              onclick={() => onselect(group.baseTitleId)}>
               {#if group.baseImage}
                 <img class="game-cover" src={group.baseImage} alt="" loading="lazy" decoding="async" />
               {:else}
@@ -162,43 +161,12 @@
               <div class="game-heading">
                 <h2>{group.baseName || group.baseTitleId}</h2>
                 <code>{group.baseTitleId}</code>
-                {#if group.baseInstalled}
-                  <span class="installed-label"><Icon name="check" size={14} /> In Eden load</span>
+                {#if group.baseInstalled || group.updates.some(entry => entry.installed)}
+                  <span class="installed-label"><Icon name="check" size={14} /> Present in Eden</span>
                 {/if}
               </div>
             </button>
 
-            {#if entries.length > 0}
-              <details class="related-titles">
-                <summary>{group.updates.length} update{group.updates.length === 1 ? '' : 's'}</summary>
-                <div class="version-list">
-                {#each entries as item (item.entry.titleId)}
-                  <button
-                    type="button"
-                    class="version-entry md-list-item"
-                    data-title-id={item.entry.titleId}
-                    aria-current={selectedTitleId === item.entry.titleId ? 'true' : undefined}
-                    onclick={() => onselect(item.entry.titleId)}
-                  >
-                    <span class="version-copy">
-                      <span class="version-name">{item.entry.name || group.baseName || item.entry.titleId}</span>
-                      <span class="version-meta">
-                        <span class="version-kind">
-                          {item.kind}
-                        </span>
-                        <code>{item.entry.titleId}</code>
-                      </span>
-                    </span>
-                    {#if item.entry.installed}
-                      <span class="installed-label entry-installed">
-                        <Icon name="check" size={14} /> In Eden load
-                      </span>
-                    {/if}
-                  </button>
-                {/each}
-                </div>
-              </details>
-            {/if}
           </article>
         {/each}
       </div>
@@ -230,7 +198,6 @@
     padding-block-start: max(0.5rem, env(safe-area-inset-top));
     padding-block-end: 0.5rem;
     padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right));
-    border-bottom: 1px solid var(--md-sys-color-outline-variant);
     background: var(--md-sys-color-surface-container);
   }
 
@@ -400,7 +367,6 @@
   }
 
   .game-heading h2,
-  .version-name,
   .empty-state p {
     overflow-wrap: anywhere;
   }
@@ -435,52 +401,6 @@
     line-height: 1rem;
     white-space: nowrap;
   }
-
-  .version-list {
-    display: grid;
-    gap: 1px;
-    background: var(--md-sys-color-outline-variant);
-  }
-
-  .version-entry {
-    min-width: 0;
-    border-radius: 0;
-    background: var(--md-sys-color-surface);
-  }
-
-  .version-copy {
-    display: grid;
-    min-width: 0;
-    flex: 1;
-    gap: 0.25rem;
-  }
-
-  .version-name {
-    color: var(--md-sys-color-on-surface);
-    font-size: var(--md-sys-typescale-body-large-size);
-    font-weight: 500;
-    line-height: 1.35rem;
-  }
-
-  .version-meta {
-    display: flex;
-    min-width: 0;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.25rem 0.75rem;
-  }
-
-  .version-kind {
-    color: var(--md-sys-color-on-surface-variant);
-    font-size: var(--md-sys-typescale-label-medium-size);
-    line-height: 1rem;
-  }
-
-  .entry-installed {
-    flex: 0 0 auto;
-  }
-
-  .related-titles > summary { min-height:48px; padding:12px 16px; cursor:pointer; font-size:14px; color:var(--md-sys-color-on-surface-variant); }
 
   .empty-state {
     display: flex;
@@ -543,14 +463,6 @@
       flex-basis: 3.5rem;
     }
 
-    .version-entry {
-      align-items: flex-start;
-      flex-wrap: wrap;
-    }
-
-    .entry-installed {
-      margin-inline-start: auto;
-    }
   }
 
   @media (max-height: 599px) {

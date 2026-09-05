@@ -18,6 +18,13 @@ export function cheatLibraryGroups(games) {
     .map(group => ({ ...group, dlcs: [] }));
 }
 
+/** Use an observed entry, never synthesize a cheat-directory Title ID.
+ * @param {GameGroup | null} game
+ */
+export function gameCheatTarget(game) {
+  return game?.baseGame ?? game?.updates[0] ?? null;
+}
+
 /**
  * @param {ManagedPackageLibrary} packageLibrary
  * @param {string} observedTitleId

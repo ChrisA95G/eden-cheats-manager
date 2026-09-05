@@ -30,9 +30,8 @@
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
   let ready = $derived(!!settings && (platform === 'android' ? edenAccess?.ready === true : settings.onboardingDone));
   let libraryGames = $derived(cheatLibraryGroups(library.games));
-  let target = $derived(libraryGames.flatMap(group=>[
-    ...(group.baseGame ? [group.baseGame] : []), ...group.updates,
-  ]).find(entry=>normalizeTitleId(entry.titleId) === normalizeTitleId(selectedTitleId)) ?? null);
+  let game = $derived(libraryGames.find(group =>
+    normalizeTitleId(group.baseTitleId) === normalizeTitleId(selectedTitleId)) ?? null);
   let alive = false;
   let scanRevision = 0;
   let statusRevision = 0;
@@ -78,8 +77,8 @@
     }
   }
   function reconcileTitle() {
-    const found = libraryGames.some(group=>[group.baseGame,...group.updates]
-      .some(entry=>entry && normalizeTitleId(entry.titleId) === normalizeTitleId(selectedTitleId)));
+    const found = libraryGames.some(group =>
+      normalizeTitleId(group.baseTitleId) === normalizeTitleId(selectedTitleId));
     if (selectedTitleId && !found) {
       selectedTitleId = ''; pane = 'library';
       history.replaceState({...history.state,...navigationState()},'');
@@ -222,7 +221,7 @@
   <main class="app-shell" class:show-workspace={pane === 'workspace'}>
     <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase}
       refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
-    <div class="workspace-slot"><GameWorkspace {target} {platform} {settings} packageLibrary={library.packageLibrary}
+    <div class="workspace-slot"><GameWorkspace {game} {platform} {settings} packageLibrary={library.packageLibrary}
       androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
       onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
   </main>

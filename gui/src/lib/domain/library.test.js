@@ -6,6 +6,7 @@ import {
   cheatLibraryGroups,
   createLibraryState,
   fallbackCandidate,
+  gameCheatTarget,
   findPresenceByObservedId,
   libraryCandidatesForTitle,
   reconcileCandidate,
@@ -32,6 +33,10 @@ test('cheat library drops DLC-only groups and preserves base/update identities',
   assert.ok(visible.every(item => item.dlcs.length === 0));
   assert.deepEqual(source, before, 'raw backend/cache data must remain intact');
   assert.deepEqual(cheatLibraryGroups([]), []);
+  assert.equal(gameCheatTarget(group), base, 'updates must not redirect base-game cheat writes');
+  assert.equal(gameCheatTarget(updateOnly), update, 'update-only groups retain the actual observed Title ID');
+  assert.equal(gameCheatTarget(dlcOnly), null);
+  assert.equal(gameCheatTarget(null), null);
 });
 
 /** @typedef {import('../api/types.js').EdenPackageCorrelationEntry} EdenPackageCorrelationEntry */
