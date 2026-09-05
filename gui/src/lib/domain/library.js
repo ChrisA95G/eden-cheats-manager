@@ -9,6 +9,15 @@ export function normalizeTitleId(value) {
   return value.trim().toUpperCase();
 }
 
+/** Keep only cheat-relevant titles in the frontend, without mutating scan/cache data.
+ * @param {GameGroup[]} games
+ * @returns {GameGroup[]}
+ */
+export function cheatLibraryGroups(games) {
+  return games.filter(group => group.baseGame || group.updates.length > 0)
+    .map(group => ({ ...group, dlcs: [] }));
+}
+
 /**
  * @param {ManagedPackageLibrary} packageLibrary
  * @param {string} observedTitleId

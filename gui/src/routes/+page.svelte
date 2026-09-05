@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick, untrack } from 'svelte';
   import * as backend from '$lib/api/backend.js';
-  import { createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
+  import { cheatLibraryGroups, createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
   import SetupScreen from '$lib/components/SetupScreen.svelte';
   import SettingsDialog from '$lib/components/SettingsDialog.svelte';
   import LibraryPane from '$lib/components/LibraryPane.svelte';
@@ -29,8 +29,9 @@
   let contextRevision = $state(0);
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
   let ready = $derived(!!settings && (platform === 'android' ? edenAccess?.ready === true : settings.onboardingDone));
-  let target = $derived(library.games.flatMap(group=>[
-    ...(group.baseGame ? [group.baseGame] : []), ...group.updates, ...group.dlcs,
+  let libraryGames = $derived(cheatLibraryGroups(library.games));
+  let target = $derived(libraryGames.flatMap(group=>[
+    ...(group.baseGame ? [group.baseGame] : []), ...group.updates,
   ]).find(entry=>normalizeTitleId(entry.titleId) === normalizeTitleId(selectedTitleId)) ?? null);
   let alive = false;
   let scanRevision = 0;
@@ -70,13 +71,14 @@
     if (event.state?.ecm !== 1) return;
     pane = event.state.pane ?? 'library';
     selectedTitleId = event.state.selectedTitleId ?? '';
+    reconcileTitle();
     await tick();
     if (pane === 'library') {
       /** @type {HTMLElement|null} */ (document.querySelector('[data-title-id="' + CSS.escape(selectedTitleId) + '"]'))?.focus();
     }
   }
   function reconcileTitle() {
-    const found = library.games.some(group=>[group.baseGame,...group.updates,...group.dlcs]
+    const found = libraryGames.some(group=>[group.baseGame,...group.updates]
       .some(entry=>entry && normalizeTitleId(entry.titleId) === normalizeTitleId(selectedTitleId)));
     if (selectedTitleId && !found) {
       selectedTitleId = ''; pane = 'library';
@@ -218,7 +220,7 @@
     onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
 {:else}
   <main class="app-shell" class:show-workspace={pane === 'workspace'}>
-    <div class="library-slot"><LibraryPane games={library.games} {refreshPhase}
+    <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase}
       refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
     <div class="workspace-slot"><GameWorkspace {target} {platform} {settings} packageLibrary={library.packageLibrary}
       androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}

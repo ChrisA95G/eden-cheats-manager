@@ -88,7 +88,7 @@
       catalogError = ''; installedError = ''; actionError = '';
       working = false; inspecting = false; customOpen = false; confirmation = null;
       customBuild = ''; customContent = ''; catalogLoading = false; installedLoading = false;
-      if (titleId && target?.category !== 'dlc') {
+      if (titleId) {
         const ctx = context();
         void read('catalog', ctx); void read('installed', ctx);
       }
@@ -199,13 +199,10 @@
   {#if target}
     <header class="app-bar">
       <button class="md-icon-button back-control" aria-label="Back to library" onclick={onback}><Icon name="back" /></button>
-      <div><h1 tabindex="-1" data-workspace-heading>{target.name || target.titleId}</h1><p>{target.category === 'base' ? 'Base game' : target.category === 'update' ? 'Update' : 'DLC'} · {target.titleId}</p></div>
+      <div><h1 tabindex="-1" data-workspace-heading>{target.name || target.titleId}</h1><p>{target.category === 'base' ? 'Base game' : 'Update'} · {target.titleId}</p></div>
       <button class="md-icon-button" aria-label="Open settings" onclick={onsettings}><Icon name="settings" /></button>
     </header>
     <div class="workspace-scroll">
-      {#if target.category === 'dlc'}
-        <div class="empty"><Icon name="info" size={36} /><h2>Cheats are not supported for DLC</h2><p>Choose a base game or update from the library.</p><button class="md-button md-button--tonal" onclick={onback}>Back to library</button></div>
-      {:else}
         {#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
         <details class="package-section" open={!chosen}>
           <summary><span>{chosenBuild ? `Comparing build ${chosenBuild}` : 'Choose a package version'}<small>{chosenBuild ? 'Selected package · not necessarily active in Eden' : 'Optional compatibility comparison'}</small></span><Icon name="expand" /></summary>
@@ -266,7 +263,6 @@
             </details>
           {:else}{#if !catalogLoading && !catalogError}<p class="support">No local cheats for this title. Fetch online or add a custom entry.</p>{/if}{/each}
         </section>
-      {/if}
     </div>
   {:else}<div class="empty"><Icon name="game" size={48} /><h1>Your next game, ready to tweak</h1><p>Choose a title from your library to manage its cheats.</p></div>{/if}
 </section>

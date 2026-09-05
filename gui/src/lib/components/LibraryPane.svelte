@@ -33,15 +33,14 @@
 
   /**
    * @param {GameGroup} group
-   * @returns {{ entry: TitleEntry, kind: string, unsupported: boolean }[]}
+   * @returns {{ entry: TitleEntry, kind: string }[]}
    */
   function entriesForGroup(group) {
     return [
       ...(group.baseGame
-        ? [{ entry: group.baseGame, kind: 'Base game', unsupported: false }]
+        ? [{ entry: group.baseGame, kind: 'Base game' }]
         : []),
-      ...group.updates.map((entry) => ({ entry, kind: 'Update', unsupported: false })),
-      ...group.dlcs.map((entry) => ({ entry, kind: 'DLC', unsupported: true })),
+      ...group.updates.map((entry) => ({ entry, kind: 'Update' })),
     ];
   }
 
@@ -171,7 +170,7 @@
 
             {#if entries.length > 0}
               <details class="related-titles">
-                <summary>{group.updates.length} updates · {group.dlcs.length} DLC titles</summary>
+                <summary>{group.updates.length} update{group.updates.length === 1 ? '' : 's'}</summary>
                 <div class="version-list">
                 {#each entries as item (item.entry.titleId)}
                   <button
@@ -184,8 +183,8 @@
                     <span class="version-copy">
                       <span class="version-name">{item.entry.name || group.baseName || item.entry.titleId}</span>
                       <span class="version-meta">
-                        <span class:unsupported={item.unsupported} class="version-kind">
-                          {item.kind}{item.unsupported ? ' · Cheats unsupported' : ''}
+                        <span class="version-kind">
+                          {item.kind}
                         </span>
                         <code>{item.entry.titleId}</code>
                       </span>
@@ -475,10 +474,6 @@
     color: var(--md-sys-color-on-surface-variant);
     font-size: var(--md-sys-typescale-label-medium-size);
     line-height: 1rem;
-  }
-
-  .version-kind.unsupported {
-    color: var(--md-sys-color-error);
   }
 
   .entry-installed {

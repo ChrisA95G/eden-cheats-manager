@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   candidateKey,
+  cheatLibraryGroups,
   createLibraryState,
   fallbackCandidate,
   findPresenceByObservedId,
@@ -10,6 +11,28 @@ import {
   reconcileCandidate,
   reduceLibraryState,
 } from './library.js';
+
+test('cheat library drops DLC-only groups and preserves base/update identities', () => {
+  /** @param {string} titleId @param {import('../api/types.js').TitleEntry['category']} category */
+  const entry = (titleId, category) => ({titleId, category, baseTitleId:'0100AAAA00000000', name:category, image:'', installed:true});
+  const base = entry('0100AAAA00000000', 'base');
+  const update = entry('0100AAAA00000800', 'update');
+  const dlc = entry('0100AAAA00000001', 'dlc');
+  const group = {baseTitleId:base.titleId, baseName:'Game', baseImage:'', baseInstalled:true, baseGame:base, updates:[update], dlcs:[dlc]};
+  const updateOnly = {...group, baseGame:null, baseInstalled:false};
+  const dlcOnly = {...updateOnly, updates:[]};
+  const source = [group, updateOnly, dlcOnly, {...dlcOnly, dlcs:[]}];
+  const before = structuredClone(source);
+  const visible = cheatLibraryGroups(source);
+
+  assert.equal(visible.length, 2);
+  assert.equal(visible[0].baseGame, base);
+  assert.equal(visible[0].updates[0], update);
+  assert.equal(visible[1].updates[0], update);
+  assert.ok(visible.every(item => item.dlcs.length === 0));
+  assert.deepEqual(source, before, 'raw backend/cache data must remain intact');
+  assert.deepEqual(cheatLibraryGroups([]), []);
+});
 
 /** @typedef {import('../api/types.js').EdenPackageCorrelationEntry} EdenPackageCorrelationEntry */
 /** @typedef {import('../api/types.js').GameVersionGroup} GameVersionGroup */
