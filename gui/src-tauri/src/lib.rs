@@ -73,8 +73,6 @@ pub fn run() {
             settings::get_eden_log_path_pc,
             settings::detect_eden_exe,
             settings::get_platform,
-            // per-title build ID detection
-            build_ids::detect_build_ids_pc,
             // local cheats lookup + custom cheats
             cheatslips::search_cheats,
             cheatslips::save_custom_cheat,
