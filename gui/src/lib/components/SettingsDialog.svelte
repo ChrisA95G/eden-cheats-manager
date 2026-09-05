@@ -64,7 +64,6 @@
       pcLoadDir: value?.pcLoadDir ?? '',
       prodKeysPath: value?.prodKeysPath ?? '',
       packageLibraryPath: value?.packageLibraryPath ?? '',
-      edenExePath: value?.edenExePath ?? '',
       onboardingDone: value?.onboardingDone ?? false,
     };
   }

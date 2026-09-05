@@ -473,30 +473,6 @@ pub fn get_cached_games_android(app: AppHandle) -> Vec<GameGroup> {
     load_game_cache(&app, "android")
 }
 
-/// Return Eden's configured non-virtual game directories on PC.
-/// Used by the frontend to set a default path in the ROM file picker.
-#[tauri::command]
-pub fn get_eden_game_dirs_pc() -> Vec<String> {
-    let config_path = match crate::build_ids::get_eden_config_path() {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let config = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    let mut dirs = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for line in config.lines() {
-        if !line.contains("gamedirs") || !line.contains("\\path=") { continue; }
-        let raw = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
-        if raw.is_empty() || crate::adb::EDEN_VIRTUAL_DIRS.contains(&raw) { continue; }
-        if std::path::PathBuf::from(raw).exists() && seen.insert(raw.to_string()) {
-            dirs.push(raw.to_string());
-        }
-    }
-    dirs
-}
 
 #[cfg(test)]
 mod tests {
