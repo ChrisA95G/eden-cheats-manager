@@ -190,10 +190,9 @@
         defaultPath,
       });
       if (selected) {
-        const path = typeof selected === 'string' ? selected : selected.path;
         await invoke('set_rom_path_manual', {
           titleId: $selectedGame.baseTitleId ?? $selectedGame.titleId,
-          path,
+          path: selected,
         });
       }
     } catch (e) {
