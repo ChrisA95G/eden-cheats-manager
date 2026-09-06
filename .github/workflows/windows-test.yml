@@ -1,0 +1,69 @@
+name: Windows test installer
+
+on:
+  push:
+    branches: ['ci/windows-rc-test', 'release/*']
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  windows-test:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Validate release metadata
+        run: node scripts/check-release-version.mjs
+      - name: Install frontend dependencies
+        working-directory: gui
+        run: npm ci
+      - name: Check frontend
+        working-directory: gui
+        run: npm run check
+      - name: Test frontend
+        working-directory: gui
+        run: npm run test
+      - name: Test native Windows backend
+        working-directory: gui/src-tauri
+        run: cargo test --locked
+      - name: Build Windows test installer
+        working-directory: gui
+        run: npm run tauri build -- --bundles nsis -- --locked
+
+      - name: Prepare artifact and checksum
+        run: |
+          $installers = @(Get-ChildItem gui/src-tauri/target/release/bundle/nsis -Filter '*-setup.exe' -File)
+          if ($installers.Count -ne 1) { throw "Expected exactly one NSIS installer" }
+          $artifactDir = New-Item -ItemType Directory -Path windows-test-artifact
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactDir.FullName
+          $hash = (Get-FileHash -LiteralPath $installers[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($installers[0].Name)" | Set-Content windows-test-artifact/SHA256SUMS -Encoding ascii
+          $version = (Get-Content gui/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          @(
+            "Commit: $env:GITHUB_SHA"
+            "Version: $version"
+            "Runner: $env:ImageOS $env:ImageVersion"
+            "Purpose: unsigned Windows x64 test installer; not a published release"
+          ) | Set-Content windows-test-artifact/build-info.txt -Encoding ascii
+
+      - name: Upload Windows test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-rc-test-${{ github.sha }}
+          path: windows-test-artifact/
+          if-no-files-found: error
+          retention-days: 14
