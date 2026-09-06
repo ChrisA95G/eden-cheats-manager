@@ -13,8 +13,6 @@ internal class EdenSafStorage(private val activity: MainActivity) {
     companion object {
         private const val SAF_PREFS = "eden_saf"
         private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
-        private const val EDEN_DOCUMENTS_AUTHORITY = "dev.eden.eden_emulator.user"
-        private const val EDEN_LOAD_DOCUMENT_ID = "root/load"
     }
 
     private data class SafDocument(
@@ -26,35 +24,23 @@ internal class EdenSafStorage(private val activity: MainActivity) {
     private val contentResolver
         get() = activity.contentResolver
 
+    @Volatile
+    private var lastSelectionError = ""
+
     private val edenLoadPicker =
         activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            lastSelectionError = ""
             if (uri == null) {
                 android.util.Log.i("CheatsManager", "SAF selection cancelled")
                 return@registerForActivityResult
             }
 
-            if (uri.authority != EDEN_DOCUMENTS_AUTHORITY) {
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Selected directory is not provided by Eden"
-                )
-                return@registerForActivityResult
-            }
-            val documentId = try {
-                DocumentsContract.getTreeDocumentId(uri)
-            } catch (error: IllegalArgumentException) {
-                android.util.Log.e("CheatsManager", "Invalid Eden tree URI", error)
-                return@registerForActivityResult
-            }
-            if (documentId != EDEN_LOAD_DOCUMENT_ID) {
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Invalid Eden directory: '$documentId'. Expected: '$EDEN_LOAD_DOCUMENT_ID'"
-                )
-                return@registerForActivityResult
-            }
-
             try {
+                val rootUri = resolveLoadDirectory(uri)
+                queryChildren(rootUri)
+                check(documentSupportsCreate(rootUri)) {
+                    "The selected load folder does not allow cheat files to be created."
+                }
                 val flags =
                     Intent.FLAG_GRANT_READ_URI_PERMISSION or
                         Intent.FLAG_GRANT_WRITE_URI_PERMISSION
@@ -91,6 +77,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
                     "Eden SAF directory permission saved"
                 )
             } catch (error: Exception) {
+                lastSelectionError = error.message ?: "Could not save access to the selected load folder."
                 android.util.Log.e(
                     "CheatsManager",
                     "Could not persist Eden SAF permission",
@@ -132,24 +119,6 @@ internal class EdenSafStorage(private val activity: MainActivity) {
                 message = "The saved Eden directory is invalid. Select it again."
             )
         }
-        val validLocation = try {
-            treeUri.authority == EDEN_DOCUMENTS_AUTHORITY &&
-                DocumentsContract.getTreeDocumentId(treeUri) == EDEN_LOAD_DOCUMENT_ID
-        } catch (_: IllegalArgumentException) {
-            false
-        }
-        if (!validLocation) {
-            return accessStatusJson(
-                selected = true,
-                validLocation = false,
-                readPermission = false,
-                writePermission = false,
-                readable = false,
-                writable = false,
-                message = "The saved directory is not Eden → load. Select it again."
-            )
-        }
-
         val permission = contentResolver.persistedUriPermissions
             .firstOrNull { it.uri == treeUri }
         val readPermission = permission?.isReadPermission == true
@@ -157,7 +126,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         if (!readPermission || !writePermission) {
             return accessStatusJson(
                 selected = true,
-                validLocation = true,
+                validLocation = false,
                 readPermission = readPermission,
                 writePermission = writePermission,
                 readable = false,
@@ -166,10 +135,19 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             )
         }
 
-        val rootUri = DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            EDEN_LOAD_DOCUMENT_ID
-        )
+        val rootUri = try {
+            resolveLoadDirectory(treeUri)
+        } catch (error: Exception) {
+            return accessStatusJson(
+                selected = true,
+                validLocation = false,
+                readPermission = readPermission,
+                writePermission = writePermission,
+                readable = false,
+                writable = false,
+                message = error.message ?: "The saved load folder is unavailable. Select it again."
+            )
+        }
         val readable = try {
             queryChildren(rootUri)
             true
@@ -265,19 +243,37 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         val savedUri = preferences().getString(PREF_EDEN_LOAD_URI, null)
             ?: throw IllegalStateException("Select Eden's load directory first")
         val treeUri = Uri.parse(savedUri)
-        if (treeUri.authority != EDEN_DOCUMENTS_AUTHORITY ||
-            DocumentsContract.getTreeDocumentId(treeUri) != EDEN_LOAD_DOCUMENT_ID) {
-            throw IllegalStateException("Saved directory is not Eden's load directory")
-        }
         val permission = contentResolver.persistedUriPermissions
             .firstOrNull { it.uri == treeUri }
         if (permission?.isReadPermission != true || permission.isWritePermission != true) {
             throw IllegalStateException("Eden load directory permission is no longer available")
         }
-        return DocumentsContract.buildDocumentUriUsingTree(
-            treeUri,
-            EDEN_LOAD_DOCUMENT_ID
+        return resolveLoadDirectory(treeUri)
+    }
+
+    private fun resolveLoadDirectory(treeUri: Uri): Uri {
+        require(treeUri.scheme == "content" && !treeUri.authority.isNullOrBlank() &&
+            DocumentsContract.isTreeUri(treeUri)) {
+            "Select your Eden installation's load folder using the folder picker."
+        }
+        val documentId = DocumentsContract.getTreeDocumentId(treeUri)
+        require(documentId.isNotBlank()) { "The selected folder has no document ID." }
+        val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE
         )
+        val cursor = contentResolver.query(rootUri, projection, null, null, null)
+            ?: throw IllegalStateException("The selected folder could not be read.")
+        cursor.use {
+            require(it.moveToFirst() &&
+                it.getString(it.getColumnIndexOrThrow(projection[0])) == "load" &&
+                it.getString(it.getColumnIndexOrThrow(projection[1])) ==
+                    DocumentsContract.Document.MIME_TYPE_DIR) {
+                "Select the folder named load inside your Eden installation, not its parent or a game folder."
+            }
+        }
+        return rootUri
     }
 
     private fun documentSupportsCreate(documentUri: Uri): Boolean {
@@ -315,7 +311,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             "ready",
             validLocation && readPermission && writePermission && readable && writable
         )
-        .put("message", message)
+        .put("message", lastSelectionError.ifEmpty { message })
         .toString()
 
     private fun pathSegments(relativePath: String): List<String> {
