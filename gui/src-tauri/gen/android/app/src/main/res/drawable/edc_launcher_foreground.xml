@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Keep the lettering inside the safe area of adaptive launcher masks. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_foreground"
+    android:insetLeft="7.5%"
+    android:insetTop="7.5%"
+    android:insetRight="7.5%"
+    android:insetBottom="7.5%" />

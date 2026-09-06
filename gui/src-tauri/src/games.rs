@@ -1,85 +1,7 @@
-use crate::adb::{ANDROID_CONFIG_PATH, REMOTE_BASE};
 use crate::db;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use tauri::{AppHandle, Manager};
-
-/// Convert a content:// URI used by Eden's config to a physical /storage/… path.
-/// e.g. content://…/tree/4A21-0000%3ARoms%2FSwitch%2FRoms → /storage/4A21-0000/Roms/Switch/Roms
-pub(crate) fn content_uri_to_physical(uri: &str) -> Option<String> {
-    let tree_part = uri.split("/tree/").nth(1)?;
-    let decoded = tree_part.replace("%3A", ":").replace("%2F", "/");
-    let (storage_id, rest) = decoded.split_once(':')?;
-    Some(format!("/storage/{}/{}", storage_id, rest))
-}
-
-/// Extract the first 16-char hex title ID ending in "800" from an NSP/XCI filename,
-/// e.g. "Xenoblade … [0100FF500E34A800][v196608][UPDATE].nsp" → "0100FF500E34A800"
-pub(crate) fn extract_update_tid_from_filename(filename: &str) -> Option<String> {
-    let bytes = filename.as_bytes();
-    let mut i = 0;
-    while i + 17 < bytes.len() {
-        if bytes[i] == b'[' && bytes[i + 17] == b']' {
-            let candidate = &filename[i + 1..i + 17];
-            if candidate.chars().all(|c| c.is_ascii_hexdigit())
-                && candidate[13..].eq_ignore_ascii_case("800")
-            {
-                return Some(candidate.to_uppercase());
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-/// Read Eden's config.ini via adb, find all configured game directories, check for
-/// a sibling "Updates" folder, and return every update title ID found in filenames.
-fn find_update_tids_android(adb_path: &str) -> Vec<String> {
-    let adb = if adb_path.is_empty() { "adb" } else { adb_path };
-    let output = std::process::Command::new(adb)
-        .args(["shell", "cat", ANDROID_CONFIG_PATH])
-        .output();
-    let Ok(output) = output else {
-        log::warn!("[games] could not spawn adb to read Eden config.ini");
-        return Vec::new();
-    };
-    if !output.status.success() {
-        log::warn!("[games] adb cat config.ini failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim());
-        return Vec::new();
-    }
-    let config_text = String::from_utf8_lossy(&output.stdout);
-
-    // Collect unique parent directories from gamedirs entries
-    let mut parents: HashSet<String> = HashSet::new();
-    for line in config_text.lines() {
-        if !line.contains("\\path=") { continue; }
-        let uri = line.splitn(2, '=').nth(1).map(|s| s.trim_matches('"')).unwrap_or("");
-        if let Some(physical) = content_uri_to_physical(uri) {
-            if let Some(parent) = std::path::Path::new(&physical).parent() {
-                parents.insert(parent.to_string_lossy().to_string());
-            }
-        }
-    }
-    log::debug!("[games] update scan parent dirs: {:?}", parents);
-
-    let mut tids = Vec::new();
-    for parent in &parents {
-        let updates_dir = format!("{}/Updates", parent);
-        let ls = std::process::Command::new(adb)
-            .args(["shell", "ls", &updates_dir])
-            .output();
-        let Ok(ls) = ls else { continue; };
-        if !ls.status.success() { continue; }
-        for filename in String::from_utf8_lossy(&ls.stdout).lines() {
-            if let Some(tid) = extract_update_tid_from_filename(filename) {
-                log::info!("[games] update found on device: {tid}  ({filename})");
-                tids.push(tid);
-            }
-        }
-    }
-    tids
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,6 +39,92 @@ fn category_from_tid(tid: &str) -> &str {
 
 pub(crate) fn is_valid_tid(s: &str) -> bool {
     s.len() == 16 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EdenPresenceRecord {
+    pub(crate) observed_title_id: String,
+    pub(crate) resolved_base_title_id: Option<String>,
+    pub(crate) resolution_issue: Option<String>,
+}
+
+pub(crate) fn extract_eden_presence(
+    rows: &[db::TitleRow],
+    installed_ids: &HashSet<String>,
+) -> Vec<EdenPresenceRecord> {
+    let mut base_candidates: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for row in rows {
+        if !is_valid_tid(&row.title_id) {
+            continue;
+        }
+        let title_id = row.title_id.to_ascii_uppercase();
+        if title_id.ends_with("000") {
+            base_candidates
+                .entry(title_id[..12].to_string())
+                .or_default()
+                .insert(title_id);
+        }
+    }
+
+    let observed_ids: BTreeSet<String> = installed_ids
+        .iter()
+        .filter(|title_id| is_valid_tid(title_id))
+        .map(|title_id| title_id.to_ascii_uppercase())
+        .collect();
+
+    observed_ids
+        .into_iter()
+        .map(|observed_title_id| {
+            let candidates = base_candidates.get(&observed_title_id[..12]);
+            let (resolved_base_title_id, resolution_issue) = if observed_title_id
+                .ends_with("000")
+            {
+                if candidates.is_some_and(|candidates| candidates.contains(&observed_title_id)) {
+                    (Some(observed_title_id.clone()), None)
+                } else {
+                    (
+                        None,
+                        Some(format!(
+                            "No authoritative base Title ID was found for observed Eden title {observed_title_id}."
+                        )),
+                    )
+                }
+            } else {
+                match candidates {
+                    Some(candidates) if candidates.len() == 1 => {
+                        (candidates.first().cloned(), None)
+                    }
+                    Some(candidates) if candidates.len() > 1 => (
+                        None,
+                        Some(format!(
+                            "Multiple authoritative base Title IDs match observed Eden title {observed_title_id}."
+                        )),
+                    ),
+                    _ => (
+                        None,
+                        Some(format!(
+                            "No authoritative base Title ID was found for observed Eden title {observed_title_id}."
+                        )),
+                    ),
+                }
+            };
+
+            EdenPresenceRecord {
+                observed_title_id,
+                resolved_base_title_id,
+                resolution_issue,
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn build_groups_with_presence(
+    rows: Vec<db::TitleRow>,
+    installed_ids: &HashSet<String>,
+) -> (Vec<GameGroup>, Vec<EdenPresenceRecord>) {
+    let presence = extract_eden_presence(&rows, installed_ids);
+    let groups = build_groups(rows, installed_ids);
+    (groups, presence)
 }
 
 /// Group SQLite title rows into GameGroups keyed by the first 12 chars of
@@ -363,70 +371,16 @@ pub(crate) fn build_groups(rows: Vec<db::TitleRow>, installed_ids: &HashSet<Stri
     merged
 }
 
-/// Scan the Eden Android load dir for title IDs, cross-reference with the
-/// SQLite titles database, and return hierarchical game groups.
-#[tauri::command]
-pub async fn scan_eden_games_android(
-    app: AppHandle,
-    adb_path: String,
-) -> Result<Vec<GameGroup>, String> {
-    let title_ids_raw = crate::adb::adb_ls(adb_path.clone(), REMOTE_BASE.to_string())?;
-    let title_ids_raw_len = title_ids_raw.len();
-    let mut installed_ids: HashSet<String> = title_ids_raw
-        .into_iter()
-        .filter(|s| is_valid_tid(s))
-        .collect();
-
-    // Also scan the Updates folder(s) derived from Eden's config game dirs
-    let update_tids = find_update_tids_android(&adb_path);
-    log::info!("[games::android] {} update title IDs found via NSP scan", update_tids.len());
-    installed_ids.extend(update_tids);
-
-    log::info!("[games::android] raw ls returned {} ids, {} valid", title_ids_raw_len, installed_ids.len());
-    for tid in &installed_ids {
-        log::debug!("[games::android] on-device: {tid}");
-    }
-
-    let state = app.state::<db::DbState>();
-    log::debug!("[games::android] db path: {:?}", state.path);
-
-    // Collect unique base prefixes (first 12 chars — game family)
-    let mut seen_prefixes = HashSet::new();
-    for tid in &installed_ids {
-        if tid.len() >= 12 {
-            seen_prefixes.insert(tid[..12].to_string());
-        }
-    }
-    log::debug!("[games::android] unique 12-char prefixes: {:?}", seen_prefixes);
-
-    let mut all_rows = Vec::new();
-    for prefix in &seen_prefixes {
-        match db::query_base_prefix(&state, prefix) {
-            Ok(rows) => {
-                log::debug!("[games::android] prefix {} -> {} rows", prefix, rows.len());
-                all_rows.extend(rows);
-            }
-            Err(e) => log::warn!("[games::android] prefix {} query error: {}", prefix, e),
-        }
-    }
-
-    let groups = build_groups(all_rows, &installed_ids);
-    log::info!("[games::android] {} groups built", groups.len());
-    save_game_cache(&app, "android", &groups);
-    Ok(groups)
-}
-
 /// Scan the Eden PC load dir for title IDs, cross-reference with the
 /// SQLite titles database, and return hierarchical game groups.
-#[tauri::command]
-pub async fn scan_eden_games_pc(
-    app: AppHandle,
-    load_dir: String,
-) -> Result<Vec<GameGroup>, String> {
-    let dir = std::path::PathBuf::from(&load_dir);
+pub(crate) fn scan_eden_games_pc_with_presence(
+    app: &AppHandle,
+    load_dir: &str,
+) -> Result<(Vec<GameGroup>, Vec<EdenPresenceRecord>), String> {
+    let dir = std::path::PathBuf::from(load_dir);
     log::info!("[games::pc] load_dir={:?}, exists={}", dir, dir.exists());
     if !dir.exists() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), Vec::new()));
     }
 
     let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
@@ -467,10 +421,18 @@ pub async fn scan_eden_games_pc(
         }
     }
 
-    let groups = build_groups(all_rows, &installed_ids);
+    let (groups, presence) = build_groups_with_presence(all_rows, &installed_ids);
     log::info!("[games::pc] {} groups built", groups.len());
-    save_game_cache(&app, "pc", &groups);
-    Ok(groups)
+    save_game_cache(app, "pc", &groups);
+    Ok((groups, presence))
+}
+
+#[tauri::command]
+pub async fn scan_eden_games_pc(
+    app: AppHandle,
+    load_dir: String,
+) -> Result<Vec<GameGroup>, String> {
+    scan_eden_games_pc_with_presence(&app, &load_dir).map(|(groups, _presence)| groups)
 }
 
 // ── Game list cache ───────────────────────────────────────────────────────────
@@ -511,27 +473,211 @@ pub fn get_cached_games_android(app: AppHandle) -> Vec<GameGroup> {
     load_game_cache(&app, "android")
 }
 
-/// Return Eden's configured non-virtual game directories on PC.
-/// Used by the frontend to set a default path in the ROM file picker.
-#[tauri::command]
-pub fn get_eden_game_dirs_pc() -> Vec<String> {
-    let config_path = match crate::build_ids::get_eden_config_path() {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
-    let config = match std::fs::read_to_string(&config_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-    let mut dirs = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for line in config.lines() {
-        if !line.contains("gamedirs") || !line.contains("\\path=") { continue; }
-        let raw = line.splitn(2, '=').nth(1).unwrap_or("").trim_matches('"');
-        if raw.is_empty() || crate::adb::EDEN_VIRTUAL_DIRS.contains(&raw) { continue; }
-        if std::path::PathBuf::from(raw).exists() && seen.insert(raw.to_string()) {
-            dirs.push(raw.to_string());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn row(title_id: &str, name: &str, image: &str) -> db::TitleRow {
+        db::TitleRow {
+            title_id: title_id.into(),
+            name: name.into(),
+            image: image.into(),
         }
     }
-    dirs
+
+    #[test]
+    fn build_groups_keeps_current_prefix_shape_and_synthetic_entries() {
+        let rows = vec![
+            row("0100AAAA00000800", "", "update.png"),
+            row("0100AAAA00000000", "Alpha", "base.png"),
+            row("0100AAAA00000001", "", "dlc.png"),
+        ];
+        let installed_ids = HashSet::from([
+            "0100AAAA00000000".to_string(),
+            "0100AAAA00000800".to_string(),
+            "0100AAAA00001800".to_string(),
+            "0100FFFF00000800".to_string(),
+        ]);
+
+        assert_eq!(
+            serde_json::to_value(build_groups(rows, &installed_ids)).unwrap(),
+            json!([{
+                "baseTitleId": "0100AAAA00000000",
+                "baseName": "Alpha",
+                "baseImage": "base.png",
+                "baseInstalled": true,
+                "baseGame": {
+                    "titleId": "0100AAAA00000000",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Alpha",
+                    "image": "base.png",
+                    "category": "base",
+                    "installed": true,
+                },
+                "updates": [
+                    {
+                        "titleId": "0100AAAA00000800",
+                        "baseTitleId": "0100AAAA00000000",
+                        "name": "Alpha",
+                        "image": "update.png",
+                        "category": "update",
+                        "installed": true,
+                    },
+                    {
+                        "titleId": "0100AAAA00001800",
+                        "baseTitleId": "0100AAAA00000000",
+                        "name": "Alpha",
+                        "image": "",
+                        "category": "update",
+                        "installed": true,
+                    }
+                ],
+                "dlcs": [{
+                    "titleId": "0100AAAA00000001",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Alpha",
+                    "image": "dlc.png",
+                    "category": "dlc",
+                    "installed": false,
+                }]
+            }])
+        );
+    }
+
+    #[test]
+    fn build_groups_name_merges_distinct_families_for_display() {
+        let rows = vec![
+            row("0100BBBB00000000", "Shared", "b.png"),
+            row("0100BBBB00000800", "", "b-update.png"),
+            row("0100AAAA00000000", "Shared", "a.png"),
+            row("0100AAAA00000001", "", "a-dlc.png"),
+        ];
+        let installed_ids = HashSet::from(["0100BBBB00000000".to_string()]);
+
+        assert_eq!(
+            serde_json::to_value(build_groups(rows, &installed_ids)).unwrap(),
+            json!([{
+                "baseTitleId": "0100AAAA00000000",
+                "baseName": "Shared",
+                "baseImage": "a.png",
+                "baseInstalled": true,
+                "baseGame": {
+                    "titleId": "0100AAAA00000000",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Shared",
+                    "image": "a.png",
+                    "category": "base",
+                    "installed": false,
+                },
+                "updates": [{
+                    "titleId": "0100BBBB00000800",
+                    "baseTitleId": "0100BBBB00000000",
+                    "name": "Shared",
+                    "image": "b-update.png",
+                    "category": "update",
+                    "installed": false,
+                }],
+                "dlcs": [{
+                    "titleId": "0100AAAA00000001",
+                    "baseTitleId": "0100AAAA00000000",
+                    "name": "Shared",
+                    "image": "a-dlc.png",
+                    "category": "dlc",
+                    "installed": false,
+                }]
+            }])
+        );
+    }
+
+    #[test]
+    fn presence_normalizes_orders_and_resolves_only_authoritative_base_rows() {
+        let rows = vec![
+            row("0100AAAA00000000", "A", ""),
+            row("0100aaaa00000000", "A duplicate", ""),
+            row("0100AAAA00001000", "A sibling", ""),
+            row("0100BBBB00000000", "B", ""),
+            row("0100BBBB00001000", "B sibling", ""),
+            row("0100CCCC00000000", "C", ""),
+            row("0100CCCC00000800", "C update", ""),
+            row("0100DDDD00000G00", "Malformed", ""),
+            row("0100EEEE00001000", "E sibling", ""),
+        ];
+        let installed_ids = HashSet::from([
+            "0100aaaa00000000".to_string(),
+            "0100AAAA00000000".to_string(),
+            "0100BBBB00000800".to_string(),
+            "0100cccc00000800".to_string(),
+            "0100DDDD00000800".to_string(),
+            "0100EEEE00000000".to_string(),
+            "not-a-title-id".to_string(),
+        ]);
+
+        assert_eq!(
+            extract_eden_presence(&rows, &installed_ids),
+            vec![
+                EdenPresenceRecord {
+                    observed_title_id: "0100AAAA00000000".into(),
+                    resolved_base_title_id: Some("0100AAAA00000000".into()),
+                    resolution_issue: None,
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100BBBB00000800".into(),
+                    resolved_base_title_id: None,
+                    resolution_issue: Some(
+                        "Multiple authoritative base Title IDs match observed Eden title 0100BBBB00000800."
+                            .into(),
+                    ),
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100CCCC00000800".into(),
+                    resolved_base_title_id: Some("0100CCCC00000000".into()),
+                    resolution_issue: None,
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100DDDD00000800".into(),
+                    resolved_base_title_id: None,
+                    resolution_issue: Some(
+                        "No authoritative base Title ID was found for observed Eden title 0100DDDD00000800."
+                            .into(),
+                    ),
+                },
+                EdenPresenceRecord {
+                    observed_title_id: "0100EEEE00000000".into(),
+                    resolved_base_title_id: None,
+                    resolution_issue: Some(
+                        "No authoritative base Title ID was found for observed Eden title 0100EEEE00000000."
+                            .into(),
+                    ),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn presence_wrapper_preserves_the_legacy_group_payload() {
+        fn rows() -> Vec<db::TitleRow> {
+            vec![
+                row("0100BBBB00000000", "Shared", "b.png"),
+                row("0100BBBB00000800", "", "b-update.png"),
+                row("0100AAAA00000000", "Shared", "a.png"),
+                row("0100AAAA00000001", "", "a-dlc.png"),
+            ]
+        }
+
+        let installed_ids = HashSet::from(["0100bbbb00000000".to_string()]);
+        let legacy = serde_json::to_vec(&build_groups(rows(), &installed_ids)).unwrap();
+        let (groups, presence) = build_groups_with_presence(rows(), &installed_ids);
+
+        assert_eq!(serde_json::to_vec(&groups).unwrap(), legacy);
+        assert_eq!(
+            presence,
+            vec![EdenPresenceRecord {
+                observed_title_id: "0100BBBB00000000".into(),
+                resolved_base_title_id: Some("0100BBBB00000000".into()),
+                resolution_issue: None,
+            }]
+        );
+    }
 }

@@ -1,339 +1,95 @@
 # Eden Cheats Manager
 
-A desktop app for managing cheat codes on the [Eden](https://github.com/eden-emulator) Nintendo Switch emulator — no terminal, no hex folders, no manual file pushing.
+Manage cheats for Eden on desktop and Android. Scan your NSP/XCI game library,
+choose a base game or update, and install cheats for its detected Build ID.
 
-> **Supports:** Android (native APK) · Android devices via ADB · PC installs (Windows / Linux / macOS)
->
-> **Android 14+ (on-device):** requires [Shizuku](https://shizuku.rikkaapp.dev/) — see [setup instructions](#3-android-14-on-device--shizuku-setup) below.
-
-![Eden Cheats Manager — main view](docs/images/main.png)
-
----
+[Downloads](https://github.com/ChrisA95G/eden-cheats-manager/releases) ·
+[Setup](#quick-start) ·
+[Report a bug](https://github.com/ChrisA95G/eden-cheats-manager/issues/new/choose)
 
 ## What it does
 
-**Before:** hunt through log files by hand, create 3 levels of nested folders with exact hex names, push files over ADB one at a time.
+- Builds your library from scanned **NSP/XCI base games and updates**.
+- Extracts package Build IDs locally and lets you choose a version within each game.
+- Shows whether the game has a corresponding entry in Eden's `load` directory.
+- Browses the bundled cheat catalog, supports custom codes, and optionally fetches
+  more entries from Cheatslips.
+- Installs individual cheat files, lists existing files, and removes them separately
+  from catalog entries.
+- Adapts to desktop and handheld screens.
+## Downloads
 
-**After:** open the app, pick a game, click Install.
+Use the assets attached to the release you intend to test.
 
-| Sidebar | Cheat panel |
-|---------|-------------|
-| ![Sidebar with game library](docs/images/sidebar.png) | ![Cheat panel with cheats loaded](docs/images/cheats.png) |
-
----
-
-## Table of contents
-
-1. [Download & install the app](#1-download--install-the-app)
-2. [Android setup — enabling ADB](#2-android-setup--enabling-adb)
-3. [Android 14+ (on-device) — Shizuku setup](#3-android-14-on-device--shizuku-setup)
-4. [First launch & setup wizard](#4-first-launch--setup-wizard)
-5. [Using the app](#5-using-the-app)
-6. [Getting cheats from Cheatslips](#6-getting-cheats-from-cheatslips)
-7. [Custom cheats](#7-custom-cheats)
-8. [How cheats work (technical)](#8-how-cheats-work-technical)
-9. [Troubleshooting](#9-troubleshooting)
-
----
-
-## 1. Download & install the app
-
-Go to the [Releases](../../releases) page and download the file for your operating system:
-
-| OS | File to download |
-|----|-----------------|
-| Windows | `eden-cheats-manager_x.x.x_x64-setup.exe` |
-| macOS (Apple Silicon) | `eden-cheats-manager_x.x.x_aarch64.dmg` |
-| macOS (Intel) | `eden-cheats-manager_x.x.x_x64.dmg` |
-| Linux | `eden-cheats-manager_x.x.x_amd64.AppImage` |
+| Platform | Asset to choose |
+| --- | --- |
+| Linux x86-64 | `.AppImage` |
 | Android | `eden-cheats-manager.apk` |
+| Windows x86-64 | `x64-setup.exe` or `.msi` |
 
-Run the installer (or sideload the APK on Android — enable "Install from unknown sources" in your device settings), launch the app, and continue to the next section.
+Tested on Linux, Windows and Android (AYN Thor).
 
-> **Android APK (on-device)?** If you installed the APK directly on the Android device running Eden, skip to [First launch](#4-first-launch--setup-wizard) — no ADB or PC required. Android 14+ users also need [Shizuku](#3-android-14-on-device--shizuku-setup).
->
-> **PC mode only?** If you're using Eden on PC (not Android), skip to [First launch](#4-first-launch--setup-wizard).
+## Before you start
 
----
+You need:
 
-## 2. Android setup — enabling ADB
+- Eden installed on the same computer or Android device.
+- Access to Eden's `load` directory for presence checks and cheat files.
+- Optionally, a Cheatslips API token for online fetching.
 
-ADB (Android Debug Bridge) is how the app talks to your Android device. You only need to do this once.
+ECM does not supply games or keys. Compressed NSZ/XCZ files are not supported.
 
-### Step 1 — Enable Developer Options
+## Quick start
 
-1. Open your device's **Settings** app
-2. Scroll down and tap **About phone** (sometimes inside "General management" or "System")
-3. Find **Build number** and **tap it 7 times** in a row
-4. You'll see a message: *"You are now a developer!"*
+### Desktop
 
-> On some devices (Samsung, Xiaomi, etc.) the location differs slightly — search "Build number" in Settings if you can't find it.
+1. Complete setup with Eden's `load` directory.
+2. Select `prod.keys` and your game-package folder during setup or in **Settings →
+   Game library**, then save.
+3. Let the library scan finish. Select a game, then choose **Game version**.
+4. Expand the matching cheat group and select **Install** beside a cheat.
+5. Enable and verify the cheat in Eden. ECM installs files; it does not enable them.
 
-### Step 2 — Enable USB Debugging
+### Android
 
-1. Go back to **Settings** and open **Developer options** (now visible near the bottom)
-2. Find **USB debugging** and turn it **ON**
-3. Confirm the warning dialog
+1. Open Eden once, then open ECM.
+2. In the system picker, choose the **Eden** provider, open **load**, and grant access.
+3. In ECM Settings, select `prod.keys` and your package-library folder using the
+   document pickers. Use local storage that supports seekable file access.
+4. Open a scanned game, choose its base game or update, and install a matching cheat.
 
-### Step 3 — Connect to your computer
+## Understand the two libraries
 
-**Via USB cable:**
+**The package folder tells ECM which games and versions to show.**
+**Eden's `load` directory tells ECM where cheat files belong and supplies its
+presence signal.** They are separate locations with separate purposes.
 
-1. Plug your device into your computer with a USB cable
-2. On your device, a prompt will appear: *"Allow USB debugging?"*
-3. Tap **Allow** (check "Always allow from this computer" to avoid seeing it again)
+“Present in Eden” means ECM found a corresponding `load/<TitleID>` entry. It does
+not prove a package is installed, that Eden is running a particular update, or
+that a cheat is enabled. A fresh game may not have a load entry yet; a stale entry
+may remain after removal. Installation is disabled when no matching entry is found.
 
-That's it — your device is ready.
+Choosing **Game version** filters cheats by the selected package's Build ID. It
+does not switch Eden's version. **All builds** is for browsing and does not establish
+compatibility. A matching Build ID is necessary evidence, not a guarantee a code works.
 
-**Via Wi-Fi (optional, wireless):**
+## Online and custom cheats
 
-1. In **Developer options**, find **Wireless debugging** and turn it **ON**
-2. Tap **Wireless debugging** to open its settings
-3. Note the **IP address and port** shown on screen
-4. In Eden Cheats Manager → **Settings** → **Saved Connections** → add those details
+The bundled catalog is available without an API token. **Connect source** opens
+Settings so you can add a Cheatslips token; **Fetch online** then requests cheats
+for the selected title. Downloaded entries are kept locally. Request limits depend
+on Cheatslips; repeatedly fetching can use your allowance.
 
-### Step 4 — Install ADB on your computer (if needed)
+**Custom cheat** saves your Build ID and named code sections to the local catalog.
+Install those sections separately. The **Installed** tab manages files in Eden;
+deleting a catalog entry does not delete its installed files, and clearing downloaded
+entries preserves custom entries and installed files.
 
-The app uses the `adb` command-line tool. If you already have Android Studio installed it's already on your system.
+## Help and project information
 
-If not, install it for your OS:
+- [Report a bug](https://github.com/ChrisA95G/eden-cheats-manager/issues/new)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
 
-- **Windows:** Download [Platform Tools](https://developer.android.com/tools/releases/platform-tools) from Google, extract the ZIP anywhere, then open Eden Cheats Manager → Settings and point the ADB path to `adb.exe` inside that folder
-- **macOS:** `brew install android-platform-tools`
-- **Linux:** `sudo apt install adb` or `sudo pacman -S android-tools`
-
-Leave the ADB path blank in Settings if `adb` is already available system-wide (i.e. you can type `adb` in a terminal and it works).
-
----
-
-## 3. Android 14+ (on-device) — Shizuku setup
-
-Android 14 and later block apps from reading each other's `/Android/data/` folders directly, including Eden's save and cheat directories. The on-device APK works around this using **Shizuku**, which grants ADB-level filesystem access without requiring a PC.
-
-If your device runs Android 13 or below, skip this section.
-
-### Step 1 — Enable Wireless Debugging
-
-1. Open **Settings** → **Developer options**
-2. Turn **Wireless Debugging** on
-
-> Developer options must be enabled first — see [Android setup](#2-android-setup--enabling-adb) step 1 if you haven't done this yet.
-
-### Step 2 — Install Shizuku
-
-- **Android 14 or 15:** install **Shizuku** from the [Play Store](https://play.google.com/store/apps/details?id=moe.shizuku.privileged.api)
-- **Android 16:** the Play Store build does not yet support Android 16 — download the latest APK directly from [github.com/RikkaApps/Shizuku/releases](https://github.com/RikkaApps/Shizuku/releases) instead
-
-> Android 17 and later are not yet supported by Shizuku. Use ADB mode (requires a PC) as a workaround until Shizuku adds support.
-
-### Step 3 — Start Shizuku via Wireless ADB
-
-1. Open Shizuku
-2. Tap **Start via Wireless ADB** and follow the on-screen prompts
-3. Shizuku should show a "Running" status
-
-### Step 4 — Grant access in Eden Cheats Manager
-
-When you tap **SCAN LIBRARY** for the first time, a prompt will appear if Shizuku permission hasn't been granted yet. Tap **[ GRANT ACCESS ]** in the sidebar, then tap **Allow** in the Shizuku dialog.
-
-You can also check Shizuku status at any time in **Settings** → **Shizuku (Android 14+)**.
-
-> Shizuku must be running every time you use the app. It stops when the device reboots — repeat Step 3 after a restart.
-
----
-
-## 4. First launch & setup wizard
-
-On first launch, a setup wizard walks you through the basics.
-
-![Setup wizard](docs/images/onboarding.png)
-
-**Step 1 — Choose your mode:**
-- **PC / Desktop** — Eden is installed on this computer. The app reads and writes cheat files directly.
-- **Android (ADB)** — Eden is running on an Android device. The app communicates over ADB from a desktop/laptop.
-- **Android (on-device)** — the app is installed as an APK on the same Android device running Eden. No ADB or PC needed. This mode is selected automatically when running the APK. **Android 14+ requires Shizuku** — see [Shizuku setup](#3-android-14-on-device--shizuku-setup).
-
-**Step 2 (Android only) — ADB path:**
-Leave blank if `adb` is on your system PATH, or browse to the `adb` / `adb.exe` binary.
-
-**Step 3 (PC only) — Eden load directory:**
-The folder where Eden loads cheats from. The app tries to detect it automatically. If not found, click **[ … ]** to browse to it manually.
-
-> **Where is the load directory?**
-> - **Windows:** `%APPDATA%\Eden\load\`
-> - **Linux:** `~/.local/share/eden/load/`
-> - **macOS:** `~/Library/Application Support/eden/load/`
-
-You can change any of these settings later via the **SYS** button in the top-right of the sidebar.
-
----
-
-## 5. Using the app
-
-### Scan your library
-
-Click **[ SCAN LIBRARY ]** in the sidebar. The app scans your installed games and groups them by title (base game, updates, DLCs).
-
-> **Android users:** make sure your device is connected and USB Debugging is on before scanning. The app will show a clear error if no device is detected — it won't try to load games from a disconnected device.
-
-### Select a game
-
-Click any game in the sidebar. The right panel shows:
-- All available cheats from the local database
-- The Build ID detected from Eden's log files (if available)
-- Cheats already installed on your device / PC
-
-### Install a cheat
-
-1. Find the **Build ID** row that matches your game version — look for the **✓ Detected** badge
-2. Click the row to expand it
-3. Click **[ INSTALL ]** next to any cheat
-
-The cheat is pushed to your device or written to your PC load directory immediately.
-
-### Delete a cheat
-
-Already-installed cheats appear at the top of the panel. Click **[ DEL ]** next to one to remove it.
-
----
-
-## 6. Getting cheats from Cheatslips
-
-The bundled database covers many games but is static. To get the latest cheats for any game on demand:
-
-1. Sign up for a free account at [cheatslips.com](https://www.cheatslips.com) and copy your API token
-2. Open **Settings** (top-right **SYS** button) → paste the token into **Cheatslips API Token** → Save
-3. Select a game and click **↓ API** in the Available Cheats header
-
-Fetched cheats are saved to your local database — you only use one of your **3 free daily requests** the first time. After that they load instantly from the local cache without any network request.
-
-To remove API-fetched cheats for a game (for example to re-fetch a newer version), click **✕ API** next to the fetch button.
-
----
-
-## 7. Custom cheats
-
-Have cheat codes that aren't in any database? Click **+ Custom** in the Available Cheats header.
-
-Enter the Build ID (pre-filled if one was detected) and paste your cheat codes in Eden's format:
-
-```
-[Cheat Name]
-04000000 00C88A70 3B9AC9FF
-```
-
-Custom cheats are saved locally and appear alongside bundled cheats. Delete them per Build ID using the **[ DEL ]** button on the right side of the accordion row.
-
----
-
-## 8. How cheats work (technical)
-
-### Folder structure
-
-Eden loads cheats from this layout on disk:
-
-```
-<load_dir>/
-  └── <TitleID>/          ← 16-char hex  (long-press game → Info → Program ID)
-       └── <CheatName>/   ← any name you choose
-            └── cheats/
-                 └── <BuildID>.txt    ← 16-char hex, version-specific
-```
-
-On Android, the load directory is:
-```
-/Android/data/dev.eden.eden_emulator/files/load/
-```
-
-### What is a Build ID?
-
-When a game launches, Eden writes a line like this to its log:
-
-```
-Querying NSO patch existence for build_id=92C78BB3DCBBC3F7..., name=main
-```
-
-The **first 16 characters** (`92C78BB3DCBBC3F7`) are the Build ID. Cheats are tied to a specific game version — a game update changes the Build ID, which means existing cheats stop working until new codes are written for the updated version.
-
-### Scan Build ID
-
-If the Build ID isn't detected automatically from Eden's existing logs, use **[ SCAN BUILD ID ]**.
-
-**PC mode:** Click Scan, then launch the game in Eden. The app watches Eden's log file for the build ID entry and returns it automatically (within a few seconds of the game loading). No further action needed — you can launch the game before or after clicking Scan.
-
-If the ROM isn't found automatically, a **[ SET ROM PATH ]** button appears in the cheat panel. Click it to browse directly to the game file — the path is cached so future scans find it instantly.
-
-**Android (ADB) mode:** The app will:
-
-1. Find the ROM file on your device
-2. Force-stop Eden for a clean state
-3. Launch Eden's main screen and wait for it to load
-4. Launch the game
-5. Read the Build ID from Eden's log
-6. Force-stop Eden and return the result
-
-> The device screen must be **unlocked and on** for Android (ADB) scanning to work.
-
-**Android (on-device) mode:** Click Scan. The app launches Eden and the game automatically, reads the Build ID from Eden's log, then sends a notification when done. Tap the notification to return to Eden Cheats Manager. Eden stays suspended in the background — swipe it away from recents if you want to close it.
-
-> On-device scanning completes in a few seconds once the game starts loading.
-
----
-
-## 9. Troubleshooting
-
-**"Shizuku setup required" / "Shizuku not running" (Android 14+)**
-> Shizuku must be started after every reboot. Open the Shizuku app → **Start via Wireless ADB**. Then tap **[ GRANT ACCESS ]** in the Eden Cheats Manager sidebar. If you're on Android 16, use the GitHub APK instead of the Play Store version. Android 17+ is not yet supported — use ADB mode from a PC.
-
-**Build ID not detected**
-> Launch the game in Eden at least once to generate a log entry, then click **Detect Build IDs** or **Scan Build ID**. On PC, Scan watches the Eden log file in real time — click Scan, then launch the game.
-
-**"No device connected" when scanning**
-> Make sure USB Debugging is enabled, the cable is plugged in, and you tapped **Allow** on the "Allow USB debugging?" prompt on your device.
-
-**Scan Build ID fails or times out**
-> - Device screen must be unlocked and on (Android)
-> - The game must be in a directory configured in Eden's settings, or use **[ SET ROM PATH ]** (PC) to point to the ROM file directly
-> - If the game is on an SD card, Eden must have storage access permission for that card
-
-**Cheat doesn't appear in Eden after installing**
-> In Eden: long-press the game → Add-ons → Install → navigate to the folder *containing* `cheats/` (not `cheats/` itself).
-
-**Cheat shows in Eden but doesn't work**
-> The codes may target a different game version — memory addresses change with updates. Confirm the Build ID matches your exact installed version.
-
-**↓ API returns far more cheats than expected**
-> Normal — Cheatslips stores one entry per contributor per Build ID, and contributors often bundle many codes into one submission. Use **✕ API** to clear and re-fetch if needed.
-
----
-
-## Build from source
-
-**Prerequisites:** [Rust](https://rustup.rs) · [Node.js](https://nodejs.org) · [ADB](https://developer.android.com/tools/adb) (Android mode only)
-
-```bash
-git clone https://github.com/ChrisA95G/eden-cheats-manager
-cd eden-cheats-manager/gui
-npm install
-npm run tauri build
-```
-
----
-
-## File locations
-
-| What | Where |
-|------|-------|
-| App settings & cached DB | Platform app data directory |
-| ECM app log | Platform app log directory (open via **Settings → Logs**) |
-| Android cheat storage | `/Android/data/dev.eden.eden_emulator/files/load/` |
-| Eden logs (Android) | `/Android/data/dev.eden.eden_emulator/files/log/eden_log.txt` |
-| Eden logs (Linux) | `~/.local/share/eden/log/eden_log.txt` |
-| Eden logs (Windows) | `%APPDATA%\eden\log\eden_log.txt` |
-| Eden logs (macOS) | `~/Library/Application Support/eden/log/eden_log.txt` |
-
----
-
-## License
-
-MIT © 2026 — see [LICENSE](LICENSE)
+MIT © 2026 — see [LICENSE](LICENSE). The code licence does not automatically cover
+third-party databases, artwork or cheat content. This is an independent project,
+not an official Eden or Nintendo product.

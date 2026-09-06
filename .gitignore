@@ -10,6 +10,7 @@ target/
 .vscode/
 .idea/
 *.png
+!gui/static/edc-logo.png
 CLAUDE.md
 .agents
 .claude
