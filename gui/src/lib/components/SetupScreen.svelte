@@ -323,7 +323,7 @@
         <div class="android-guide">
           <h2>Choose the correct folder</h2>
           <ol>
-            <li>Open the folder picker and choose <strong>Eden</strong> as the storage provider.</li>
+            <li>Open the folder picker and choose the storage for the <strong>Eden build you use</strong>. Its name may differ for nightly or renamed builds.</li>
             <li>Open <strong>load</strong>, then confirm with <strong>Use this folder</strong>.</li>
           </ol>
         </div>
