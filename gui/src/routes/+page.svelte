@@ -206,7 +206,7 @@
 </script>
 
 {#if loading}
-  <main class="startup" aria-busy="true"><Icon name="game" size={40}/><h1>Eden Cheats Manager</h1><p>Opening your library…</p><div class="md-progress" role="progressbar" aria-label="Loading app"></div></main>
+  <main class="startup" aria-busy="true"><img src="/edc-logo.png" alt="" width="80" height="80"/><h1>EDC</h1><p>Opening your library…</p><div class="md-progress" role="progressbar" aria-label="Loading app"></div></main>
 {:else if bootstrapError || !settings}
   <main class="startup"><h1>Unable to open the app</h1><p role="alert">{bootstrapError}</p><button class="md-button md-button--filled" onclick={bootstrap}>Try again</button></main>
 {:else if !ready}

@@ -73,7 +73,7 @@
 <aside class="library-pane" aria-labelledby={`${id}-title`}>
   <header class="top-app-bar">
     <div class="title-block">
-      <span class="brand" aria-hidden="true">ECM</span>
+      <img class="brand" src="/edc-logo.png" alt="EDC" width="40" height="40" />
       <div>
         <h1 id={`${id}-title`}>Game library</h1>
         <p>{groupCountLabel}</p>
@@ -226,10 +226,8 @@
 
   .brand {
     flex: 0 0 auto;
-    color: var(--md-sys-color-primary);
-    font-size: var(--md-sys-typescale-title-medium-size);
-    font-weight: 700;
-    letter-spacing: 0.12em;
+    width: 2.5rem;
+    height: 2.5rem;
   }
 
   .title-block > div {
@@ -473,10 +471,6 @@
   }
 
   @container library (max-width: 420px) {
-    .brand {
-      display: none;
-    }
-
     .library-scroll {
       padding-inline: 1rem;
     }

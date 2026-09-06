@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Eden Cheats Manager",
+        "title": "EDC",
         "width": 1200,
         "height": 760,
         "minWidth": 900,
@@ -25,6 +25,10 @@
   },
   "bundle": {
     "active": true,
+    "linux": {
+      "deb": { "desktopTemplate": "edc.desktop.hbs" },
+      "rpm": { "desktopTemplate": "edc.desktop.hbs" }
+    },
     "android": { "versionCode": 2001 },
     "windows": { "wix": { "version": "0.2.0.1" } },
     "macOS": { "bundleVersion": "0.2.1" },

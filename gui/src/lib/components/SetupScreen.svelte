@@ -140,11 +140,9 @@
 <main class="setup-screen">
   <section class="setup-card md-card md-card--elevated" aria-labelledby="setup-title" aria-busy={componentBusy}>
     <header class="hero">
-      <div class="hero-icon" aria-hidden="true">
-        <Icon name={platform === 'android' ? 'folder' : 'settings'} size={32} />
-      </div>
+      <img class="hero-icon" src="/edc-logo.png" alt="" width="56" height="56" />
       <div>
-        <p class="eyebrow">Eden Cheats Manager</p>
+        <p class="eyebrow">EDC</p>
         <h1 id="setup-title">
           {platform === 'android' ? 'Connect Eden storage' : 'Finish setting up'}
         </h1>
@@ -152,7 +150,7 @@
           {#if platform === 'android'}
             Grant access to Eden's load directory before managing cheats on this device.
           {:else}
-            Choose the local Eden folders ECM should use. You can change these later.
+            Choose the local Eden folders EDC should use. You can change these later.
           {/if}
         </p>
       </div>
@@ -376,14 +374,9 @@
   }
 
   .hero-icon {
-    display: grid;
     width: 3.5rem;
     height: 3.5rem;
     flex: 0 0 3.5rem;
-    place-items: center;
-    border-radius: var(--md-sys-shape-corner-large);
-    color: var(--md-sys-color-on-primary-container);
-    background: var(--md-sys-color-primary-container);
   }
 
   .eyebrow,
