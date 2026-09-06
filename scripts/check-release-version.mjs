@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const config = JSON.parse(read('gui/src-tauri/tauri.conf.json'));
 const version = config.version;
 const match = /^(\d+)\.(\d+)\.(\d+)(?:-rc\.([1-9]\d*))?$/.exec(version);
@@ -13,7 +13,7 @@ assert.equal(lock.packages[''].version, version);
 assert.equal(/^version = "([^"]+)"/m.exec(read('gui/src-tauri/Cargo.toml'))?.[1], version);
 assert.equal(/name = "eden-cheats-manager-gui"\nversion = "([^"]+)"/.exec(read('gui/src-tauri/Cargo.lock'))?.[1], version);
 
-// Native build numbers are explicitly maintained; see docs/releasing.md.
+// Native build numbers are maintained explicitly for upgrade continuity.
 const [, major, minor, patch] = match;
 const code = config.bundle.android.versionCode;
 assert.ok(Number.isInteger(code) && code > 1000 && code <= 2_100_000_000);

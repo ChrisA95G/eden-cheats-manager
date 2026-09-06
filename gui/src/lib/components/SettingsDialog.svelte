@@ -245,7 +245,7 @@
           <Icon name="folder" size={24} />
           <div>
             <h3 id="settings-storage-title">Eden storage</h3>
-            <p>ECM installs cheat files in Eden's load directory.</p>
+          <p>EDC installs cheat files in Eden's load directory.</p>
           </div>
         </div>
 
@@ -483,7 +483,7 @@
           <Icon name="info" size={24} />
           <div>
             <h3 id="settings-diagnostics-title">Diagnostics</h3>
-            <p>Reveal ECM's local application log.</p>
+          <p>Reveal EDC's local application log.</p>
           </div>
         </div>
 
