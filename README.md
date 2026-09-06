@@ -3,10 +3,6 @@
 Manage cheats for Eden on desktop and Android. Scan your NSP/XCI game library,
 choose a base game or update, and install cheats for its detected Build ID.
 
-**0.2.0-rc.1 is in preparation.** This branch documents the rewritten app, not
-the older 0.1.x releases. RC builds are for testing; back up your settings and
-cheats first.
-
 [Downloads](https://github.com/ChrisA95G/eden-cheats-manager/releases) ·
 [Setup](#quick-start) ·
 [Report a bug](https://github.com/ChrisA95G/eden-cheats-manager/issues/new/choose)
@@ -27,11 +23,11 @@ Use the assets attached to the release you intend to test.
 
 | Platform | Asset to choose |
 | --- | --- |
-| Linux x86-64 | `.AppImage` or `.deb` |
+| Linux x86-64 | `.AppImage` |
 | Android | `eden-cheats-manager.apk` |
 | Windows x86-64 | `x64-setup.exe` or `.msi` |
 
-Tested on Linux and Android (AYN Thor); Windows testing is still pending.
+Tested on Linux, Windows and Android (AYN Thor).
 
 ## Before you start
 
