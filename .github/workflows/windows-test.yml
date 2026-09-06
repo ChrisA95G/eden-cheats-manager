@@ -26,6 +26,8 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Test release metadata guard
+        run: node --test scripts/check-release-version.test.mjs
       - name: Validate release metadata
         run: node scripts/check-release-version.mjs
       - name: Install frontend dependencies

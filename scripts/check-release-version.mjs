@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const config = JSON.parse(read('gui/src-tauri/tauri.conf.json'));
 const version = config.version;
 const match = /^(\d+)\.(\d+)\.(\d+)(?:-rc\.([1-9]\d*))?$/.exec(version);
