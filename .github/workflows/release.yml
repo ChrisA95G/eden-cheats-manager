@@ -3,7 +3,7 @@ name: Release
 on:
   pull_request:
   push:
-    branches: [dev, main]
+    branches: [dev, main, 'release/*']
     tags:
       - 'v*'
 
@@ -48,20 +48,8 @@ jobs:
         include:
           - platform: ubuntu-22.04
             runner: ubuntu-22.04
-            args: ''
-            rust_target: ''
           - platform: windows-latest
             runner: windows-latest
-            args: ''
-            rust_target: ''
-          - platform: macos-aarch64
-            runner: macos-latest
-            args: '--target aarch64-apple-darwin'
-            rust_target: aarch64-apple-darwin
-          - platform: macos-x86_64
-            runner: macos-latest
-            args: '--target x86_64-apple-darwin'
-            rust_target: x86_64-apple-darwin
 
     runs-on: ${{ matrix.runner }}
 
@@ -75,8 +63,6 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_target }}
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -99,15 +85,15 @@ jobs:
           releaseBody: |
             See the assets below to download for your platform.
 
-            Release notes, setup and known limitations: https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/CHANGELOG.md
+            Setup: https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md#quick-start
 
-            **Windows/macOS:** Builds are not yet runtime-verified for this RC. Desktop installers are not publisher-signed/notarized; review platform security warnings before choosing to install.
+            **Windows:** Installers are not publisher-signed; review platform security warnings before choosing to install.
             **Linux:** AppImage — make executable with `chmod +x` then run.
             **Android:** Sideload the APK — enable "Install from unknown sources" in settings.
             Back up existing cheats/settings before testing. Do not uninstall an existing Android release to bypass a signing mismatch.
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
-          args: ${{ matrix.args }} -- --locked
+          args: -- --locked
 
   release-android:
     needs: validate
