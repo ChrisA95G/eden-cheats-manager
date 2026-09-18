@@ -312,6 +312,7 @@ input::placeholder, textarea::placeholder {
 .md-dialog {
   display: flex;
   width: min(calc(100% - 2rem), 35rem);
+  max-height: min(90vh, 45rem);
   max-height: min(90dvh, 45rem);
   flex-direction: column;
   overflow: hidden;
@@ -385,6 +386,7 @@ input::placeholder, textarea::placeholder {
   }
 
   .md-dialog {
+    max-height: calc(100vh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
   }
 }

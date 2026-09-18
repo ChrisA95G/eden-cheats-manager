@@ -23,6 +23,8 @@ html {
 }
 
 body {
+  /* Keep a bounded viewport on Android WebViews without dynamic viewport units. */
+  min-height: 100vh;
   min-height: 100dvh;
   color: var(--md-sys-color-on-background);
   overflow: hidden;
