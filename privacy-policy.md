@@ -29,6 +29,16 @@ user-created codes, or diagnostic logs to the developer. The app has no advertis
 analytics, or automatic crash-reporting service, and does not require an EDC
 account.
 
+## Game cover images
+
+When EDC displays game covers, it downloads images over HTTPS from Nintendo's
+image servers at `img-eshop.cdn.nintendo.net`. The image provider receives your
+IP address, the requested image URL, and standard web-request information.
+These requests can happen automatically when covers are displayed, even if you
+do not use the optional Cheatslips feature. They do not upload your game files
+or `prod.keys` contents. The image provider controls its own server records;
+the developer does not receive those records.
+
 ## Optional online downloads
 
 You can use the included catalog and local features without a Cheatslips token.

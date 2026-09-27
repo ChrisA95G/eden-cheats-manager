@@ -55,6 +55,14 @@ details. Older logs may be replaced during log rotation.</p>
 user-created codes, or diagnostic logs to the developer. The app has no advertising,
 analytics, or automatic crash-reporting service, and does not require an EDC
 account.</p>
+<h2>Game cover images</h2>
+<p>When EDC displays game covers, it downloads images over HTTPS from Nintendo's
+image servers at <code>img-eshop.cdn.nintendo.net</code>. The image provider receives your
+IP address, the requested image URL, and standard web-request information.
+These requests can happen automatically when covers are displayed, even if you
+do not use the optional Cheatslips feature. They do not upload your game files
+or <code>prod.keys</code> contents. The image provider controls its own server records;
+the developer does not receive those records.</p>
 <h2>Optional online downloads</h2>
 <p>You can use the included catalog and local features without a Cheatslips token.
 If you enter a token and request an online fetch, EDC sends <strong>the token and the
