@@ -6,6 +6,9 @@ Eden Cheats Manager (EDC) is maintained by **ChrisA95G**. For support or privacy
 questions, contact
 [google.bucktooth379@passmail.com](mailto:google.bucktooth379@passmail.com).
 
+To request deletion, follow the
+[data-deletion instructions](https://chrisa95g.github.io/eden-cheats-manager/delete-data.html).
+
 This policy explains how EDC handles information when you scan your game library
 and manage cheat codes for Eden. We refer to these as "codes" below; "code files"
 are the files installed in Eden's folder.
@@ -112,7 +115,7 @@ on your device.
 
 ## Privacy policy website
 
-This policy page is hosted on GitHub Pages. When you visit it, GitHub logs and
+This privacy and data-deletion website is hosted on GitHub Pages. When you visit it, GitHub logs and
 stores your IP address for security purposes. EDC adds no analytics, advertising,
 or cookies to this page. GitHub's handling of website data is described in its
 [privacy statement](https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement).
