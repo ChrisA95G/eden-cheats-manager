@@ -230,10 +230,10 @@
 {#if notice}<div class="md-snackbar" role="status" aria-live="polite"><span>{notice.message}</span><button class="md-icon-button" aria-label="Dismiss message" onclick={()=>notice=null}><Icon name="close"/></button></div>{/if}
 
 <style>
-  .app-shell { height:100dvh; width:100%; display:grid; grid-template-columns:minmax(0,1fr); overflow:hidden; }
+  .app-shell { height:100vh; height:100dvh; width:100%; display:grid; grid-template-columns:minmax(0,1fr); overflow:hidden; }
   .library-slot,.workspace-slot { min-width:0; min-height:0; overflow:hidden; }
   .workspace-slot { display:none; } .show-workspace .workspace-slot { display:block; } .show-workspace .library-slot { display:none; }
-  .startup { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; height:100dvh; padding:32px; text-align:center; }
+  .startup { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; height:100vh; height:100dvh; padding:32px; text-align:center; }
   .startup h1 { font-size:24px; font-weight:400; } .startup .md-progress { max-width:260px; }
   .md-snackbar span { flex:1; overflow-wrap:anywhere; } .md-snackbar button { color:inherit; }
   @media (min-width:900px) and (min-height:600px) {

@@ -409,7 +409,7 @@
   .options-menu { position:relative; flex:none; }
   .options-menu > summary { list-style:none; }
   .options-menu > summary::-webkit-details-marker { display:none; }
-  .game-options { position:absolute; z-index:3; right:0; top:100%; display:grid; gap:4px; width:min(320px,calc(100vw - 32px)); max-height:calc(100dvh - 160px); overflow:auto; padding:12px; border-radius:12px; background:var(--md-sys-color-surface-container-high); box-shadow:var(--md-sys-elevation-level-3); }
+  .game-options { position:absolute; z-index:3; right:0; top:100%; display:grid; gap:4px; width:min(320px,calc(100vw - 32px)); max-height:calc(100vh - 160px); max-height:calc(100dvh - 160px); overflow:auto; padding:12px; border-radius:12px; background:var(--md-sys-color-surface-container-high); box-shadow:var(--md-sys-elevation-level-3); }
   .game-options > button { justify-content:flex-start; border-radius:4px; color:var(--md-sys-color-on-surface); white-space:normal; text-align:start; }
   .file-row, .cheat-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid var(--md-sys-color-outline-variant); } .file-row > div,.file-row > details,.cheat-row > details { flex:1; min-width:0; overflow-wrap:anywhere; }
   .build-group { margin-top:12px; padding:0 16px; border-radius:var(--md-sys-shape-corner-medium); background:var(--md-sys-color-surface-container-low); }

@@ -347,6 +347,7 @@
   .setup-screen {
     box-sizing: border-box;
     width: 100%;
+    height: 100vh;
     height: 100dvh;
     overflow-y: auto;
     overscroll-behavior: contain;

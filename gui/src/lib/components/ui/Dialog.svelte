@@ -211,7 +211,9 @@
     dialog.dialog.full-screen {
       width: 100%;
       max-width: none;
+      height: 100vh;
       height: 100dvh;
+      max-height: 100vh;
       max-height: 100dvh;
       margin: 0;
       border-radius: 0;
