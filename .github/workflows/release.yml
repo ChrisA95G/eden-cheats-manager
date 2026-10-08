@@ -138,6 +138,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Use installed JDK for Gradle
+        # Android Studio's daemon criteria override JAVA_HOME and point at an
+        # unavailable JetBrains download. Use the JDK provisioned above in CI.
+        run: rm gui/src-tauri/gen/android/gradle/gradle-daemon-jvm.properties
+
       - name: Install Android NDK
         run: |
           echo "y" | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018"
