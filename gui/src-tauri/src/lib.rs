@@ -23,6 +23,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             // ── Logging setup ───────────────────────────────────────────
             // Log to terminal and to a size-capped rotating log file.
             // If the log exceeds 5 MB, rotate it to .old before opening.

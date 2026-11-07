@@ -17,3 +17,4 @@ CLAUDE.md
 skills-lock.json
 .plans/
 *.jks
+/.signing/
