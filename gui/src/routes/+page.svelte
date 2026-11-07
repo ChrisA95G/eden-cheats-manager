@@ -223,6 +223,7 @@
       onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
   </main>
   <SettingsDialog open={settingsOpen} {platform} {settings} {edenAccess} {packageStatus} {gameLibraryStatus}
+    oncheckupdates={backend.checkAppUpdate}
     {pendingPicker} {saving} error={statusError} onsave={save} onclose={()=>settingsOpen=false}
     onpickdesktop={pickDesktop} onpickandroid={pickAndroid} onretryandroid={refreshAndroidStatus}
     ontesteden={backend.testEdenLoadDirectory} onrevealapplog={()=>backend.revealAppLog(platform)}/>

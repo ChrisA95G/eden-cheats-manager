@@ -34,6 +34,7 @@
    * @property {() => void | Promise<void>} [onretryandroid]
    * @property {() => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
+   * @property {() => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
    */
 
   /** @type {Props} */
@@ -54,6 +55,7 @@
     onretryandroid,
     ontesteden,
     onrevealapplog,
+    oncheckupdates,
   } = $props();
 
   /** @param {AppSettings | null | undefined} value @returns {AppSettings} */
@@ -73,6 +75,7 @@
   let localError = $state('');
   let testResult = $state('');
   let logResult = $state('');
+  let updateResult = $state(/** @type {import('../api/types.js').AppUpdateCheck | null} */ (null));
   let submitting = $state(false);
   let wasOpen = false;
   let session = 0;
@@ -85,6 +88,7 @@
       localError = '';
       testResult = '';
       logResult = '';
+      updateResult = null;
     }
     wasOpen = open;
   });
@@ -172,6 +176,15 @@
     if (typeof revealed === 'boolean') {
       logResult = revealed ? 'Opened the app log.' : 'The app log is not available yet.';
     }
+  }
+
+  async function checkUpdates() {
+    updateResult = null;
+    const result = await runAction('app-update-check', async () => {
+      if (!oncheckupdates) throw new Error('Update checking is unavailable.');
+      return oncheckupdates();
+    });
+    if (result) updateResult = result;
   }
 
   async function submit() {
@@ -501,6 +514,40 @@
       </section>
     {/if}
 
+    <section class="settings-section" aria-labelledby="settings-updates-title">
+      <div class="section-heading">
+        <Icon name="download" size={24} />
+        <div>
+          <h3 id="settings-updates-title">App updates</h3>
+          <p>Check for a newer stable version of EDC.</p>
+        </div>
+      </div>
+      <button
+        class="md-button md-button--outlined section-button"
+        type="button"
+        disabled={busy}
+        onclick={checkUpdates}
+      >
+        {activeAction === 'app-update-check' ? 'Checking…' : 'Check for updates'}
+      </button>
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {#if activeAction === 'app-update-check'}
+          <p class="action-result">Checking for updates…</p>
+        {:else if updateResult}
+          <p class="action-result">Installed version: {updateResult.currentVersion}</p>
+          <p class="action-result">
+            {updateResult.available ? `EDC ${updateResult.available.version} is available.` : 'No newer stable release is available.'}
+          </p>
+        {/if}
+      </div>
+      {#if updateResult?.available?.notes}
+        <details>
+          <summary>Release notes</summary>
+          <p class="update-notes">{updateResult.available.notes}</p>
+        </details>
+      {/if}
+    </section>
+
     {#if displayedError}
       <p class="dialog-error md-error-text" role="alert">{displayedError}</p>
     {/if}
@@ -522,6 +569,7 @@
 </Dialog>
 
 <style>
+  .update-notes { margin-top: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .theme-options { display: flex; }
   .theme-option {
     display: flex; align-items: center; justify-content: center; gap: 0.5rem;

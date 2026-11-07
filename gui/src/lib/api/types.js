@@ -1,6 +1,19 @@
 /** @typedef {'desktop' | 'android'} Platform */
 
 /**
+ * @typedef {Object} AvailableUpdate
+ * @property {string} version
+ * @property {string} notes
+ * @property {string} releaseUrl
+ */
+
+/**
+ * @typedef {Object} AppUpdateCheck
+ * @property {string} currentVersion
+ * @property {AvailableUpdate | null} available
+ */
+
+/**
  * @typedef {Object} AppSettings
  * @property {string} apiToken
  * @property {string} pcLoadDir

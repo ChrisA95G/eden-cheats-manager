@@ -58,6 +58,11 @@ export async function saveSettings(settings) {
   await invoke('save_settings', { settings });
 }
 
+/** @returns {Promise<import('./types.js').AppUpdateCheck>} */
+export function checkAppUpdate() {
+  return invoke('check_app_update');
+}
+
 /** @returns {Promise<string>} */
 export async function detectPcLoadDir() {
   return /** @type {string} */ (await invoke('detect_pc_load_dir'));
