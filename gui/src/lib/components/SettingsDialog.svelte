@@ -67,6 +67,7 @@
       prodKeysPath: value?.prodKeysPath ?? '',
       packageLibraryPath: value?.packageLibraryPath ?? '',
       onboardingDone: value?.onboardingDone ?? false,
+      autoCheckUpdates: value?.autoCheckUpdates ?? true,
     };
   }
 
@@ -522,6 +523,10 @@
           <p>Check for a newer stable version of EDC.</p>
         </div>
       </div>
+      <label class="update-preference">
+        <input type="checkbox" bind:checked={draft.autoCheckUpdates} disabled={busy} />
+        Automatically check for updates when EDC opens
+      </label>
       <button
         class="md-button md-button--outlined section-button"
         type="button"
@@ -569,6 +574,8 @@
 </Dialog>
 
 <style>
+  .update-preference { display:flex; align-items:center; gap:0.75rem; min-height:var(--md-sys-size-touch); cursor:pointer; }
+  .update-preference input { flex:none; width:1.25rem; height:1.25rem; accent-color:var(--md-sys-color-primary); }
   .update-notes { margin-top: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .theme-options { display: flex; }
   .theme-option {

@@ -12,6 +12,7 @@ pub struct Settings {
     pub prod_keys_path: String,
     pub package_library_path: String,
     pub onboarding_done: bool,
+    pub auto_check_updates: bool,
 }
 
 impl Default for Settings {
@@ -22,6 +23,7 @@ impl Default for Settings {
             prod_keys_path: String::new(),
             package_library_path: String::new(),
             onboarding_done: false,
+            auto_check_updates: true,
         }
     }
 }
@@ -371,7 +373,8 @@ mod tests {
                     "pcLoadDir": " retained load ",
                     "prodKeysPath": " retained keys ",
                     "packageLibraryPath": " retained packages ",
-                    "onboardingDone": true
+                    "onboardingDone": true,
+                    "autoCheckUpdates": false
                 });
                 let mut legacy = current.clone();
                 legacy["edenExePath"] = obsolete;
@@ -393,6 +396,7 @@ mod tests {
             prod_keys_path: "keys/prod.keys".into(),
             package_library_path: "packages".into(),
             onboarding_done: true,
+            auto_check_updates: false,
         };
 
         assert_eq!(
@@ -402,8 +406,28 @@ mod tests {
                 "pcLoadDir": "load",
                 "prodKeysPath": "keys/prod.keys",
                 "packageLibraryPath": "packages",
-                "onboardingDone": true
+                "onboardingDone": true,
+                "autoCheckUpdates": false
             })
         );
+    }
+
+    #[test]
+    fn update_checks_default_on_and_preserve_saved_opt_out() {
+        for platform in [SettingsPlatform::Desktop, SettingsPlatform::Android] {
+            let legacy = settings_json(None, "retained load");
+            let settings = deserialize_settings(&legacy, platform);
+            assert!(settings.auto_check_updates);
+            assert_eq!(settings.api_token, " token kept exactly ");
+            assert_eq!(settings.pc_load_dir, "retained load");
+            assert!(settings.onboarding_done);
+
+            let opted_out = Settings {
+                auto_check_updates: false,
+                ..settings
+            };
+            let saved = serde_json::to_string(&opted_out).unwrap();
+            assert_eq!(deserialize_settings(&saved, platform), opted_out);
+        }
     }
 }

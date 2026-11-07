@@ -26,6 +26,7 @@
   let selectedTitleId = $state('');
   let pane = $state('library');
   let settingsOpen = $state(false);
+  let startupUpdate = $state(/** @type {import('$lib/api/types.js').AvailableUpdate|null} */ (null));
   let saving = $state(false);
   let contextRevision = $state(0);
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
@@ -38,6 +39,7 @@
   let statusRevision = 0;
   let pickerId = 0;
   let started = false;
+  let updateCheckStarted = false;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let resumeTimer;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
@@ -105,6 +107,17 @@
     started = true;
     await refreshLibrary();
   }
+  async function checkStartupUpdate() {
+    if (updateCheckStarted) return;
+    updateCheckStarted = true;
+    try {
+      const result = await backend.checkAppUpdate();
+      if (alive && settings?.autoCheckUpdates) startupUpdate = result.available;
+    } catch { /* Background checks must not interrupt the library when offline. */ }
+  }
+  $effect(()=>{
+    if (ready && !loading && settings?.autoCheckUpdates) untrack(()=>{void checkStartupUpdate();});
+  });
   $effect(()=>{
     if (ready && !loading) untrack(()=>{void startLibrary();});
     else if (!loading) untrack(()=>{
@@ -169,6 +182,7 @@
       await backend.saveSettings(next);
       if (!alive) return;
       settings = next; contextRevision++; settingsOpen = false;
+      if (!next.autoCheckUpdates) startupUpdate = null;
       notify({tone:'success',message:'Settings saved.'});
       if (started) void refreshLibrary();
     } finally { saving = false; }
@@ -214,14 +228,22 @@
     error={statusError} onsubmit={save} onpickdesktop={pickDesktop} onpickandroid={()=>pickAndroid('edenLoad')}
     onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
 {:else}
-  <main class="app-shell" class:show-workspace={pane === 'workspace'}>
-    <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase}
-      packageLibrary={library.packageLibrary}
-      refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
-    <div class="workspace-slot"><GameWorkspace {game} {platform} {settings} packageLibrary={library.packageLibrary}
-      androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
-      onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
-  </main>
+  <div class="app-frame">
+    {#if startupUpdate}
+      <aside class="update-notice" aria-label="App update" aria-live="polite">
+        <span>EDC {startupUpdate.version} is available.</span>
+        <button class="md-button md-button--text" onclick={()=>startupUpdate=null}>Later</button>
+      </aside>
+    {/if}
+    <main class="app-shell" class:show-workspace={pane === 'workspace'}>
+      <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase}
+        packageLibrary={library.packageLibrary}
+        refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
+      <div class="workspace-slot"><GameWorkspace {game} {platform} {settings} packageLibrary={library.packageLibrary}
+        androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
+        onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
+    </main>
+  </div>
   <SettingsDialog open={settingsOpen} {platform} {settings} {edenAccess} {packageStatus} {gameLibraryStatus}
     oncheckupdates={backend.checkAppUpdate}
     {pendingPicker} {saving} error={statusError} onsave={save} onclose={()=>settingsOpen=false}
@@ -231,7 +253,10 @@
 {#if notice}<div class="md-snackbar" role="status" aria-live="polite"><span>{notice.message}</span><button class="md-icon-button" aria-label="Dismiss message" onclick={()=>notice=null}><Icon name="close"/></button></div>{/if}
 
 <style>
-  .app-shell { height:100vh; height:100dvh; width:100%; display:grid; grid-template-columns:minmax(0,1fr); overflow:hidden; }
+  .app-frame { height:100vh; height:100dvh; display:flex; flex-direction:column; }
+  .update-notice { flex:none; display:flex; align-items:center; gap:1rem; padding:max(0.5rem,env(safe-area-inset-top)) max(1rem,env(safe-area-inset-right)) 0.5rem max(1rem,env(safe-area-inset-left)); background:var(--md-sys-color-secondary-container); color:var(--md-sys-color-on-secondary-container); }
+  .update-notice span { flex:1; overflow-wrap:anywhere; }
+  .app-shell { flex:1; min-height:0; width:100%; display:grid; grid-template-columns:minmax(0,1fr); overflow:hidden; }
   .library-slot,.workspace-slot { min-width:0; min-height:0; overflow:hidden; }
   .workspace-slot { display:none; } .show-workspace .workspace-slot { display:block; } .show-workspace .library-slot { display:none; }
   .startup { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; height:100vh; height:100dvh; padding:32px; text-align:center; }
