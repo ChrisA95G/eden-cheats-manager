@@ -2,11 +2,53 @@ use reqwest::{Client, StatusCode};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::AppHandle;
 
 const LATEST_RELEASE_URL: &str =
     "https://api.github.com/repos/ChrisA95G/eden-cheats-manager/releases/latest";
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+const RELEASES_URL: &str = "https://github.com/ChrisA95G/eden-cheats-manager/releases";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UpdateTarget {
+    Android,
+    WindowsNsis,
+    WindowsMsi,
+    LinuxAppImage,
+}
+
+impl UpdateTarget {
+    fn for_installation(os: &str, arch: &str, bundle: Option<BundleType>) -> Result<Self, String> {
+        match (os, arch, &bundle) {
+            ("android", "arm" | "aarch64" | "x86" | "x86_64", _) => Ok(Self::Android),
+            ("windows", "x86_64", Some(BundleType::Nsis)) => Ok(Self::WindowsNsis),
+            ("windows", "x86_64", Some(BundleType::Msi)) => Ok(Self::WindowsMsi),
+            ("linux", "x86_64", Some(BundleType::AppImage)) => Ok(Self::LinuxAppImage),
+            _ => Err(format!(
+                "App updates are unavailable for this installation ({os}/{arch}, {}).",
+                bundle.map_or_else(|| "unknown package type".into(), |value| value.to_string())
+            )),
+        }
+    }
+
+    fn asset_name(self, version: &Version) -> String {
+        let suffix = match self {
+            Self::Android => return "eden-cheats-manager.apk".into(),
+            Self::WindowsNsis => "x64-setup.exe",
+            Self::WindowsMsi => "x64_en-US.msi",
+            Self::LinuxAppImage => "amd64.AppImage",
+        };
+        format!("Eden.Cheats.Manager_{version}_{suffix}")
+    }
+}
+
+#[derive(Deserialize)]
+struct ReleaseAsset {
+    name: String,
+    size: u64,
+    state: String,
+}
 
 #[derive(Deserialize)]
 struct Release {
@@ -14,6 +56,15 @@ struct Release {
     draft: bool,
     prerelease: bool,
     body: Option<String>,
+    #[serde(default)]
+    assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpdateDownload {
+    name: String,
+    url: String,
+    size: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -22,6 +73,7 @@ pub struct AvailableUpdate {
     version: String,
     notes: String,
     release_url: String,
+    download: UpdateDownload,
 }
 
 #[derive(Serialize)]
@@ -31,7 +83,36 @@ pub struct UpdateCheck {
     available: Option<AvailableUpdate>,
 }
 
-fn select_release(data: &[u8], current: &Version) -> Result<Option<AvailableUpdate>, String> {
+fn select_download(
+    release: &Release,
+    version: &Version,
+    target: UpdateTarget,
+) -> Result<UpdateDownload, String> {
+    let name = target.asset_name(version);
+    let mut matches = release.assets.iter().filter(|asset| asset.name == name);
+    let asset = matches
+        .next()
+        .ok_or_else(|| format!("The release is missing {name}."))?;
+    if matches.next().is_some() {
+        return Err(format!("The release contains multiple files named {name}."));
+    }
+    if asset.state != "uploaded" || asset.size == 0 {
+        return Err(format!("The release file {name} is not ready to download."));
+    }
+    // Use the project's release path, never a URL supplied in asset metadata.
+    let url = format!("{RELEASES_URL}/download/{}/{name}", release.tag_name);
+    Ok(UpdateDownload {
+        name,
+        url,
+        size: asset.size,
+    })
+}
+
+fn select_release(
+    data: &[u8],
+    current: &Version,
+    target: UpdateTarget,
+) -> Result<Option<AvailableUpdate>, String> {
     let release: Release = serde_json::from_slice(data)
         .map_err(|e| format!("Could not read GitHub release information: {e}"))?;
     if release.draft || release.prerelease {
@@ -47,13 +128,12 @@ fn select_release(data: &[u8], current: &Version) -> Result<Option<AvailableUpda
     if !version.pre.is_empty() || !version.cmp_precedence(current).is_gt() {
         return Ok(None);
     }
+    let download = select_download(&release, &version, target)?;
     Ok(Some(AvailableUpdate {
         version: version.to_string(),
         notes: release.body.unwrap_or_default(),
-        release_url: format!(
-            "https://github.com/ChrisA95G/eden-cheats-manager/releases/tag/{}",
-            release.tag_name
-        ),
+        release_url: format!("{RELEASES_URL}/tag/{}", release.tag_name),
+        download,
     }))
 }
 
@@ -61,6 +141,7 @@ async fn fetch_update(
     client: &Client,
     url: &str,
     current: &Version,
+    target: UpdateTarget,
 ) -> Result<Option<AvailableUpdate>, String> {
     let mut response = client
         .get(url)
@@ -89,11 +170,16 @@ async fn fetch_update(
         }
         data.extend_from_slice(&chunk);
     }
-    select_release(&data, current)
+    select_release(&data, current, target)
 }
 
 #[tauri::command]
 pub async fn check_app_update(app: AppHandle) -> Result<UpdateCheck, String> {
+    let target = UpdateTarget::for_installation(
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+        bundle_type(),
+    )?;
     let current = &app.package_info().version;
     let client = Client::builder()
         .https_only(true)
@@ -103,7 +189,7 @@ pub async fn check_app_update(app: AppHandle) -> Result<UpdateCheck, String> {
         .map_err(|e| e.to_string())?;
     Ok(UpdateCheck {
         current_version: current.to_string(),
-        available: fetch_update(&client, LATEST_RELEASE_URL, current).await?,
+        available: fetch_update(&client, LATEST_RELEASE_URL, current, target).await?,
     })
 }
 

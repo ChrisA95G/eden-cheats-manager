@@ -2,13 +2,15 @@ use super::*;
 use serde_json::json;
 
 fn release(tag: &str) -> serde_json::Value {
-    json!({"tag_name": tag, "draft": false, "prerelease": false, "body": "Release notes"})
+    json!({"tag_name": tag, "draft": false, "prerelease": false, "body": "Release notes",
+        "assets": [{"name": "eden-cheats-manager.apk", "state": "uploaded", "size": 12345}]})
 }
 
 fn select(data: serde_json::Value, current: &str) -> Result<Option<AvailableUpdate>, String> {
     select_release(
         &serde_json::to_vec(&data).unwrap(),
         &Version::parse(current).unwrap(),
+        UpdateTarget::Android,
     )
 }
 
@@ -54,6 +56,7 @@ fn drafts_and_prereleases_are_ignored_even_if_the_tag_looks_stable() {
     for flag in ["draft", "prerelease"] {
         let mut data = release("v0.3.0");
         data[flag] = json!(true);
+        data["assets"] = json!([]);
         assert!(select(data, "0.2.1").unwrap().is_none());
     }
     assert!(select(release("v0.3.0-rc.1"), "0.2.1").unwrap().is_none());
@@ -80,7 +83,129 @@ fn malformed_metadata_is_an_error_rather_than_no_update() {
     ] {
         assert!(select(data, "0.2.1").is_err());
     }
-    assert!(select_release(b"not JSON", &Version::new(0, 2, 1)).is_err());
+    assert!(select_release(b"not JSON", &Version::new(0, 2, 1), UpdateTarget::Android).is_err());
+}
+
+#[test]
+fn installation_mapping_preserves_the_installer_and_architecture() {
+    for arch in ["arm", "aarch64", "x86", "x86_64"] {
+        assert_eq!(
+            UpdateTarget::for_installation("android", arch, None).unwrap(),
+            UpdateTarget::Android
+        );
+    }
+    for (os, bundle, expected) in [
+        ("windows", BundleType::Nsis, UpdateTarget::WindowsNsis),
+        ("windows", BundleType::Msi, UpdateTarget::WindowsMsi),
+        ("linux", BundleType::AppImage, UpdateTarget::LinuxAppImage),
+    ] {
+        assert_eq!(
+            UpdateTarget::for_installation(os, "x86_64", Some(bundle)).unwrap(),
+            expected
+        );
+    }
+    for (os, arch, bundle) in [
+        ("windows", "aarch64", Some(BundleType::Nsis)),
+        ("windows", "x86", Some(BundleType::Msi)),
+        ("windows", "x86_64", None),
+        ("linux", "aarch64", Some(BundleType::AppImage)),
+        ("linux", "x86_64", Some(BundleType::Deb)),
+        ("linux", "x86_64", Some(BundleType::Rpm)),
+        ("linux", "x86_64", None),
+        ("macos", "aarch64", Some(BundleType::App)),
+        ("android", "riscv64", None),
+    ] {
+        assert!(UpdateTarget::for_installation(os, arch, bundle).is_err());
+    }
+}
+
+#[test]
+fn each_target_selects_its_own_file_from_a_mixed_release() {
+    let files = [
+        (UpdateTarget::Android, "eden-cheats-manager.apk"),
+        (
+            UpdateTarget::WindowsNsis,
+            "Eden.Cheats.Manager_0.2.1_x64-setup.exe",
+        ),
+        (
+            UpdateTarget::WindowsMsi,
+            "Eden.Cheats.Manager_0.2.1_x64_en-US.msi",
+        ),
+        (
+            UpdateTarget::LinuxAppImage,
+            "Eden.Cheats.Manager_0.2.1_amd64.AppImage",
+        ),
+    ];
+    let mut data = release("v0.2.1");
+    data["assets"] = json!(files
+        .iter()
+        .map(|(_, name)| json!({
+            "name": name, "state": "uploaded", "size": 12345,
+            "browser_download_url": "https://untrusted.example/other.exe"
+        }))
+        .collect::<Vec<_>>());
+    data["assets"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"name":"SHA256SUMS","state":"uploaded","size":409}));
+    for (target, name) in files {
+        let update = select_release(
+            &serde_json::to_vec(&data).unwrap(),
+            &Version::new(0, 2, 0),
+            target,
+        )
+        .unwrap()
+        .unwrap();
+        let download = serde_json::to_value(update).unwrap()["download"].clone();
+        assert_eq!(
+            download,
+            json!({"name": name, "size": 12345,
+            "url": format!("{RELEASES_URL}/download/v0.2.1/{name}")})
+        );
+    }
+}
+
+#[test]
+fn missing_duplicate_and_unfinished_downloads_are_errors() {
+    let valid = release("v0.3.0")["assets"][0].clone();
+    for assets in [json!([]), json!([valid.clone(), valid.clone()])] {
+        let mut data = release("v0.3.0");
+        data["assets"] = assets;
+        assert!(select(data, "0.2.1").is_err());
+    }
+    for (field, value) in [
+        ("size", json!(0)),
+        ("size", json!(-1)),
+        ("state", json!("starter")),
+        ("name", json!("other.apk")),
+    ] {
+        let mut data = release("v0.3.0");
+        data["assets"][0][field] = value;
+        assert!(select(data, "0.2.1").is_err());
+    }
+    let mut data = release("v0.3.0");
+    data.as_object_mut().unwrap().remove("assets");
+    assert!(fetch_response(200, &data.to_string()).is_err());
+    assert!(select(data.clone(), "0.2.1").is_err());
+    assert!(select(data, "0.3.0").unwrap().is_none());
+}
+
+#[test]
+fn a_different_version_or_architecture_cannot_substitute_for_a_missing_installer() {
+    for name in [
+        "Eden.Cheats.Manager_0.2.1_x64-setup.exe",
+        "Eden.Cheats.Manager_0.3.0_arm64-setup.exe",
+        "Eden.Cheats.Manager_0.3.0_x64_en-US.msi",
+    ] {
+        let mut data = release("v0.3.0");
+        data["assets"][0]["name"] = json!(name);
+        assert!(select_release(
+            &serde_json::to_vec(&data).unwrap(),
+            &Version::new(0, 2, 1),
+            UpdateTarget::WindowsNsis
+        )
+        .is_err());
+    }
 }
 
 fn fetch_response(status: u16, body: &str) -> Result<Option<AvailableUpdate>, String> {
@@ -108,8 +233,12 @@ fn fetch_response(status: u16, body: &str) -> Result<Option<AvailableUpdate>, St
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    let result =
-        tauri::async_runtime::block_on(fetch_update(&client, &url, &Version::new(0, 2, 1)));
+    let result = tauri::async_runtime::block_on(fetch_update(
+        &client,
+        &url,
+        &Version::new(0, 2, 1),
+        UpdateTarget::Android,
+    ));
     server.join().unwrap();
     result
 }

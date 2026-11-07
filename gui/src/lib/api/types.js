@@ -1,10 +1,18 @@
 /** @typedef {'desktop' | 'android'} Platform */
 
 /**
+ * @typedef {Object} UpdateDownload
+ * @property {string} name
+ * @property {string} url
+ * @property {number} size
+ */
+
+/**
  * @typedef {Object} AvailableUpdate
  * @property {string} version
  * @property {string} notes
  * @property {string} releaseUrl
+ * @property {UpdateDownload} download
  */
 
 /**
