@@ -9,6 +9,7 @@ mod package_library_pc;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod package_metadata;
 mod settings;
+mod updates;
 
 use simplelog::{
     ColorChoice, CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode, WriteLogger,
@@ -62,6 +63,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            updates::check_app_update,
             // settings
             settings::get_settings,
             settings::save_settings,
