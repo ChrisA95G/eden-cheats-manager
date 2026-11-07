@@ -94,7 +94,7 @@ fn parse_package_cnmts(
     for entry in meta_entries {
         let reader = source.bounded(entry.offset, entry.size)?;
         let mut nca = Nca::from_reader(reader, keyset, title_keys)
-            .map_err(|error| format!("Could not decrypt metadata NCA '{}': {error}", entry.name))?;
+            .map_err(|error| format!("Could not read metadata NCA '{}': {error}", entry.name))?;
         if !nca.has_valid_keys() {
             return Err(format!(
                 "Missing decryption keys for metadata NCA '{}'.",
@@ -257,7 +257,7 @@ fn extract_main_nso_build_id(
     title_keys: Option<&TitleKeys>,
 ) -> Result<(String, String), String> {
     let mut nca = Nca::from_reader(reader, keyset, title_keys)
-        .map_err(|error| format!("Could not decrypt Program NCA: {error}"))?;
+        .map_err(|error| format!("Could not read Program NCA: {error}"))?;
     if !nca.has_valid_keys() {
         return Err("prod.keys is missing the keys required by this Program NCA.".into());
     }

@@ -1,5 +1,11 @@
 # Third-party notices
 
+## nx-archive
+
+[nx-archive](https://github.com/RyouVC/nx-archive) 0.1.2.
+Copyright 2025 Cappy & Eri Ishihara.
+MIT License: `gui/src-tauri/vendor/nx-archive/LICENSE`.
+
 ## Roboto
 
 Locally bundled Roboto variable WOFF2 (weights 400–700, Latin and Latin Extended)

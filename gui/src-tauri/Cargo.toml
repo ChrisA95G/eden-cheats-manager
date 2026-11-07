@@ -31,3 +31,7 @@ binrw = "=0.14.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21", default-features = false }
+
+[patch.crates-io]
+# Support NCA key generations above 19 (#11).
+nx-archive = { path = "vendor/nx-archive" }
