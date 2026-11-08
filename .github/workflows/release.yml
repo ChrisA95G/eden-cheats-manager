@@ -32,6 +32,10 @@ jobs:
         run: node --test scripts/check-release-version.test.mjs
       - name: Test AppImage post-processing
         run: node --test scripts/strip-appimage-libs.test.mjs
+      - name: Test update artifact signing
+        run: node --test scripts/sign-update-artifacts.test.mjs
+      - name: Test update metadata
+        run: node --test scripts/create-update-manifest.test.mjs
       - name: Validate release metadata
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
@@ -53,13 +57,17 @@ jobs:
           - platform: ubuntu-22.04
             runner: ubuntu-22.04
             args: --bundles appimage -- --locked
-            artifacts: gui/src-tauri/target/release/bundle/appimage/*.AppImage
+            artifacts: |
+              gui/src-tauri/target/release/bundle/appimage/*.AppImage
+              gui/src-tauri/target/release/bundle/appimage/*.AppImage.sig
           - platform: windows-latest
             runner: windows-latest
             args: -- --locked
             artifacts: |
               gui/src-tauri/target/release/bundle/nsis/*.exe
+              gui/src-tauri/target/release/bundle/nsis/*.exe.sig
               gui/src-tauri/target/release/bundle/msi/*.msi
+              gui/src-tauri/target/release/bundle/msi/*.msi.sig
 
     runs-on: ${{ matrix.runner }}
 
@@ -102,6 +110,20 @@ jobs:
           echo "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0  $APPIMAGETOOL" | sha256sum --check
           chmod +x "$APPIMAGETOOL"
           bash scripts/strip-appimage-libs.sh "$APPIMAGETOOL" gui/src-tauri/target/release/bundle/appimage/*.AppImage
+
+      - name: Sign final update bundles
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            node scripts/sign-update-artifacts.mjs gui/src-tauri/target/release/bundle/appimage/*.AppImage
+          else
+            node scripts/sign-update-artifacts.mjs \
+              gui/src-tauri/target/release/bundle/nsis/*.exe \
+              gui/src-tauri/target/release/bundle/msi/*.msi
+          fi
 
       - name: Upload release bundles
         uses: softprops/action-gh-release@v2
@@ -178,6 +200,10 @@ jobs:
         working-directory: gui
         run: npm run tauri android build -- --apk -- --locked
 
+      - name: Test Android update validation
+        working-directory: gui/src-tauri/gen/android
+        run: ./gradlew :app:testUniversalReleaseUnitTest
+
       - name: Verify JNI methods not renamed by R8
         run: |
           APK=gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
@@ -186,7 +212,7 @@ jobs:
             echo "ERROR: apkanalyzer not found; release verification is mandatory"
             exit 1
           fi
-          METHODS='selectEdenLoadDirectory()V getEdenLoadAccessStatus()Ljava/lang/String; safListDirectory(Ljava/lang/String;)Ljava/lang/String; safWriteTextFile(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; safDeleteFile(Ljava/lang/String;)Ljava/lang/String; safRemoveEmptyDirectory(Ljava/lang/String;)Ljava/lang/String; selectProdKeysDocument()V selectGamePackageDocument()V getPackageDiscoveryStatus()Ljava/lang/String; openProdKeysReadFd()I openGamePackageReadFd()I selectGameLibraryDirectory()V getGameLibraryStatus()Ljava/lang/String; listGameLibraryPackages()Ljava/lang/String; openGameLibraryPackageReadFd(Ljava/lang/String;)I'
+          METHODS='getAppUpdateDownloadPath()Ljava/lang/String; installAppUpdate(Ljava/lang/String;)Ljava/lang/String; selectEdenLoadDirectory()V getEdenLoadAccessStatus()Ljava/lang/String; safListDirectory(Ljava/lang/String;)Ljava/lang/String; safWriteTextFile(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; safDeleteFile(Ljava/lang/String;)Ljava/lang/String; safRemoveEmptyDirectory(Ljava/lang/String;)Ljava/lang/String; selectProdKeysDocument()V selectGamePackageDocument()V getPackageDiscoveryStatus()Ljava/lang/String; openProdKeysReadFd()I openGamePackageReadFd()I selectGameLibraryDirectory()V getGameLibraryStatus()Ljava/lang/String; listGameLibraryPackages()Ljava/lang/String; openGameLibraryPackageReadFd(Ljava/lang/String;)I'
           FAIL=0
           DEX_DUMP=$("$APKANALYZER" dex code --class dev.eden.cheats_manager.MainActivity "$APK")
           DECLARATIONS=$(echo "$DEX_DUMP" | grep -E '^\.method .*public.*static ' | sed 's/.* //')
@@ -232,15 +258,25 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Attach checksums after all platform builds succeed
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Attach update metadata and checksums after all platform builds succeed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          ARTIFACT_DIR=$(mktemp -d)
+          METADATA_DIR=$(mktemp -d "$RUNNER_TEMP/edc-release-XXXXXX")
+          trap 'rm -rf "$METADATA_DIR"' EXIT
+          ARTIFACT_DIR="$METADATA_DIR/artifacts"
+          mkdir "$ARTIFACT_DIR"
           gh release download "$RELEASE_TAG" --dir "$ARTIFACT_DIR"
+          gh release view "$RELEASE_TAG" --json tagName,body,isDraft > "$METADATA_DIR/release.json"
+          node scripts/create-update-manifest.mjs "$ARTIFACT_DIR" "$METADATA_DIR/release.json"
           cd "$ARTIFACT_DIR"
           find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
           test -s SHA256SUMS
           gh release upload "$RELEASE_TAG" SHA256SUMS --clobber
+          gh release upload "$RELEASE_TAG" latest.json --clobber

@@ -1,6 +1,7 @@
 <script>
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
+  import AppUpdate from './AppUpdate.svelte';
   import { theme } from '../domain/theme.js';
 
   /** @typedef {import('../api/types.js').AppSettings} AppSettings */
@@ -34,6 +35,9 @@
    * @property {() => void | Promise<void>} [onretryandroid]
    * @property {() => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
+   * @property {() => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
+   * @property {import('../api/types.js').UpdateInstallation | null} [installation]
+   * @property {(update: import('../api/types.js').AvailableUpdate) => void | Promise<void>} oninstallupdate
    */
 
   /** @type {Props} */
@@ -54,6 +58,9 @@
     onretryandroid,
     ontesteden,
     onrevealapplog,
+    oncheckupdates,
+    installation = null,
+    oninstallupdate,
   } = $props();
 
   /** @param {AppSettings | null | undefined} value @returns {AppSettings} */
@@ -65,6 +72,7 @@
       prodKeysPath: value?.prodKeysPath ?? '',
       packageLibraryPath: value?.packageLibraryPath ?? '',
       onboardingDone: value?.onboardingDone ?? false,
+      autoCheckUpdates: value?.autoCheckUpdates ?? true,
     };
   }
 
@@ -73,6 +81,7 @@
   let localError = $state('');
   let testResult = $state('');
   let logResult = $state('');
+  let updateResult = $state(/** @type {import('../api/types.js').AppUpdateCheck | null} */ (null));
   let submitting = $state(false);
   let wasOpen = false;
   let session = 0;
@@ -85,6 +94,7 @@
       localError = '';
       testResult = '';
       logResult = '';
+      updateResult = null;
     }
     wasOpen = open;
   });
@@ -101,7 +111,9 @@
   );
   let loadDirectoryMissing = $derived(isDesktop && !draft.pcLoadDir.trim());
   let displayedError = $derived(localError || error);
-  let busy = $derived(saving || submitting || Boolean(activeAction) || Boolean(pendingPicker));
+  let busy = $derived(saving || submitting || Boolean(activeAction) || Boolean(pendingPicker) || installation?.busy);
+  let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
+  let availableUpdate = $derived(installation?.update ?? updateResult?.available);
 
   /** @param {unknown} cause */
   function errorMessage(cause) {
@@ -172,6 +184,15 @@
     if (typeof revealed === 'boolean') {
       logResult = revealed ? 'Opened the app log.' : 'The app log is not available yet.';
     }
+  }
+
+  async function checkUpdates() {
+    updateResult = null;
+    const result = await runAction('app-update-check', async () => {
+      if (!oncheckupdates) throw new Error('Update checking is unavailable.');
+      return oncheckupdates();
+    });
+    if (result) updateResult = result;
   }
 
   async function submit() {
@@ -501,6 +522,51 @@
       </section>
     {/if}
 
+    <section class="settings-section" aria-labelledby="settings-updates-title">
+      <div class="section-heading">
+        <Icon name="download" size={24} />
+        <div>
+          <h3 id="settings-updates-title">App updates</h3>
+          <p>Check for a newer stable version of EDC.</p>
+        </div>
+      </div>
+      <label class="update-preference">
+        <input type="checkbox" bind:checked={draft.autoCheckUpdates} disabled={busy} />
+        Automatically check for updates when EDC opens
+      </label>
+      <button
+        class="md-button md-button--outlined section-button"
+        type="button"
+        disabled={busy}
+        onclick={checkUpdates}
+      >
+        {activeAction === 'app-update-check' ? 'Checking…' : 'Check for updates'}
+      </button>
+      <div role="status" aria-live="polite" aria-atomic="true">
+        {#if activeAction === 'app-update-check'}
+          <p class="action-result">Checking for updates…</p>
+        {:else if updateResult}
+          <p class="action-result">Installed version: {updateResult.currentVersion}</p>
+          {#if !updateResult.available}
+            <p class="action-result">No newer stable release is available.</p>
+          {/if}
+        {/if}
+      </div>
+      {#if availableUpdate}
+        <AppUpdate update={availableUpdate} {installation} {platform}
+          disabled={busy || settingsChanged} oninstall={oninstallupdate} />
+        {#if settingsChanged && !installation?.busy}
+          <p class="md-supporting-text">Save or cancel your settings changes before updating.</p>
+        {/if}
+      {/if}
+      {#if availableUpdate?.notes}
+        <details>
+          <summary>Release notes</summary>
+          <p class="update-notes">{availableUpdate.notes}</p>
+        </details>
+      {/if}
+    </section>
+
     {#if displayedError}
       <p class="dialog-error md-error-text" role="alert">{displayedError}</p>
     {/if}
@@ -522,6 +588,9 @@
 </Dialog>
 
 <style>
+  .update-preference { display:flex; align-items:center; gap:0.75rem; min-height:var(--md-sys-size-touch); cursor:pointer; }
+  .update-preference input { flex:none; width:1.25rem; height:1.25rem; accent-color:var(--md-sys-color-primary); }
+  .update-notes { margin-top: 0.75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
   .theme-options { display: flex; }
   .theme-option {
     display: flex; align-items: center; justify-content: center; gap: 0.5rem;

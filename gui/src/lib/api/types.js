@@ -1,4 +1,40 @@
 /** @typedef {'desktop' | 'android'} Platform */
+/** @typedef {'permissionRequired' | 'installerOpened'} AndroidInstallResult */
+
+/**
+ * @typedef {{event: 'checking' | 'verifying' | 'installing' | 'restarting'}
+ *   | {event: 'downloading', downloaded: number, total: number}} UpdateProgress
+ */
+
+/**
+ * @typedef {Object} UpdateInstallation
+ * @property {AvailableUpdate} update
+ * @property {UpdateProgress} progress
+ * @property {boolean} busy
+ * @property {string} error
+ * @property {AndroidInstallResult | null} handoff
+ */
+
+/**
+ * @typedef {Object} UpdateDownload
+ * @property {string} name
+ * @property {string} url
+ * @property {number} size
+ */
+
+/**
+ * @typedef {Object} AvailableUpdate
+ * @property {string} version
+ * @property {string} notes
+ * @property {string} releaseUrl
+ * @property {UpdateDownload} download
+ */
+
+/**
+ * @typedef {Object} AppUpdateCheck
+ * @property {string} currentVersion
+ * @property {AvailableUpdate | null} available
+ */
 
 /**
  * @typedef {Object} AppSettings
@@ -7,6 +43,7 @@
  * @property {string} prodKeysPath
  * @property {string} packageLibraryPath
  * @property {boolean} onboardingDone
+ * @property {boolean} autoCheckUpdates
  */
 
 /**

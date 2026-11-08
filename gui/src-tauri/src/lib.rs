@@ -9,6 +9,7 @@ mod package_library_pc;
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod package_metadata;
 mod settings;
+mod updates;
 
 use simplelog::{
     ColorChoice, CombinedLogger, Config, LevelFilter, TermLogger, TerminalMode, WriteLogger,
@@ -22,6 +23,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
+
             // ── Logging setup ───────────────────────────────────────────
             // Log to terminal and to a size-capped rotating log file.
             // If the log exceeds 5 MB, rotate it to .old before opening.
@@ -62,6 +67,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            updates::check_app_update,
+            #[cfg(target_os = "android")]
+            updates::android::install_android_update,
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            updates::desktop::install_desktop_update,
             // settings
             settings::get_settings,
             settings::save_settings,
