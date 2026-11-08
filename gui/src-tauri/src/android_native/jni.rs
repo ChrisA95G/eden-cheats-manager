@@ -184,11 +184,11 @@ pub(super) fn jni_noarg_string_call(method: &str) -> Result<String, String> {
 }
 
 #[cfg(target_os = "android")]
-fn jni_saf_path_call(method: &str, relative_path: &str) -> Result<String, String> {
+pub(super) fn jni_string_call(method: &str, value: &str) -> Result<String, String> {
     use ::jni::objects::{JObject, JString, JValue};
     with_main_class(|env, jcls| {
         let path = env
-            .new_string(relative_path)
+            .new_string(value)
             .map_err(|e| format!("JNI string: {e}"))?;
         let result = env
             .call_static_method(
@@ -250,7 +250,7 @@ pub(super) fn parse_saf_response(response: String) -> Result<String, String> {
 
 #[cfg(target_os = "android")]
 pub(super) fn jni_saf_list_directory(relative_path: &str) -> Result<Vec<SafEntry>, String> {
-    let response = parse_saf_response(jni_saf_path_call("safListDirectory", relative_path)?)?;
+    let response = parse_saf_response(jni_string_call("safListDirectory", relative_path)?)?;
     serde_json::from_str(&response).map_err(|e| format!("Invalid SAF directory response: {e}"))
 }
 
@@ -266,7 +266,7 @@ pub(super) fn jni_saf_write_text_file(relative_path: &str, content: &str) -> Res
 
 #[cfg(target_os = "android")]
 pub(super) fn jni_saf_delete_file(relative_path: &str) -> Result<(), String> {
-    let response = parse_saf_response(jni_saf_path_call("safDeleteFile", relative_path)?)?;
+    let response = parse_saf_response(jni_string_call("safDeleteFile", relative_path)?)?;
     if response == "OK" {
         Ok(())
     } else {
@@ -276,8 +276,7 @@ pub(super) fn jni_saf_delete_file(relative_path: &str) -> Result<(), String> {
 
 #[cfg(target_os = "android")]
 pub(super) fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), String> {
-    let response =
-        parse_saf_response(jni_saf_path_call("safRemoveEmptyDirectory", relative_path)?)?;
+    let response = parse_saf_response(jni_string_call("safRemoveEmptyDirectory", relative_path)?)?;
     if response == "OK" {
         Ok(())
     } else {

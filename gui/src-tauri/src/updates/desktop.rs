@@ -1,20 +1,9 @@
-use super::{check_app_update, AvailableUpdate, UpdateTarget};
-use serde::Serialize;
+use super::{check_app_update, AvailableUpdate, UpdateProgress, UpdateTarget};
 use std::time::Duration;
 use tauri::{async_runtime::Mutex, ipc::Channel, AppHandle};
 use tauri_plugin_updater::{Updater, UpdaterExt};
 
 static UPDATE_LOCK: Mutex<()> = Mutex::const_new(());
-
-#[derive(Serialize)]
-#[serde(tag = "event", rename_all = "camelCase")]
-pub enum UpdateProgress {
-    Checking,
-    Downloading { downloaded: u64, total: u64 },
-    Verifying,
-    Installing,
-    Restarting,
-}
 
 impl UpdateTarget {
     fn updater_target(self) -> Result<&'static str, String> {

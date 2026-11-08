@@ -13,6 +13,23 @@ const RELEASES_URL: &str = "https://github.com/ChrisA95G/eden-cheats-manager/rel
 #[cfg(any(target_os = "windows", target_os = "linux"))]
 pub mod desktop;
 
+#[cfg(any(target_os = "android", test))]
+pub mod android;
+
+#[derive(Serialize)]
+#[serde(tag = "event", rename_all = "camelCase")]
+pub enum UpdateProgress {
+    Checking,
+    Downloading {
+        downloaded: u64,
+        total: u64,
+    },
+    Verifying,
+    Installing,
+    #[cfg(not(target_os = "android"))]
+    Restarting,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpdateTarget {
     Android,

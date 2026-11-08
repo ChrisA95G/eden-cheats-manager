@@ -68,6 +68,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             updates::check_app_update,
+            #[cfg(target_os = "android")]
+            updates::android::install_android_update,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             updates::desktop::install_desktop_update,
             // settings

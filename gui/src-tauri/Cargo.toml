@@ -32,6 +32,8 @@ binrw = "=0.14.1"
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni = { version = "0.21", default-features = false }
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
+tempfile = "3"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-updater = { version = "2.12", default-features = false, features = ["rustls-tls", "system-proxy"] }
@@ -39,6 +41,7 @@ tauri-plugin-updater = { version = "2.12", default-features = false, features = 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
 tempfile = "3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking"] }
 
 [patch.crates-io]
 # Support NCA key generations above 19 (#11).
