@@ -1,6 +1,7 @@
 <script>
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
+  import AppUpdate from './AppUpdate.svelte';
   import { theme } from '../domain/theme.js';
 
   /** @typedef {import('../api/types.js').AppSettings} AppSettings */
@@ -35,6 +36,8 @@
    * @property {() => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
    * @property {() => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
+   * @property {import('../api/types.js').UpdateInstallation | null} [installation]
+   * @property {(update: import('../api/types.js').AvailableUpdate) => void | Promise<void>} oninstallupdate
    */
 
   /** @type {Props} */
@@ -56,6 +59,8 @@
     ontesteden,
     onrevealapplog,
     oncheckupdates,
+    installation = null,
+    oninstallupdate,
   } = $props();
 
   /** @param {AppSettings | null | undefined} value @returns {AppSettings} */
@@ -106,7 +111,9 @@
   );
   let loadDirectoryMissing = $derived(isDesktop && !draft.pcLoadDir.trim());
   let displayedError = $derived(localError || error);
-  let busy = $derived(saving || submitting || Boolean(activeAction) || Boolean(pendingPicker));
+  let busy = $derived(saving || submitting || Boolean(activeAction) || Boolean(pendingPicker) || installation?.busy);
+  let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
+  let availableUpdate = $derived(installation?.update ?? updateResult?.available);
 
   /** @param {unknown} cause */
   function errorMessage(cause) {
@@ -540,15 +547,22 @@
           <p class="action-result">Checking for updates…</p>
         {:else if updateResult}
           <p class="action-result">Installed version: {updateResult.currentVersion}</p>
-          <p class="action-result">
-            {updateResult.available ? `EDC ${updateResult.available.version} is available.` : 'No newer stable release is available.'}
-          </p>
+          {#if !updateResult.available}
+            <p class="action-result">No newer stable release is available.</p>
+          {/if}
         {/if}
       </div>
-      {#if updateResult?.available?.notes}
+      {#if availableUpdate}
+        <AppUpdate update={availableUpdate} {installation} canInstall={isDesktop}
+          disabled={busy || settingsChanged} oninstall={oninstallupdate} />
+        {#if isDesktop && settingsChanged && !installation?.busy}
+          <p class="md-supporting-text">Save or cancel your settings changes before updating.</p>
+        {/if}
+      {/if}
+      {#if availableUpdate?.notes}
         <details>
           <summary>Release notes</summary>
-          <p class="update-notes">{updateResult.available.notes}</p>
+          <p class="update-notes">{availableUpdate.notes}</p>
         </details>
       {/if}
     </section>

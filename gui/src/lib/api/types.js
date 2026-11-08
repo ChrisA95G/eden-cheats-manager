@@ -1,6 +1,19 @@
 /** @typedef {'desktop' | 'android'} Platform */
 
 /**
+ * @typedef {{event: 'checking' | 'verifying' | 'installing' | 'restarting'}
+ *   | {event: 'downloading', downloaded: number, total: number}} UpdateProgress
+ */
+
+/**
+ * @typedef {Object} UpdateInstallation
+ * @property {AvailableUpdate} update
+ * @property {UpdateProgress} progress
+ * @property {boolean} busy
+ * @property {string} error
+ */
+
+/**
  * @typedef {Object} UpdateDownload
  * @property {string} name
  * @property {string} url

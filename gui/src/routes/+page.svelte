@@ -5,6 +5,7 @@
   import { cheatLibraryGroups, createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
   import SetupScreen from '$lib/components/SetupScreen.svelte';
   import SettingsDialog from '$lib/components/SettingsDialog.svelte';
+  import AppUpdate from '$lib/components/AppUpdate.svelte';
   import LibraryPane from '$lib/components/LibraryPane.svelte';
   import GameWorkspace from '$lib/components/GameWorkspace.svelte';
   import Icon from '$lib/components/ui/Icon.svelte';
@@ -27,6 +28,8 @@
   let pane = $state('library');
   let settingsOpen = $state(false);
   let startupUpdate = $state(/** @type {import('$lib/api/types.js').AvailableUpdate|null} */ (null));
+  let installation = $state(/** @type {import('$lib/api/types.js').UpdateInstallation|null} */ (null));
+  let visibleUpdate = $derived(installation?.update ?? startupUpdate);
   let saving = $state(false);
   let contextRevision = $state(0);
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
@@ -39,7 +42,8 @@
   let statusRevision = 0;
   let pickerId = 0;
   let started = false;
-  let updateCheckStarted = false;
+  let updateCheckRevision = 0;
+  let installRevision = 0;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
   let resumeTimer;
   /** @type {ReturnType<typeof setTimeout>|undefined} */
@@ -108,12 +112,42 @@
     await refreshLibrary();
   }
   async function checkStartupUpdate() {
-    if (updateCheckStarted) return;
-    updateCheckStarted = true;
+    if (updateCheckRevision) return;
+    const revision = ++updateCheckRevision;
     try {
       const result = await backend.checkAppUpdate();
-      if (alive && settings?.autoCheckUpdates) startupUpdate = result.available;
+      if (alive && revision === updateCheckRevision && settings?.autoCheckUpdates) startupUpdate = result.available;
     } catch { /* Background checks must not interrupt the library when offline. */ }
+  }
+  function checkUpdates() {
+    updateCheckRevision++;
+    if (!installation?.busy) {
+      installation = null;
+      startupUpdate = null;
+    }
+    return backend.checkAppUpdate();
+  }
+  /** @param {import('$lib/api/types.js').AvailableUpdate} update */
+  async function installUpdate(update) {
+    if (platform !== 'desktop' || installation?.busy) return;
+    const revision = ++installRevision;
+    installation = { update, progress: {event:'checking'}, busy: true, error: '' };
+    try {
+      await backend.installDesktopUpdate(update.version, progress => {
+        if (alive && revision === installRevision && installation?.busy) installation.progress = progress;
+      });
+      if (alive && revision === installRevision && installation) installation.progress = {event:'restarting'};
+    } catch (cause) {
+      if (alive && revision === installRevision && installation) {
+        installation.busy = false;
+        installation.error = errorMessage(cause);
+      }
+    }
+  }
+  function dismissUpdate() {
+    if (installation?.busy) return;
+    startupUpdate = null;
+    installation = null;
   }
   $effect(()=>{
     if (ready && !loading && settings?.autoCheckUpdates) untrack(()=>{void checkStartupUpdate();});
@@ -229,10 +263,12 @@
     onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
 {:else}
   <div class="app-frame">
-    {#if startupUpdate}
-      <aside class="update-notice" aria-label="App update" aria-live="polite">
-        <span>EDC {startupUpdate.version} is available.</span>
-        <button class="md-button md-button--text" onclick={()=>startupUpdate=null}>Later</button>
+    {#if visibleUpdate}
+      <aside class="update-notice" aria-label="App update">
+        <div class="update-content">
+          <AppUpdate update={visibleUpdate} {installation} canInstall={platform === 'desktop'} oninstall={installUpdate} />
+        </div>
+        <button class="md-button md-button--text" disabled={installation?.busy} onclick={dismissUpdate}>Later</button>
       </aside>
     {/if}
     <main class="app-shell" class:show-workspace={pane === 'workspace'}>
@@ -245,7 +281,7 @@
     </main>
   </div>
   <SettingsDialog open={settingsOpen} {platform} {settings} {edenAccess} {packageStatus} {gameLibraryStatus}
-    oncheckupdates={backend.checkAppUpdate}
+    oncheckupdates={checkUpdates} {installation} oninstallupdate={installUpdate}
     {pendingPicker} {saving} error={statusError} onsave={save} onclose={()=>settingsOpen=false}
     onpickdesktop={pickDesktop} onpickandroid={pickAndroid} onretryandroid={refreshAndroidStatus}
     ontesteden={backend.testEdenLoadDirectory} onrevealapplog={()=>backend.revealAppLog(platform)}/>
@@ -254,8 +290,8 @@
 
 <style>
   .app-frame { height:100vh; height:100dvh; display:flex; flex-direction:column; }
-  .update-notice { flex:none; display:flex; align-items:center; gap:1rem; padding:max(0.5rem,env(safe-area-inset-top)) max(1rem,env(safe-area-inset-right)) 0.5rem max(1rem,env(safe-area-inset-left)); background:var(--md-sys-color-secondary-container); color:var(--md-sys-color-on-secondary-container); }
-  .update-notice span { flex:1; overflow-wrap:anywhere; }
+  .update-notice { flex:none; display:flex; align-items:center; flex-wrap:wrap; gap:1rem; padding:max(0.5rem,env(safe-area-inset-top)) max(1rem,env(safe-area-inset-right)) 0.5rem max(1rem,env(safe-area-inset-left)); background:var(--md-sys-color-secondary-container); color:var(--md-sys-color-on-secondary-container); }
+  .update-content { flex:1; min-width:min(100%,18rem); }
   .app-shell { flex:1; min-height:0; width:100%; display:grid; grid-template-columns:minmax(0,1fr); overflow:hidden; }
   .library-slot,.workspace-slot { min-width:0; min-height:0; overflow:hidden; }
   .workspace-slot { display:none; } .show-workspace .workspace-slot { display:block; } .show-workspace .library-slot { display:none; }

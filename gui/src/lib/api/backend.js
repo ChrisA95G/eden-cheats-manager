@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
@@ -61,6 +61,15 @@ export async function saveSettings(settings) {
 /** @returns {Promise<import('./types.js').AppUpdateCheck>} */
 export function checkAppUpdate() {
   return invoke('check_app_update');
+}
+
+/**
+ * @param {string} version
+ * @param {(progress: import('./types.js').UpdateProgress) => void} onProgress
+ * @returns {Promise<void>}
+ */
+export function installDesktopUpdate(version, onProgress) {
+  return invoke('install_desktop_update', { version, onProgress: new Channel(onProgress) });
 }
 
 /** @returns {Promise<string>} */
