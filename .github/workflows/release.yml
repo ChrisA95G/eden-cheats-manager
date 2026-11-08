@@ -59,15 +59,12 @@ jobs:
             args: --bundles appimage -- --locked
             artifacts: |
               gui/src-tauri/target/release/bundle/appimage/*.AppImage
-              gui/src-tauri/target/release/bundle/appimage/*.AppImage.sig
           - platform: windows-latest
             runner: windows-latest
             args: -- --locked
             artifacts: |
               gui/src-tauri/target/release/bundle/nsis/*.exe
-              gui/src-tauri/target/release/bundle/nsis/*.exe.sig
               gui/src-tauri/target/release/bundle/msi/*.msi
-              gui/src-tauri/target/release/bundle/msi/*.msi.sig
 
     runs-on: ${{ matrix.runner }}
 
@@ -124,6 +121,14 @@ jobs:
               gui/src-tauri/target/release/bundle/nsis/*.exe \
               gui/src-tauri/target/release/bundle/msi/*.msi
           fi
+
+      - name: Keep update signatures in CI
+        uses: actions/upload-artifact@v4
+        with:
+          name: update-signatures-${{ matrix.platform }}
+          path: gui/src-tauri/target/release/bundle/**/*.sig
+          if-no-files-found: error
+          overwrite: true
 
       - name: Upload release bundles
         uses: softprops/action-gh-release@v2
@@ -262,6 +267,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Download update signatures
+        uses: actions/download-artifact@v4
+        with:
+          pattern: update-signatures-*
+          path: ${{ runner.temp }}/update-signatures
+          merge-multiple: true
       - name: Attach update metadata and checksums after all platform builds succeed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -273,10 +284,14 @@ jobs:
           ARTIFACT_DIR="$METADATA_DIR/artifacts"
           mkdir "$ARTIFACT_DIR"
           gh release download "$RELEASE_TAG" --dir "$ARTIFACT_DIR"
+          while IFS= read -r -d '' signature; do
+            signature_name=$(basename "$signature")
+            cp "$signature" "$ARTIFACT_DIR/${signature_name// /.}"
+          done < <(find "$RUNNER_TEMP/update-signatures" -type f -name '*.sig' -print0)
           gh release view "$RELEASE_TAG" --json tagName,body,isDraft > "$METADATA_DIR/release.json"
           node scripts/create-update-manifest.mjs "$ARTIFACT_DIR" "$METADATA_DIR/release.json"
           cd "$ARTIFACT_DIR"
-          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
+          find . -maxdepth 1 -type f ! -name SHA256SUMS ! -name '*.sig' -printf '%f\0' | sort -z | xargs -0 sha256sum > SHA256SUMS
           test -s SHA256SUMS
           gh release upload "$RELEASE_TAG" SHA256SUMS --clobber
           gh release upload "$RELEASE_TAG" latest.json --clobber
