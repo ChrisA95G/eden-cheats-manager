@@ -36,6 +36,10 @@ jni = { version = "0.21", default-features = false }
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 tauri-plugin-updater = { version = "2.12", default-features = false, features = ["rustls-tls", "system-proxy"] }
 
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+tempfile = "3"
+
 [patch.crates-io]
 # Support NCA key generations above 19 (#11).
 nx-archive = { path = "vendor/nx-archive" }

@@ -10,6 +10,9 @@ const LATEST_RELEASE_URL: &str =
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const RELEASES_URL: &str = "https://github.com/ChrisA95G/eden-cheats-manager/releases";
 
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+pub mod desktop;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UpdateTarget {
     Android,

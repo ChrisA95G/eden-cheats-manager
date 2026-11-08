@@ -68,6 +68,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             updates::check_app_update,
+            #[cfg(any(target_os = "windows", target_os = "linux"))]
+            updates::desktop::install_desktop_update,
             // settings
             settings::get_settings,
             settings::save_settings,
