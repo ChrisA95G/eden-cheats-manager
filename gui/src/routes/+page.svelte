@@ -129,14 +129,24 @@
   }
   /** @param {import('$lib/api/types.js').AvailableUpdate} update */
   async function installUpdate(update) {
-    if (platform !== 'desktop' || installation?.busy) return;
+    if (installation?.busy) return;
     const revision = ++installRevision;
-    installation = { update, progress: {event:'checking'}, busy: true, error: '' };
+    installation = { update, progress: {event:'checking'}, busy: true, error: '', handoff: null };
+    /** @param {import('$lib/api/types.js').UpdateProgress} progress */
+    const reportProgress = progress => {
+      if (alive && revision === installRevision && installation?.busy) installation.progress = progress;
+    };
     try {
-      await backend.installDesktopUpdate(update.version, progress => {
-        if (alive && revision === installRevision && installation?.busy) installation.progress = progress;
-      });
-      if (alive && revision === installRevision && installation) installation.progress = {event:'restarting'};
+      if (platform === 'android') {
+        const handoff = await backend.installAndroidUpdate(update.version, reportProgress);
+        if (alive && revision === installRevision && installation) {
+          installation.handoff = handoff;
+          installation.busy = false;
+        }
+      } else {
+        await backend.installDesktopUpdate(update.version, reportProgress);
+        if (alive && revision === installRevision && installation) installation.progress = {event:'restarting'};
+      }
     } catch (cause) {
       if (alive && revision === installRevision && installation) {
         installation.busy = false;
@@ -266,9 +276,8 @@
     {#if visibleUpdate}
       <aside class="update-notice" aria-label="App update">
         <div class="update-content">
-          <AppUpdate update={visibleUpdate} {installation} canInstall={platform === 'desktop'} oninstall={installUpdate} />
+          <AppUpdate update={visibleUpdate} {installation} {platform} oninstall={installUpdate} ondismiss={dismissUpdate} />
         </div>
-        <button class="md-button md-button--text" disabled={installation?.busy} onclick={dismissUpdate}>Later</button>
       </aside>
     {/if}
     <main class="app-shell" class:show-workspace={pane === 'workspace'}>

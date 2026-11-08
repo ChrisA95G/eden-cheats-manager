@@ -1,4 +1,5 @@
 /** @typedef {'desktop' | 'android'} Platform */
+/** @typedef {'permissionRequired' | 'installerOpened'} AndroidInstallResult */
 
 /**
  * @typedef {{event: 'checking' | 'verifying' | 'installing' | 'restarting'}
@@ -11,6 +12,7 @@
  * @property {UpdateProgress} progress
  * @property {boolean} busy
  * @property {string} error
+ * @property {AndroidInstallResult | null} handoff
  */
 
 /**

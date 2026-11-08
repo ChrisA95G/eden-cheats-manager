@@ -553,9 +553,9 @@
         {/if}
       </div>
       {#if availableUpdate}
-        <AppUpdate update={availableUpdate} {installation} canInstall={isDesktop}
+        <AppUpdate update={availableUpdate} {installation} {platform}
           disabled={busy || settingsChanged} oninstall={oninstallupdate} />
-        {#if isDesktop && settingsChanged && !installation?.busy}
+        {#if settingsChanged && !installation?.busy}
           <p class="md-supporting-text">Save or cancel your settings changes before updating.</p>
         {/if}
       {/if}

@@ -72,6 +72,15 @@ export function installDesktopUpdate(version, onProgress) {
   return invoke('install_desktop_update', { version, onProgress: new Channel(onProgress) });
 }
 
+/**
+ * @param {string} version
+ * @param {(progress: import('./types.js').UpdateProgress) => void} onProgress
+ * @returns {Promise<import('./types.js').AndroidInstallResult>}
+ */
+export function installAndroidUpdate(version, onProgress) {
+  return invoke('install_android_update', { version, onProgress: new Channel(onProgress) });
+}
+
 /** @returns {Promise<string>} */
 export async function detectPcLoadDir() {
   return /** @type {string} */ (await invoke('detect_pc_load_dir'));

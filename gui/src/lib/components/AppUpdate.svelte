@@ -3,12 +3,13 @@
    * @type {{
    *   update: import('../api/types.js').AvailableUpdate,
    *   installation: import('../api/types.js').UpdateInstallation | null,
-   *   canInstall: boolean,
+   *   platform: import('../api/types.js').Platform,
    *   disabled?: boolean,
    *   oninstall: (update: import('../api/types.js').AvailableUpdate) => void | Promise<void>,
+   *   ondismiss?: () => void,
    * }}
    */
-  let { update, installation, canInstall, disabled = false, oninstall } = $props();
+  let { update, installation, platform, disabled = false, oninstall, ondismiss } = $props();
   let current = $derived(installation?.update.version === update.version ? installation : null);
   let progress = $derived(current?.busy ? current.progress : null);
   let percent = $derived(progress?.event === 'downloading' && progress.total > 0
@@ -18,24 +19,37 @@
     : progress ? {
       checking: 'Checking update…',
       verifying: 'Verifying download…',
-      installing: 'Installing update…',
+      installing: platform === 'android' ? 'Preparing installation…' : 'Installing update…',
       restarting: 'Restarting EDC…',
     }[progress.event] : '');
+  let action = $derived(current?.busy ? 'Updating…'
+    : current?.error ? 'Retry update'
+    : current?.handoff === 'permissionRequired' ? 'Continue update'
+    : current?.handoff === 'installerOpened' ? 'Open installer again'
+    : 'Update now');
+  let guidance = $derived(platform === 'desktop' ? 'EDC will close and restart during the update.'
+    : current?.handoff === 'permissionRequired'
+      ? 'Allow updates from EDC in Android settings, then return here and choose Continue update.'
+    : current?.handoff === 'installerOpened'
+      ? 'Finish the update in Android’s installer. If you cancelled, you can open it again.'
+    : 'Android will ask you to confirm the update.');
 </script>
 
 <div class="app-update">
   <div class="update-row">
     <div class="update-copy">
       <p aria-live="polite">{current?.busy ? `Updating to EDC ${update.version}` : `EDC ${update.version} is available.`}</p>
-      {#if canInstall && !current?.busy}
-        <p class="md-supporting-text">EDC will close and restart during the update.</p>
+      {#if !current?.busy}
+        <p class="md-supporting-text" role="status" aria-live="polite">{guidance}</p>
       {/if}
     </div>
-    {#if canInstall}
-      <button class="md-button md-button--filled" type="button"
-        disabled={disabled || installation?.busy} onclick={() => oninstall(update)}>
-        {current?.busy ? 'Updating…' : current?.error ? 'Retry update' : 'Update now'}
-      </button>
+    <button class="md-button md-button--filled" type="button"
+      disabled={disabled || installation?.busy} onclick={() => oninstall(update)}>
+      {action}
+    </button>
+    {#if ondismiss}
+      <button class="md-button md-button--text" type="button"
+        disabled={installation?.busy} onclick={ondismiss}>Later</button>
     {/if}
   </div>
   {#if progress}
