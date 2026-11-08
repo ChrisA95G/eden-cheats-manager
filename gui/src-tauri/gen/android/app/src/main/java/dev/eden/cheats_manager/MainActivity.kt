@@ -13,10 +13,23 @@ class MainActivity : TauriActivity() {
     private val edenSafStorage = EdenSafStorage(this)
     private val gameLibraryStorage = GameLibraryStorage(this)
     private val packageDocumentStorage = PackageDocumentStorage(this)
+    private val appUpdateInstaller = AppUpdateInstaller(this)
 
     companion object {
         @Volatile
         private var instance: WeakReference<MainActivity>? = null
+
+        @JvmStatic
+        fun getAppUpdateDownloadPath(): String {
+            val activity = instance?.get() ?: return "ERROR: Main activity unavailable"
+            return activity.appUpdateInstaller.getDownloadPath()
+        }
+
+        @JvmStatic
+        fun installAppUpdate(expectedVersion: String): String {
+            val activity = instance?.get() ?: return "ERROR: Main activity unavailable"
+            return activity.appUpdateInstaller.install(expectedVersion)
+        }
 
         @JvmStatic
         fun selectEdenLoadDirectory() {

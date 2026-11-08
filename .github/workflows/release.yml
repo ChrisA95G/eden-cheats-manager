@@ -200,6 +200,10 @@ jobs:
         working-directory: gui
         run: npm run tauri android build -- --apk -- --locked
 
+      - name: Test Android update validation
+        working-directory: gui/src-tauri/gen/android
+        run: ./gradlew :app:testUniversalReleaseUnitTest
+
       - name: Verify JNI methods not renamed by R8
         run: |
           APK=gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
@@ -208,7 +212,7 @@ jobs:
             echo "ERROR: apkanalyzer not found; release verification is mandatory"
             exit 1
           fi
-          METHODS='selectEdenLoadDirectory()V getEdenLoadAccessStatus()Ljava/lang/String; safListDirectory(Ljava/lang/String;)Ljava/lang/String; safWriteTextFile(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; safDeleteFile(Ljava/lang/String;)Ljava/lang/String; safRemoveEmptyDirectory(Ljava/lang/String;)Ljava/lang/String; selectProdKeysDocument()V selectGamePackageDocument()V getPackageDiscoveryStatus()Ljava/lang/String; openProdKeysReadFd()I openGamePackageReadFd()I selectGameLibraryDirectory()V getGameLibraryStatus()Ljava/lang/String; listGameLibraryPackages()Ljava/lang/String; openGameLibraryPackageReadFd(Ljava/lang/String;)I'
+          METHODS='getAppUpdateDownloadPath()Ljava/lang/String; installAppUpdate(Ljava/lang/String;)Ljava/lang/String; selectEdenLoadDirectory()V getEdenLoadAccessStatus()Ljava/lang/String; safListDirectory(Ljava/lang/String;)Ljava/lang/String; safWriteTextFile(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; safDeleteFile(Ljava/lang/String;)Ljava/lang/String; safRemoveEmptyDirectory(Ljava/lang/String;)Ljava/lang/String; selectProdKeysDocument()V selectGamePackageDocument()V getPackageDiscoveryStatus()Ljava/lang/String; openProdKeysReadFd()I openGamePackageReadFd()I selectGameLibraryDirectory()V getGameLibraryStatus()Ljava/lang/String; listGameLibraryPackages()Ljava/lang/String; openGameLibraryPackageReadFd(Ljava/lang/String;)I'
           FAIL=0
           DEX_DUMP=$("$APKANALYZER" dex code --class dev.eden.cheats_manager.MainActivity "$APK")
           DECLARATIONS=$(echo "$DEX_DUMP" | grep -E '^\.method .*public.*static ' | sed 's/.* //')

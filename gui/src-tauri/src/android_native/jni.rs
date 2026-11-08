@@ -20,6 +20,8 @@ static MAIN_CLASS: std::sync::OnceLock<::jni::objects::GlobalRef> = std::sync::O
 #[cfg(target_os = "android")]
 fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
     const METHODS: &[(&str, &str)] = &[
+        ("getAppUpdateDownloadPath", "()Ljava/lang/String;"),
+        ("installAppUpdate", "(Ljava/lang/String;)Ljava/lang/String;"),
         ("selectEdenLoadDirectory", "()V"),
         ("getEdenLoadAccessStatus", "()Ljava/lang/String;"),
         ("safListDirectory", "(Ljava/lang/String;)Ljava/lang/String;"),
