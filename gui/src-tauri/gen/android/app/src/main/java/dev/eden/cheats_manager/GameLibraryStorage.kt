@@ -11,7 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Read-only SAF tree used to enumerate user-owned NSP and XCI packages. */
+/** Read-only SAF tree used to enumerate game packages. */
 internal class GameLibraryStorage(private val activity: MainActivity) {
     companion object {
         private const val PREFS = "game_library"
@@ -145,9 +145,7 @@ internal class GameLibraryStorage(private val activity: MainActivity) {
     fun openPackageReadFd(relativePath: String): Int {
         val uri = packageUris[relativePath]
             ?: return PackageDocumentStorage.FD_ERROR_UNAVAILABLE
-        if (!relativePath.endsWith(".nsp", ignoreCase = true) &&
-            !relativePath.endsWith(".xci", ignoreCase = true)
-        ) {
+        if (!isGamePackage(relativePath)) {
             return PackageDocumentStorage.FD_ERROR_OPEN
         }
 
@@ -192,9 +190,7 @@ internal class GameLibraryStorage(private val activity: MainActivity) {
             }
             if (child.directory) {
                 scanDirectory(child.uri, childPath, depth + 1, visited, packages)
-            } else if (child.name.endsWith(".nsp", ignoreCase = true) ||
-                child.name.endsWith(".xci", ignoreCase = true)
-            ) {
+            } else if (isGamePackage(child.name)) {
                 if (packages.size >= MAX_PACKAGES) {
                     throw IllegalStateException("The selected library contains more than $MAX_PACKAGES packages")
                 }

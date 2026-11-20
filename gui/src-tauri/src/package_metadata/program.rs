@@ -1,10 +1,14 @@
-use super::archive::{ArchiveEntry, BoundedReader, ReadAtFile};
+use super::archive::{parse_pfs0, ArchiveEntry, BoundedReader, ReadAtFile};
+use super::ncz::{compression, BlockReader, Compression, NCA_PREFIX_SIZE};
 use nx_archive::formats::{
     cnmt::{Cnmt, ContentMetaType, ExtendedHeader, PackagedContent, PackagedContentType},
     nca::{decrypt_with_header_key, Nca},
     Keyset, TitleKeys,
 };
-use std::{collections::BTreeSet, io::Cursor};
+use std::{
+    collections::BTreeSet,
+    io::{Cursor, Read, Seek, SeekFrom},
+};
 
 const MAX_CNMT_SIZE: u64 = 16 * 1024 * 1024;
 const NCA_HEADER_SIZE: usize = 0xC00;
@@ -44,9 +48,14 @@ pub(super) fn discover_program_metadata(
 
     let content_id = hex::encode(selected.program.info.content_id);
     let expected_name = format!("{content_id}.nca");
-    let program_entry = entries
-        .iter()
-        .find(|entry| entry.name.eq_ignore_ascii_case(&expected_name))
+    let compressed_name = format!("{content_id}.ncz");
+    let find = |name: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case(name))
+    };
+    let program_entry = find(&expected_name)
+        .or_else(|| find(&compressed_name))
         .ok_or_else(|| {
             format!(
                 "The Program NCA selected by CNMT ({expected_name}) is missing from this package."
@@ -60,6 +69,7 @@ pub(super) fn discover_program_metadata(
 
     let (module_id, build_id) = extract_main_nso_build_id(
         source.bounded(program_entry.offset, program_entry.size)?,
+        program_entry.name.eq_ignore_ascii_case(&compressed_name),
         keyset,
         title_keys,
     )?;
@@ -253,13 +263,24 @@ fn inspect_nca(
 
 fn extract_main_nso_build_id(
     reader: BoundedReader,
+    compressed: bool,
     keyset: &Keyset,
     title_keys: Option<&TitleKeys>,
 ) -> Result<(String, String), String> {
-    let mut nca = Nca::from_reader(reader, keyset, title_keys)
+    let mut nca = Nca::from_reader(reader.clone(), keyset, title_keys)
         .map_err(|error| format!("Could not read Program NCA: {error}"))?;
     if !nca.has_valid_keys() {
         return Err("prod.keys is missing the keys required by this Program NCA.".into());
+    }
+
+    if compressed {
+        let Compression::Block(payload) = compression(reader)? else {
+            return Err(
+                "Reading Build IDs from solid-compressed NCZ programs is not supported yet.".into(),
+            );
+        };
+        let ranges = nca.pfs0_data_ranges().map_err(|e| e.to_string())?;
+        return block_program_build_id(payload, ranges);
     }
 
     let mut main_headers = Vec::new();
@@ -281,7 +302,48 @@ fn extract_main_nso_build_id(
         main_headers.push(header);
     }
 
-    let header = match main_headers.as_slice() {
+    build_id_from_main_headers(&main_headers)
+}
+
+fn block_program_build_id(
+    mut payload: BlockReader<BoundedReader>,
+    ranges: Vec<std::ops::Range<u64>>,
+) -> Result<(String, String), String> {
+    let mut main_headers = Vec::new();
+    // NCZ blocks already contain plaintext filesystem data. Their offsets start after the NCA prefix.
+    for range in ranges {
+        let size = range.end - range.start;
+        let start = range
+            .start
+            .checked_sub(NCA_PREFIX_SIZE)
+            .ok_or("NCZ filesystem overlaps the NCA prefix.")?;
+        if range.end - NCA_PREFIX_SIZE > payload.index.decoded_size {
+            return Err("NCZ filesystem exceeds the decoded payload.".into());
+        }
+        payload
+            .seek(SeekFrom::Start(start))
+            .map_err(|e| e.to_string())?;
+        let files = parse_pfs0((&mut payload).take(size), size)?;
+        for main in files.iter().filter(|f| f.name == "main") {
+            if main.size < 0x100 {
+                return Err("The main NSO is truncated.".into());
+            }
+            payload
+                .seek(SeekFrom::Start(start + main.offset))
+                .map_err(|e| e.to_string())?;
+            let mut header = [0; 0x100];
+            payload
+                .read_exact(&mut header)
+                .map_err(|e| format!("Could not read main NSO: {e}"))?;
+            validate_nso_header(&header, main.size)?;
+            main_headers.push(header);
+        }
+    }
+    build_id_from_main_headers(&main_headers)
+}
+
+fn build_id_from_main_headers(main_headers: &[[u8; 0x100]]) -> Result<(String, String), String> {
+    let header = match main_headers {
         [header] => header,
         [] => return Err("Program NCA contains no readable main NSO.".into()),
         _ => return Err("Program NCA contains multiple main NSO files.".into()),

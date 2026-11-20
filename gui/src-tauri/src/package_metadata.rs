@@ -1,5 +1,6 @@
 mod archive;
 mod keys;
+mod ncz;
 mod program;
 
 pub(crate) const NO_BUILD_ID_CONTENT_ERROR: &str =
@@ -129,6 +130,24 @@ fn discover_package_metadata_inner(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires EDC_PROD_KEYS, EDC_ORIGINAL_PACKAGE and EDC_BLOCK_PACKAGE"]
+    fn block_package_matches_its_original() {
+        let open = |var| File::open(std::env::var_os(var).expect(var)).unwrap();
+        let inspect = |var| discover_package_metadata(open("EDC_PROD_KEYS"), open(var)).unwrap();
+        let mut expected = inspect("EDC_ORIGINAL_PACKAGE");
+        let actual = inspect("EDC_BLOCK_PACKAGE");
+        expected.package_format = match expected.package_format.as_str() {
+            "NSP" => "NSZ".into(),
+            "XCI" => "XCZ".into(),
+            other => panic!("Expected an NSP or XCI original, got {other}"),
+        };
+        assert_eq!(
+            serde_json::to_value(actual).unwrap(),
+            serde_json::to_value(expected).unwrap()
+        );
+    }
 
     fn patch_metadata() -> PackageMetadata {
         PackageMetadata {

@@ -172,8 +172,8 @@ export async function pickGamePackageFile() {
   return /** @type {string | null} */ (await openDialog({
     directory: false,
     multiple: false,
-    title: 'Select an NSP or XCI package',
-    filters: [{ name: 'Nintendo Switch package', extensions: ['nsp', 'xci'] }],
+    title: 'Select a game package',
+    filters: [{ name: 'Nintendo Switch package', extensions: ['nsp', 'xci', 'nsz', 'xcz'] }],
   }));
 }
 

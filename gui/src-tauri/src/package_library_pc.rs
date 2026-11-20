@@ -208,7 +208,9 @@ fn is_package_path(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| {
-            extension.eq_ignore_ascii_case("nsp") || extension.eq_ignore_ascii_case("xci")
+            ["nsp", "xci", "nsz", "xcz"]
+                .iter()
+                .any(|ext| extension.eq_ignore_ascii_case(ext))
         })
 }
 
@@ -254,6 +256,8 @@ mod tests {
         let temp = TestDirectory::new();
         let a = temp.write("a.NSP", b"a");
         let nested = temp.write("nested/B.nsp", b"bbb");
+        let block_nsz = temp.write("nested/C.NsZ", b"ccc");
+        let block_xcz = temp.write("nested/D.XCZ", b"dddd");
         let z = temp.write("Z.xCi", b"zz");
         temp.write("ignored.zip", b"ignored");
 
@@ -272,6 +276,8 @@ mod tests {
             vec![
                 ("a.NSP", "a.NSP", 1, a.as_path()),
                 ("B.nsp", "nested/B.nsp", 3, nested.as_path()),
+                ("C.NsZ", "nested/C.NsZ", 3, block_nsz.as_path()),
+                ("D.XCZ", "nested/D.XCZ", 4, block_xcz.as_path()),
                 ("Z.xCi", "Z.xCi", 2, z.as_path()),
             ]
         );
