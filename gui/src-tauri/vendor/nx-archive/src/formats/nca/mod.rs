@@ -422,6 +422,47 @@ impl<R: Read + Seek> Nca<R> {
         self.fs_headers.len()
     }
 
+    /// Absolute NCA byte ranges of the data layers containing partition filesystems.
+    pub fn pfs0_data_ranges(&self) -> Result<Vec<std::ops::Range<u64>>, crate::error::Error> {
+        let mut ranges = Vec::new();
+        let entries = self
+            .header
+            .fs_entries
+            .iter()
+            .filter(|e| e.start_offset != 0 || e.end_offset != 0);
+        for (entry, fs) in entries.zip(&self.fs_headers) {
+            if fs.fs_type != FsType::PartitionFs {
+                continue;
+            }
+            let HashData::HierarchicalSha256(hash) = &fs.hash_data else {
+                return Err(crate::error::Error::NotSupported(
+                    "Unsupported PFS0 hash layout".into(),
+                ));
+            };
+            let mut layers = std::iter::once(&hash.hash_table_region).chain(&hash.layer_regions);
+            let layer = hash
+                .layer_count
+                .checked_sub(1)
+                .and_then(|i| layers.nth(i as usize))
+                .ok_or_else(|| {
+                    crate::error::Error::InvalidData("Invalid PFS0 layer count".into())
+                })?;
+            let section_start = get_block_offset(u64::from(entry.start_offset));
+            let section_end = get_block_offset(u64::from(entry.end_offset));
+            let range = section_start
+                .checked_add(layer.offset)
+                .and_then(|start| start.checked_add(layer.size).map(|end| start..end));
+            ranges.push(
+                range
+                    .filter(|r| r.end <= section_end && r.end <= self.header.content_size)
+                    .ok_or_else(|| {
+                        crate::error::Error::InvalidData("PFS0 data exceeds its NCA section".into())
+                    })?,
+            );
+        }
+        Ok(ranges)
+    }
+
     /// Get the filesystem offset in bytes
     pub fn get_fs_offset(&self, idx: usize) -> Option<u64> {
         if idx >= self.fs_headers.len() {

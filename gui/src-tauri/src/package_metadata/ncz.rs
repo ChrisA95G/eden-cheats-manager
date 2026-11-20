@@ -1,9 +1,9 @@
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
 mod reader;
-use reader::BlockReader;
+pub(super) use reader::BlockReader;
 
-const NCA_PREFIX_SIZE: u64 = 0x4000;
+pub(super) const NCA_PREFIX_SIZE: u64 = 0x4000;
 const SECTION_SIZE: u64 = 64;
 
 pub(super) enum Compression<R> {

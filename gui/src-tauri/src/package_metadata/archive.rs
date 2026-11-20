@@ -148,6 +148,25 @@ pub(super) struct PackageArchive {
     pub(super) entries: Vec<ArchiveEntry>,
 }
 
+impl PackageArchive {
+    fn from_entries(
+        entries: Vec<ArchiveEntry>,
+        plain: &'static str,
+        compressed: &'static str,
+    ) -> Self {
+        let has_ncz = entries.iter().any(|entry| {
+            entry
+                .name
+                .rsplit_once('.')
+                .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("ncz"))
+        });
+        Self {
+            format: if has_ncz { compressed } else { plain },
+            entries,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EntryTable {
     Pfs,
@@ -163,10 +182,8 @@ pub(super) fn parse_package_archive(source: &ReadAtFile) -> Result<PackageArchiv
     let mut magic = [0; 4];
     source.read_exact_at(0, &mut magic)?;
     if &magic == b"PFS0" {
-        return Ok(PackageArchive {
-            format: "NSP",
-            entries: parse_pfs0(source, 0, source.len)?,
-        });
+        let entries = parse_pfs0(source.bounded(0, source.len)?, source.len)?;
+        return Ok(PackageArchive::from_entries(entries, "NSP", "NSZ"));
     }
 
     source.read_exact_at(0x100, &mut magic)?;
@@ -185,10 +202,8 @@ pub(super) fn parse_package_archive(source: &ReadAtFile) -> Result<PackageArchiv
             .iter()
             .find(|entry| entry.name == "secure")
             .ok_or_else(|| "XCI does not contain a secure partition.".to_string())?;
-        return Ok(PackageArchive {
-            format: "XCI",
-            entries: parse_hfs0(source, secure.offset, secure.size, EntryTable::SecureHfs)?,
-        });
+        let entries = parse_hfs0(source, secure.offset, secure.size, EntryTable::SecureHfs)?;
+        return Ok(PackageArchive::from_entries(entries, "XCI", "XCZ"));
     }
 
     let mut full_xci_magic = [0; 4];
@@ -199,11 +214,17 @@ pub(super) fn parse_package_archive(source: &ReadAtFile) -> Result<PackageArchiv
         return Err("Full/key-area-prefixed XCI files are not supported yet.".into());
     }
 
-    Err("Unsupported package format. Select an uncompressed NSP or trimmed XCI file.".into())
+    Err(
+        "Unsupported package format. Select an NSP, trimmed XCI, or block-compressed NSZ/XCZ file."
+            .into(),
+    )
 }
 
-fn parse_pfs0(source: &ReadAtFile, start: u64, size: u64) -> Result<Vec<ArchiveEntry>, String> {
-    let header = source.read_vec(start, 0x10, 0x10, "PFS0 header")?;
+pub(super) fn parse_pfs0(mut reader: impl Read, size: u64) -> Result<Vec<ArchiveEntry>, String> {
+    let mut header = [0; 0x10];
+    reader
+        .read_exact(&mut header)
+        .map_err(|e| format!("Could not read PFS0 header: {e}"))?;
     if &header[..4] != b"PFS0" {
         return Err("Invalid NSP/PFS0 header.".into());
     }
@@ -222,22 +243,13 @@ fn parse_pfs0(source: &ReadAtFile, start: u64, size: u64) -> Result<Vec<ArchiveE
         return Err("PFS0 header extends beyond the package.".into());
     }
 
-    let raw_entries = source.read_vec(start + 0x10, entries_size, entries_size, "PFS0 entries")?;
-    let strings = source.read_vec(
-        start + 0x10 + entries_size,
-        u64::from(string_size),
-        u64::from(MAX_STRING_TABLE_SIZE),
-        "PFS0 string table",
-    )?;
-    build_entries(
-        source,
-        start,
-        size,
-        data_start,
-        &raw_entries,
-        EntryTable::Pfs,
-        &strings,
-    )
+    let mut raw_entries = vec![0; entries_size as usize];
+    let mut strings = vec![0; string_size as usize];
+    reader
+        .read_exact(&mut raw_entries)
+        .and_then(|_| reader.read_exact(&mut strings))
+        .map_err(|e| format!("Could not read PFS0 file table: {e}"))?;
+    build_entries(0, size, data_start, &raw_entries, EntryTable::Pfs, &strings)
 }
 
 fn parse_hfs0(
@@ -272,15 +284,7 @@ fn parse_hfs0(
         u64::from(MAX_STRING_TABLE_SIZE),
         "HFS0 string table",
     )?;
-    build_entries(
-        source,
-        start,
-        size,
-        data_start,
-        &raw_entries,
-        table,
-        &strings,
-    )
+    build_entries(start, size, data_start, &raw_entries, table, &strings)
 }
 
 fn validate_archive_header(file_count: u32, string_size: u32) -> Result<(), String> {
@@ -294,7 +298,6 @@ fn validate_archive_header(file_count: u32, string_size: u32) -> Result<(), Stri
 }
 
 fn build_entries(
-    source: &ReadAtFile,
     archive_start: u64,
     archive_size: u64,
     data_start: u64,
@@ -353,7 +356,6 @@ fn build_entries(
         let offset = archive_start
             .checked_add(relative_data_offset)
             .ok_or_else(|| "Archive entry absolute offset overflowed.".to_string())?;
-        source.bounded(offset, size)?;
         entries.push(ArchiveEntry { name, offset, size });
     }
     Ok(entries)
@@ -448,7 +450,6 @@ mod tests {
         package[0x18..0x20].copy_from_slice(&4_u64.to_le_bytes());
         package[0x20..0x24].copy_from_slice(&0_u32.to_le_bytes());
         package[0x28..0x2E].copy_from_slice(b"a.nca\0");
-        let source = ReadAtFile::new(temporary_file(&package)).unwrap();
-        assert!(parse_pfs0(&source, 0, source.len).is_err());
+        assert!(parse_pfs0(package.as_slice(), package.len() as u64).is_err());
     }
 }
