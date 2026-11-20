@@ -1,11 +1,13 @@
 use std::io::{BufReader, Read, Seek, SeekFrom};
 
+mod reader;
+use reader::BlockReader;
+
 const NCA_PREFIX_SIZE: u64 = 0x4000;
 const SECTION_SIZE: u64 = 64;
 
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum Compression {
-    Block(BlockIndex),
+pub(super) enum Compression<R> {
+    Block(BlockReader<R>),
     Solid,
 }
 
@@ -71,7 +73,7 @@ fn read_block_index(mut entry: impl Read + Seek) -> Result<BlockIndex, String> {
     })
 }
 
-pub(super) fn compression(mut entry: impl Read + Seek) -> Result<Compression, String> {
+pub(super) fn compression<R: Read + Seek>(mut entry: R) -> Result<Compression<R>, String> {
     let mut header = [0; 16];
     entry
         .seek(SeekFrom::Start(NCA_PREFIX_SIZE))
@@ -94,7 +96,8 @@ pub(super) fn compression(mut entry: impl Read + Seek) -> Result<Compression, St
         .and_then(|_| entry.read_exact(&mut magic))
         .map_err(|e| format!("Could not read NCZ compression marker: {e}"))?;
     if &magic == b"NCZBLOCK" {
-        read_block_index(entry).map(Compression::Block)
+        let index = read_block_index(&mut entry)?;
+        Ok(Compression::Block(BlockReader::new(entry, index)))
     } else if magic.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
         Ok(Compression::Solid)
     } else {
@@ -119,7 +122,10 @@ mod tests {
     #[test]
     fn detects_compression_after_the_section_table() {
         let zstd = [0x28, 0xb5, 0x2f, 0xfd, 0, 0, 0, 0];
-        assert_eq!(compression(entry(2, &zstd)), Ok(Compression::Solid));
+        assert!(matches!(
+            compression(entry(2, &zstd)),
+            Ok(Compression::Solid)
+        ));
     }
 
     fn blocks(decoded_size: u64, sizes: &[u32], data_len: usize) -> Cursor<Vec<u8>> {
@@ -138,12 +144,46 @@ mod tests {
         for tail in [3, 16384] {
             let entry = blocks(16384 + tail, &[9, tail as u32], 9 + tail as usize);
             let end = entry.get_ref().len() as u64;
-            let Ok(Compression::Block(index)) = compression(entry) else {
+            let Ok(Compression::Block(reader)) = compression(entry) else {
                 panic!("expected block index")
             };
+            let index = reader.index;
             assert_eq!(index.offsets, [end - tail - 9, end - tail, end]);
             assert_eq!(index.block_size, 16384);
             assert_eq!(index.decoded_size, 16384 + tail);
+        }
+    }
+
+    #[test]
+    fn seeks_across_compressed_and_raw_blocks() {
+        let bytes: Vec<_> = (0..16384).map(|i| (i % 251) as u8).collect();
+        let frame = zstd::bulk::compress(&bytes, 1).unwrap();
+        let mut entry = blocks(16387, &[frame.len() as u32, 3], 0).into_inner();
+        entry.extend_from_slice(&frame);
+        entry.extend_from_slice(b"raw");
+        let Ok(Compression::Block(mut reader)) = compression(Cursor::new(entry)) else {
+            panic!("expected block compression")
+        };
+        reader.seek(SeekFrom::End(-5)).unwrap();
+        let mut tail = [0; 5];
+        reader.read_exact(&mut tail).unwrap();
+        assert_eq!(&tail[..2], &bytes[16382..]);
+        assert_eq!(&tail[2..], b"raw");
+        assert_eq!(reader.read(&mut tail).unwrap(), 0);
+        reader.seek(SeekFrom::Start(17)).unwrap();
+        reader.read_exact(&mut tail).unwrap();
+        assert_eq!(tail, bytes[17..22]);
+    }
+
+    #[test]
+    fn rejects_corrupt_frames_and_incorrect_decoded_sizes() {
+        for frame in [vec![0; 8], zstd::bulk::compress(&[1; 100], 1).unwrap()] {
+            let mut entry = blocks(16384, &[frame.len() as u32], 0).into_inner();
+            entry.extend_from_slice(&frame);
+            let Ok(Compression::Block(mut reader)) = compression(Cursor::new(entry)) else {
+                panic!("expected valid block index")
+            };
+            assert!(reader.read_exact(&mut [0]).is_err());
         }
     }
 
