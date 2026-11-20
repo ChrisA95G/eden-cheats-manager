@@ -56,7 +56,15 @@ pub(super) fn discover_program_metadata(
         {
             let reader = source.bounded(entry.offset, entry.size)?;
             let kind = match compression(reader)? {
-                Compression::Block => "block",
+                Compression::Block(index) => {
+                    log::debug!(
+                        "[package] NCZ has {} blocks of up to {} bytes ({} bytes decoded)",
+                        index.offsets.len() - 1,
+                        index.block_size,
+                        index.decoded_size
+                    );
+                    "block"
+                }
                 Compression::Solid => "solid",
             };
             return Err(format!(
