@@ -8,7 +8,7 @@ EDC lets you browse, install and manage cheats for Eden on Android, Windows and 
 
 ## Features
 
-- Scan your NSP/XCI games and updates into one library.
+- Scan NSP, XCI, and NSZ/XCZ games and updates into one library.
 - Browse cheats by game and version.
 - Use the included cheat catalog, add your own codes, or fetch cheats from Cheatslips.
 - Install and remove cheat files in Eden.
@@ -29,7 +29,7 @@ On Linux, make the AppImage executable before opening it.
 ## What you need
 
 - Eden installed on the same device, with access to its `load` folder.
-- Your NSP/XCI game files and any updates you use.
+- Your game files and any updates you use.
 - Your `prod.keys` file to read the game files.
 
 A Cheatslips API token is only needed to fetch online cheats. Add it in Settings
@@ -41,7 +41,7 @@ if you want to use that source.
    On Android, choose the storage for your Eden build in the folder picker,
    open `load`, and grant access with **Use this folder**.
 2. In **Settings → Game library**, select `prod.keys` and the folder containing
-   your NSP/XCI files, then save.
+   your game files, then save.
 3. Select a game from the library and choose the game version you use in Eden.
 4. Choose a cheat and select **Install**, then enable it in Eden.
 

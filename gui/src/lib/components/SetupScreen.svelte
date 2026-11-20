@@ -215,7 +215,7 @@
             <div>
               <h2 id="package-matching-heading">Game library</h2>
               <p>
-                Select prod.keys and your NSP/XCI folder to list games and detect their builds.
+                Select prod.keys and your game folder to list games and detect their builds.
                 You can connect them later in Settings; the library stays empty until then.
               </p>
             </div>
@@ -246,7 +246,7 @@
             </label>
 
             <label class="md-field" for="setup-package-library">
-              <span>NSP/XCI library directory</span>
+              <span>Game library directory</span>
               <span class="path-control">
                 <input
                   id="setup-package-library"

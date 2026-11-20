@@ -136,9 +136,9 @@
       <div class="empty-state" role="status">
         <span class="empty-icon" aria-hidden="true"><Icon name="game" size={32} /></span>
         <h2>{needsSetup ? 'Connect your game library' : libraryError ? 'Unable to load game library' : 'No games found'}</h2>
-        <p>{needsSetup ? 'Select prod.keys and the folder containing your NSP/XCI games in Settings.'
+        <p>{needsSetup ? 'Select prod.keys and the folder containing your games in Settings.'
           : libraryError ? 'Check your package folder and prod.keys, then try again.'
-          : 'Add base games or updates to your NSP/XCI folder, then refresh. DLC is not listed.'}</p>
+          : 'Add base games or updates to your game folder, then refresh. DLC is not listed.'}</p>
         <button type="button" class="md-button md-button--tonal" onclick={onsettings}>Open Settings</button>
         {#if !needsSetup}
         <button type="button" class="md-button md-button--tonal" onclick={onrefresh}>

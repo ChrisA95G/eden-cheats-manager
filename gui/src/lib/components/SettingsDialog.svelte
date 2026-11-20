@@ -304,7 +304,7 @@
           <Icon name="game" size={24} />
           <div>
             <h3 id="settings-packages-title">Game library</h3>
-            <p>Scan NSP/XCI games and updates to populate your library and detect builds.</p>
+            <p>Scan games and updates in NSP, XCI, or block-compressed NSZ/XCZ format.</p>
           </div>
         </div>
 
@@ -337,7 +337,7 @@
             <input
               id="settings-package-library"
               bind:value={draft.packageLibraryPath}
-              placeholder="Select a folder containing NSP or XCI files"
+              placeholder="Select your game folder"
               spellcheck="false"
               aria-invalid={packagePairIncomplete}
               aria-describedby={packagePairIncomplete ? 'settings-package-pair-error' : undefined}
@@ -426,7 +426,7 @@
           <Icon name="game" size={24} />
           <div>
             <h3 id="settings-android-packages-title">Game library</h3>
-            <p>Connect prod.keys and your NSP/XCI folder to populate the library.</p>
+            <p>Connect prod.keys and your game folder to populate the library.</p>
           </div>
         </div>
 

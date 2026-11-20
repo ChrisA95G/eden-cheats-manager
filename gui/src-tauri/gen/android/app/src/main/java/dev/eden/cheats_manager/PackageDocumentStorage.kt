@@ -10,6 +10,11 @@ import android.system.OsConstants
 import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 
+private val gamePackageExtensions = setOf("nsp", "xci", "nsz", "xcz")
+
+internal fun isGamePackage(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase() in gamePackageExtensions
+
 /** Read-only persisted document access for user-supplied Switch keys and packages. */
 internal class PackageDocumentStorage(private val activity: MainActivity) {
     companion object {
@@ -50,10 +55,8 @@ internal class PackageDocumentStorage(private val activity: MainActivity) {
     private val packagePicker =
         activity.registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             persistSelection(uri, PREF_PACKAGE_URI) { name ->
-                if (!name.endsWith(".nsp", ignoreCase = true) &&
-                    !name.endsWith(".xci", ignoreCase = true)
-                ) {
-                    "Select an uncompressed .nsp or .xci file."
+                if (!isGamePackage(name)) {
+                    "Select an NSP, XCI, block-compressed NSZ, or block-compressed XCZ file."
                 } else {
                     null
                 }
@@ -82,7 +85,7 @@ internal class PackageDocumentStorage(private val activity: MainActivity) {
             !prodKeys.selected -> "Select prod.keys to decrypt package metadata."
             !prodKeys.readable -> "Android can no longer read prod.keys. Select it again."
             !prodKeys.seekable -> "The selected prod.keys provider is not seekable. Select a local file."
-            !gamePackage.selected -> "Select one uncompressed NSP or XCI package."
+            !gamePackage.selected -> "Select a game package."
             !gamePackage.readable -> "Android can no longer read the selected package. Select it again."
             !gamePackage.seekable -> "The selected package provider is not seekable. Select a local file."
             else -> "Keys and package are ready to inspect."
