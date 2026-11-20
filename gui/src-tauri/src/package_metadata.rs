@@ -1,5 +1,6 @@
 mod archive;
 mod keys;
+mod ncz;
 mod program;
 
 pub(crate) const NO_BUILD_ID_CONTENT_ERROR: &str =

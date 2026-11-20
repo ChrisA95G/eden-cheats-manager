@@ -1,4 +1,5 @@
 use super::archive::{ArchiveEntry, BoundedReader, ReadAtFile};
+use super::ncz::{compression, Compression};
 use nx_archive::formats::{
     cnmt::{Cnmt, ContentMetaType, ExtendedHeader, PackagedContent, PackagedContentType},
     nca::{decrypt_with_header_key, Nca},
@@ -44,14 +45,28 @@ pub(super) fn discover_program_metadata(
 
     let content_id = hex::encode(selected.program.info.content_id);
     let expected_name = format!("{content_id}.nca");
-    let program_entry = entries
+    let Some(program_entry) = entries
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case(&expected_name))
-        .ok_or_else(|| {
-            format!(
-                "The Program NCA selected by CNMT ({expected_name}) is missing from this package."
-            )
-        })?;
+    else {
+        let compressed_name = format!("{content_id}.ncz");
+        if let Some(entry) = entries
+            .iter()
+            .find(|e| e.name.eq_ignore_ascii_case(&compressed_name))
+        {
+            let reader = source.bounded(entry.offset, entry.size)?;
+            let kind = match compression(reader)? {
+                Compression::Block => "block",
+                Compression::Solid => "solid",
+            };
+            return Err(format!(
+                "Reading Build IDs from {kind}-compressed NCZ programs is not supported yet."
+            ));
+        }
+        return Err(format!(
+            "The Program NCA selected by CNMT ({expected_name}) is missing from this package."
+        ));
+    };
 
     let inspection = inspect_nca(source, program_entry, keyset)?;
     if inspection.content_type != 0 {
