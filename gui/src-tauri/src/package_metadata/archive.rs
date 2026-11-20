@@ -148,6 +148,13 @@ pub(super) struct PackageArchive {
     pub(super) entries: Vec<ArchiveEntry>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum EntryTable {
+    Pfs,
+    RootHfs,
+    SecureHfs,
+}
+
 pub(super) fn parse_package_archive(source: &ReadAtFile) -> Result<PackageArchive, String> {
     if source.len < 0x104 {
         return Err("Selected package is too small to be an NSP or XCI.".into());
@@ -168,14 +175,19 @@ pub(super) fn parse_package_archive(source: &ReadAtFile) -> Result<PackageArchiv
         if hfs0_offset >= source.len {
             return Err("XCI root partition offset is outside the document.".into());
         }
-        let root_entries = parse_hfs0(source, hfs0_offset, source.len - hfs0_offset)?;
+        let root_entries = parse_hfs0(
+            source,
+            hfs0_offset,
+            source.len - hfs0_offset,
+            EntryTable::RootHfs,
+        )?;
         let secure = root_entries
             .iter()
             .find(|entry| entry.name == "secure")
             .ok_or_else(|| "XCI does not contain a secure partition.".to_string())?;
         return Ok(PackageArchive {
             format: "XCI",
-            entries: parse_hfs0(source, secure.offset, secure.size)?,
+            entries: parse_hfs0(source, secure.offset, secure.size, EntryTable::SecureHfs)?,
         });
     }
 
@@ -223,12 +235,17 @@ fn parse_pfs0(source: &ReadAtFile, start: u64, size: u64) -> Result<Vec<ArchiveE
         size,
         data_start,
         &raw_entries,
-        0x18,
+        EntryTable::Pfs,
         &strings,
     )
 }
 
-fn parse_hfs0(source: &ReadAtFile, start: u64, size: u64) -> Result<Vec<ArchiveEntry>, String> {
+fn parse_hfs0(
+    source: &ReadAtFile,
+    start: u64,
+    size: u64,
+    table: EntryTable,
+) -> Result<Vec<ArchiveEntry>, String> {
     let header = source.read_vec(start, 0x10, 0x10, "HFS0 header")?;
     if &header[..4] != b"HFS0" {
         return Err("Invalid XCI/HFS0 partition header.".into());
@@ -261,7 +278,7 @@ fn parse_hfs0(source: &ReadAtFile, start: u64, size: u64) -> Result<Vec<ArchiveE
         size,
         data_start,
         &raw_entries,
-        0x40,
+        table,
         &strings,
     )
 }
@@ -282,11 +299,16 @@ fn build_entries(
     archive_size: u64,
     data_start: u64,
     raw_entries: &[u8],
-    entry_size: usize,
+    table: EntryTable,
     strings: &[u8],
 ) -> Result<Vec<ArchiveEntry>, String> {
-    let mut entries = Vec::with_capacity(raw_entries.len() / entry_size);
-    for raw in raw_entries.chunks_exact(entry_size) {
+    let entry_size = match table {
+        EntryTable::Pfs => 0x18,
+        EntryTable::RootHfs | EntryTable::SecureHfs => 0x40,
+    };
+    let mut rows = raw_entries.chunks_exact(entry_size);
+    let mut entries = Vec::with_capacity(rows.len());
+    while let Some(raw) = rows.next() {
         let relative_offset = u64::from_le_bytes(raw[0..8].try_into().unwrap());
         let size = u64::from_le_bytes(raw[8..16].try_into().unwrap());
         let name_offset = u32::from_le_bytes(raw[16..20].try_into().unwrap()) as usize;
@@ -311,11 +333,23 @@ fn build_entries(
         let relative_end = relative_data_offset
             .checked_add(size)
             .ok_or_else(|| "Archive entry size overflowed.".to_string())?;
-        if relative_end > archive_size {
+        let size = if relative_end <= archive_size {
+            size
+        } else if table == EntryTable::RootHfs
+            && rows.len() == 0
+            && name == "secure"
+            && relative_data_offset <= archive_size
+            && size % 0x200 == 0
+            && relative_end - archive_size <= 0x200
+        {
+            // The reference XCZ writer rounds the final partition up to a sector
+            // but can end the file immediately after the last content entry.
+            archive_size - relative_data_offset
+        } else {
             return Err(format!(
                 "Archive entry '{name}' extends beyond its container."
             ));
-        }
+        };
         let offset = archive_start
             .checked_add(relative_data_offset)
             .ok_or_else(|| "Archive entry absolute offset overflowed.".to_string())?;
@@ -379,6 +413,29 @@ mod tests {
         assert_eq!(&data, b"67");
         left.read_exact(&mut data).unwrap();
         assert_eq!(&data, b"34");
+    }
+
+    #[test]
+    fn secure_partition_may_omit_final_sector_padding_but_not_content() {
+        fn hfs(name: &[u8], size: u64) -> Vec<u8> {
+            let mut table = vec![0; 0x200];
+            table[..4].copy_from_slice(b"HFS0");
+            table[4..8].copy_from_slice(&1_u32.to_le_bytes());
+            table[8..12].copy_from_slice(&0x1b0_u32.to_le_bytes());
+            table[0x18..0x20].copy_from_slice(&size.to_le_bytes());
+            table[0x50..0x50 + name.len()].copy_from_slice(name);
+            table
+        }
+        let mut image = vec![0; 0x200];
+        image[0x100..0x104].copy_from_slice(b"HEAD");
+        image[0x130..0x138].copy_from_slice(&0x200_u64.to_le_bytes());
+        image.extend(hfs(b"secure", 0x400));
+        image.extend(hfs(b"program.ncz", 3));
+        image.extend_from_slice(b"abc");
+        let parse =
+            |bytes: &[u8]| parse_package_archive(&ReadAtFile::new(temporary_file(bytes)).unwrap());
+        assert_eq!(parse(&image).unwrap().entries[0].size, 3);
+        assert!(parse(&image[..image.len() - 1]).is_err());
     }
 
     #[test]
