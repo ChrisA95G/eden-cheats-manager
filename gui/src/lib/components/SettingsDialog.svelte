@@ -2,6 +2,7 @@
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
   import AppUpdate from './AppUpdate.svelte';
+  import { version } from '../../../package.json';
   import { theme } from '../domain/theme.js';
 
   /** @typedef {import('../api/types.js').AppSettings} AppSettings */
@@ -231,7 +232,7 @@
   }
 </script>
 
-<Dialog {open} fullScreen title="Settings" onclose={requestClose}>
+<Dialog {open} fullScreen title="Settings" subtitle={`Installed version ${version}`} onclose={requestClose}>
   <form
     id="settings-form"
     class="settings-form"
@@ -545,11 +546,8 @@
       <div role="status" aria-live="polite" aria-atomic="true">
         {#if activeAction === 'app-update-check'}
           <p class="action-result">Checking for updates…</p>
-        {:else if updateResult}
-          <p class="action-result">Installed version: {updateResult.currentVersion}</p>
-          {#if !updateResult.available}
-            <p class="action-result">No newer stable release is available.</p>
-          {/if}
+        {:else if updateResult && !updateResult.available}
+          <p class="action-result">No newer stable release is available.</p>
         {/if}
       </div>
       {#if availableUpdate}
