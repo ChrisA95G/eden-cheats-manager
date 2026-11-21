@@ -526,7 +526,7 @@
       <div class="section-heading">
         <Icon name="download" size={24} />
         <div>
-          <h3 id="settings-updates-title">App updates</h3>
+          <h3 id="settings-updates-title" tabindex="-1">App updates</h3>
           <p>Check for a newer stable version of EDC.</p>
         </div>
       </div>

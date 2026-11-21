@@ -5,6 +5,7 @@
   import { cheatLibraryGroups, createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
   import SetupScreen from '$lib/components/SetupScreen.svelte';
   import SettingsDialog from '$lib/components/SettingsDialog.svelte';
+  import WhatsNewDialog from '$lib/components/WhatsNewDialog.svelte';
   import AppUpdate from '$lib/components/AppUpdate.svelte';
   import LibraryPane from '$lib/components/LibraryPane.svelte';
   import GameWorkspace from '$lib/components/GameWorkspace.svelte';
@@ -27,6 +28,7 @@
   let selectedTitleId = $state('');
   let pane = $state('library');
   let settingsOpen = $state(false);
+  let announcementDismissed = $state(false);
   let startupUpdate = $state(/** @type {import('$lib/api/types.js').AvailableUpdate|null} */ (null));
   let installation = $state(/** @type {import('$lib/api/types.js').UpdateInstallation|null} */ (null));
   let visibleUpdate = $derived(installation?.update ?? startupUpdate);
@@ -72,6 +74,10 @@
   }
   function backToLibrary() { if (pane === 'workspace') history.back(); }
   function openSettings() { if (!saving) settingsOpen = true; }
+  function openUpdateSettings() {
+    openSettings();
+    requestAnimationFrame(() => document.getElementById('settings-updates-title')?.focus());
+  }
   /** @param {PopStateEvent} event */
   async function navigateBack(event) {
     if (event.state?.ecm !== 1) return;
@@ -289,6 +295,9 @@
         onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
     </main>
   </div>
+  {#if !announcementDismissed}
+    <WhatsNewDialog {platform} onupdatesettings={openUpdateSettings} ondismiss={() => announcementDismissed = true} />
+  {/if}
   <SettingsDialog open={settingsOpen} {platform} {settings} {edenAccess} {packageStatus} {gameLibraryStatus}
     oncheckupdates={checkUpdates} {installation} oninstallupdate={installUpdate}
     {pendingPicker} {saving} error={statusError} onsave={save} onclose={()=>settingsOpen=false}
