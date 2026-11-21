@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchAnnouncement, unreadAnnouncement, rememberDismissal } from './announcement.js';
+import { fetchAnnouncement, listAnnouncementHistory, readPastAnnouncement, unreadAnnouncement, rememberDismissal } from './announcement.js';
 
 const first = '2026-11-20T09:00:00Z';
 const second = '2026-11-20T09:00:01Z';
@@ -93,4 +93,49 @@ test('the index orders independent notices and skips missing or invalid entries'
   assert.equal((await read())?.file, file);
   files.set('index.json', '[]');
   assert.equal(await read(), null);
+});
+
+test('dismissed revisions and separate notices with the same date can be reread offline', async t => {
+  const fetch = t.mock.method(globalThis, 'fetch', () => { throw new Error('offline'); });
+  const storage = memoryStorage();
+  const other = 'news/maintenance.md';
+  const entries = [
+    { file, timestamp: first, body: 'Original' },
+    { file: other, timestamp: first, body: 'Maintenance' },
+    { file, timestamp: second, body: 'New copy\n## Android\nMobile only' },
+  ];
+  for (const { file, timestamp, body } of entries) {
+    const notice = unreadAnnouncement(timestamp + '\n' + body, file, 'desktop', storage);
+    assert.ok(notice);
+    rememberDismissal(notice, storage);
+  }
+  const history = listAnnouncementHistory(storage);
+  assert.equal(history.length, 3);
+  assert.deepEqual(history[0], { file, timestamp: second });
+  const signal = new AbortController().signal;
+  for (const entry of history) {
+    const notice = await readPastAnnouncement(entry, 'desktop', signal, storage);
+    const expected = entries.find(e => e.file === entry.file && e.timestamp === entry.timestamp);
+    assert.ok(expected && notice);
+    assert.ok(notice.html.includes(expected.body.split('\n')[0]));
+    assert.doesNotMatch(notice.html, /Mobile only/);
+    assert.equal(unreadAnnouncement(notice.source, entry.file, 'desktop', storage), null);
+  }
+  assert.equal(fetch.mock.callCount(), 0);
+});
+
+test('a date-only dismissal can recover its original revision when still available', async t => {
+  const storage = memoryStorage();
+  storage.setItem('ecm-dismissed-announcement:' + file, first);
+  const [entry] = listAnnouncementHistory(storage);
+  const signal = new AbortController().signal;
+  let remote = second + '\nNewer revision';
+  const fetch = t.mock.method(globalThis, 'fetch', () => new Response(remote));
+  assert.equal(await readPastAnnouncement(entry, 'desktop', signal, storage), null);
+  remote = first + '\nOriginal revision';
+  assert.match((await readPastAnnouncement(entry, 'desktop', signal, storage))?.html ?? '', /Original/);
+  remote = '';
+  assert.match((await readPastAnnouncement(entry, 'desktop', signal, storage))?.html ?? '', /Original/);
+  assert.equal(fetch.mock.callCount(), 2);
+  assert.ok(unreadAnnouncement(second + '\nNewer revision', file, 'desktop', storage));
 });
