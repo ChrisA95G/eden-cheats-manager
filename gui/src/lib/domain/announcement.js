@@ -3,6 +3,7 @@ import MarkdownIt from 'markdown-it';
 const feed = 'https://raw.githubusercontent.com/ChrisA95G/eden-cheats-manager/announcements/';
 const maxLength = 32 * 1024;
 const dismissedPrefix = 'ecm-dismissed-announcement:';
+const archivePrefix = 'ecm-announcement-history:';
 const markdown = new MarkdownIt({ html: false }).disable('image');
 markdown.validateLink = (/** @type {string} */ url) => /^https:\/\//i.test(url);
 /** @type {import('markdown-it').RendererRule} */
@@ -13,14 +14,27 @@ function renderExternalLink(tokens, index, options, env, renderer) {
 }
 markdown.renderer.rules.link_open = renderExternalLink;
 
-/** @param {string} source @param {string} file @param {import('../api/types.js').Platform} platform @param {Pick<Storage, 'getItem'>} storage */
-export function unreadAnnouncement(source, file, platform, storage) {
+/** @param {unknown} file @returns {file is string} */
+function isAnnouncementFile(file) {
+  return typeof file === 'string' && file.endsWith('.md') && !file.includes('\\')
+    && file.split('/').every(part => part && part !== '.' && part !== '..');
+}
+
+/** @param {string} timestamp */
+function validTimestamp(timestamp) {
+  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(timestamp)) return false;
+  const date = new Date(timestamp);
+  return Number.isFinite(date.getTime()) && date.toISOString().replace('.000Z', 'Z') === timestamp;
+}
+
+/** @typedef {import('../api/types.js').Platform} Platform */
+/** @typedef {{ file: string, timestamp: string }} AnnouncementId */
+
+/** @param {string} source @param {string} file @param {Platform} platform */
+function parseAnnouncement(source, file, platform) {
   if (source.length > maxLength) return null;
   const [firstLine, ...body] = source.replace(/^\uFEFF/, '').split(/\r?\n/);
-  if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/.test(firstLine)) return null;
-  const date = new Date(firstLine);
-  if (!Number.isFinite(date.getTime()) || date.toISOString().replace('.000Z', 'Z') !== firstLine) return null;
-  if (firstLine <= (storage.getItem(dismissedPrefix + file) ?? '')) return null;
+  if (!validTimestamp(firstLine)) return null;
 
   const tokens = markdown.parse(body.join('\n'), {});
   let title = 'News from EDC';
@@ -38,13 +52,51 @@ export function unreadAnnouncement(source, file, platform, storage) {
     return visible;
   });
   const html = markdown.renderer.render(visibleTokens, markdown.options, {}).trim();
-  return html ? { file, timestamp: firstLine, title, html } : null;
+  return html ? { file, timestamp: firstLine, title, html, source } : null;
 }
 
-/** @param {{ file: string, timestamp: string }} notice @param {Pick<Storage, 'getItem' | 'setItem'>} storage */
-export function rememberDismissal({ file, timestamp }, storage) {
+/** @param {string} source @param {string} file @param {Platform} platform @param {Pick<Storage, 'getItem'>} storage */
+export function unreadAnnouncement(source, file, platform, storage) {
+  const notice = parseAnnouncement(source, file, platform);
+  return notice && notice.timestamp > (storage.getItem(dismissedPrefix + file) ?? '') ? notice : null;
+}
+
+/** @param {AnnouncementId & {source: string}} notice @param {Pick<Storage, 'getItem' | 'setItem'>} storage */
+export function rememberDismissal({ file, timestamp, source }, storage) {
   const key = dismissedPrefix + file;
   if (timestamp > (storage.getItem(key) ?? '')) storage.setItem(key, timestamp);
+  storage.setItem(archivePrefix + timestamp + '/' + file, source);
+}
+
+/** @param {Pick<Storage, 'length' | 'key' | 'getItem'>} storage */
+export function listAnnouncementHistory(storage) {
+  const ids = new Set();
+  for (let i = 0; i < storage.length; i++) {
+    const key = storage.key(i) ?? '';
+    if (key.startsWith(archivePrefix)) ids.add(key.slice(archivePrefix.length));
+    if (key.startsWith(dismissedPrefix)) ids.add(storage.getItem(key) + '/' + key.slice(dismissedPrefix.length));
+  }
+  // Canonical UTC timestamps sort chronologically, including revisions of the same file.
+  return [...ids].sort().reverse().flatMap(id => {
+    const [timestamp, ...path] = id.split('/');
+    const file = path.join('/');
+    return validTimestamp(timestamp) && isAnnouncementFile(file) ? [{ file, timestamp }] : [];
+  });
+}
+
+/** @param {AnnouncementId} entry @param {Platform} platform @param {AbortSignal} signal @param {Pick<Storage, 'getItem' | 'setItem'>} storage */
+export async function readPastAnnouncement({ file, timestamp }, platform, signal, storage) {
+  if (!isAnnouncementFile(file) || !validTimestamp(timestamp)) return null;
+  const key = archivePrefix + timestamp + '/' + file;
+  const cached = storage.getItem(key);
+  // Older installations recorded the dismissal date without keeping the Markdown.
+  const source = cached ?? await fetchText(file, signal);
+  const notice = source && parseAnnouncement(source, file, platform);
+  if (!notice || notice.timestamp !== timestamp) return null;
+  if (cached === null) {
+    try { storage.setItem(key, source); } catch { /* It can still be read this time. */ }
+  }
+  return notice;
 }
 
 /** @param {string} path @param {AbortSignal} signal */
@@ -77,8 +129,7 @@ export async function fetchAnnouncement(platform, signal, storage = localStorage
   for (const entry of entries) {
     if (signal.aborted) break;
     const file = entry?.file;
-    if (typeof file !== 'string' || !file.endsWith('.md') || file.includes('\\')) continue;
-    if (file.split('/').some(part => !part || part === '.' || part === '..')) continue;
+    if (!isAnnouncementFile(file)) continue;
     const source = await fetchText(file, signal);
     if (!source) continue;
     const notice = unreadAnnouncement(source, file, platform, storage);
