@@ -162,7 +162,7 @@ pub async fn install_android_update(
     let selected = super::check_app_update(app)
         .await?
         .available
-        .ok_or("No newer stable update is available.")?;
+        .ok_or("No newer update is available.")?;
     if selected.version != version {
         return Err("The available release has changed. Check for updates again.".into());
     }

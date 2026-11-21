@@ -209,24 +209,40 @@ fn a_different_version_or_architecture_cannot_substitute_for_a_missing_installer
 }
 
 fn fetch_response(status: u16, body: &str) -> Result<Option<AvailableUpdate>, String> {
+    fetch_pages(vec![(status, body.to_owned())], "0.2.1", false)
+}
+
+fn fetch_pages(
+    pages: Vec<(u16, String)>,
+    current: &str,
+    include_beta: bool,
+) -> Result<Option<AvailableUpdate>, String> {
     use std::{
         io::{Read, Write},
-        net::TcpListener,
+        net::{TcpListener, TcpStream},
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/latest", listener.local_addr().unwrap());
-    let response = format!(
-        "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
+    let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let mut request = [0; 4096];
-        stream.read(&mut request).unwrap();
-        let _ = stream.write_all(response.as_bytes());
+        for (index, (status, body)) in pages.into_iter().enumerate() {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = [0; 4096];
+            let len = stream.read(&mut request).unwrap();
+            let path = if include_beta {
+                format!("/releases?per_page={RELEASES_PER_PAGE}&page={}", index + 1)
+            } else {
+                "/releases/latest".into()
+            };
+            assert!(request[..len].starts_with(format!("GET {path} ").as_bytes()));
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
     });
     let client = Client::builder()
         .no_proxy()
@@ -235,10 +251,13 @@ fn fetch_response(status: u16, body: &str) -> Result<Option<AvailableUpdate>, St
         .unwrap();
     let result = tauri::async_runtime::block_on(fetch_update(
         &client,
-        &url,
-        &Version::new(0, 2, 1),
+        &format!("http://{address}/releases"),
+        &Version::parse(current).unwrap(),
         UpdateTarget::Android,
+        include_beta,
     ));
+    // Wake the fixture if the client returned before requesting an expected page.
+    drop(TcpStream::connect(address));
     server.join().unwrap();
     result
 }

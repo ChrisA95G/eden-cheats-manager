@@ -74,7 +74,7 @@ pub async fn install_desktop_update(
     let selected = check_app_update(app.clone())
         .await?
         .available
-        .ok_or("No newer stable update is available.")?;
+        .ok_or("No newer update is available.")?;
     if selected.version != version {
         return Err("The available release has changed. Check for updates again.".into());
     }

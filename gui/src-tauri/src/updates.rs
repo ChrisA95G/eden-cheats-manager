@@ -5,8 +5,8 @@ use std::time::Duration;
 use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::AppHandle;
 
-const LATEST_RELEASE_URL: &str =
-    "https://api.github.com/repos/ChrisA95G/eden-cheats-manager/releases/latest";
+const RELEASES_API: &str = "https://api.github.com/repos/ChrisA95G/eden-cheats-manager/releases";
+const RELEASES_PER_PAGE: usize = 20;
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const RELEASES_URL: &str = "https://github.com/ChrisA95G/eden-cheats-manager/releases";
 
@@ -177,12 +177,7 @@ fn select_release(
     release.into_update(&version, target).map(Some)
 }
 
-async fn fetch_update(
-    client: &Client,
-    url: &str,
-    current: &Version,
-    target: UpdateTarget,
-) -> Result<Option<AvailableUpdate>, String> {
+async fn fetch_release_data(client: &Client, url: &str) -> Result<Vec<u8>, String> {
     let mut response = client
         .get(url)
         .header("Accept", "application/vnd.github+json")
@@ -210,7 +205,45 @@ async fn fetch_update(
         }
         data.extend_from_slice(&chunk);
     }
-    select_release(&data, current, target)
+    Ok(data)
+}
+
+async fn fetch_update(
+    client: &Client,
+    releases_url: &str,
+    current: &Version,
+    target: UpdateTarget,
+    include_beta: bool,
+) -> Result<Option<AvailableUpdate>, String> {
+    if !include_beta {
+        let data = fetch_release_data(client, &format!("{releases_url}/latest")).await?;
+        return select_release(&data, current, target);
+    }
+
+    let mut newest = current.clone();
+    let mut selected = None;
+    for page in 1.. {
+        let url = format!("{releases_url}?per_page={RELEASES_PER_PAGE}&page={page}");
+        let data = fetch_release_data(client, &url).await?;
+        let releases: Vec<Release> = serde_json::from_slice(&data)
+            .map_err(|e| format!("Could not read GitHub release information: {e}"))?;
+        let last_page = releases.len() < RELEASES_PER_PAGE;
+        for release in releases {
+            let Ok(Some(version)) = release.update_version(true) else {
+                continue;
+            };
+            if version.cmp_precedence(&newest).is_gt() {
+                newest = version;
+                selected = Some(release);
+            }
+        }
+        if last_page {
+            break;
+        }
+    }
+    selected
+        .map(|release| release.into_update(&newest, target))
+        .transpose()
 }
 
 #[tauri::command]
@@ -229,7 +262,14 @@ pub async fn check_app_update(app: AppHandle) -> Result<UpdateCheck, String> {
         .map_err(|e| e.to_string())?;
     Ok(UpdateCheck {
         current_version: current.to_string(),
-        available: fetch_update(&client, LATEST_RELEASE_URL, current, target).await?,
+        available: fetch_update(
+            &client,
+            RELEASES_API,
+            current,
+            target,
+            crate::settings::get_settings(app.clone()).include_beta_updates,
+        )
+        .await?,
     })
 }
 
