@@ -262,6 +262,54 @@ fn fetch_pages(
     result
 }
 
+fn prerelease(tag: &str) -> serde_json::Value {
+    let mut record = release(tag);
+    record["prerelease"] = json!(true);
+    record
+}
+
+#[test]
+fn beta_opt_in_selects_the_highest_eligible_version_across_pages() {
+    let mut draft = prerelease("v0.4.0-beta.1");
+    draft["draft"] = json!(true);
+    let mut page = vec![
+        draft,
+        prerelease("v0.4.0-rc.1"),
+        prerelease("v0.4.0"),
+        release("v0.4.0-beta.1"),
+        prerelease("v0.4.0-beta.0"),
+        release("nightly"),
+        release("v0.2.3"),
+        prerelease("v0.3.0-beta.2"),
+    ];
+    page.resize(RELEASES_PER_PAGE, release("v0.2.1"));
+    let next_page = json!([prerelease("v0.3.0-beta.10"), prerelease("v0.3.0-beta.1")]);
+    let selected = fetch_pages(
+        vec![(200, json!(page).to_string()), (200, next_page.to_string())],
+        "0.2.3",
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(selected.version, "0.3.0-beta.10");
+    assert!(selected
+        .download
+        .url
+        .ends_with("/v0.3.0-beta.10/eden-cheats-manager.apk"));
+}
+
+#[test]
+fn beta_testers_get_the_final_stable_release_and_never_a_downgrade() {
+    let releases = json!([prerelease("v0.3.0-beta.2"), release("v0.3.0")]).to_string();
+    let check = |current| fetch_pages(vec![(200, releases.clone())], current, true).unwrap();
+    assert_eq!(check("0.3.0-beta.1").unwrap().version, "0.3.0");
+    assert!(check("0.3.0").is_none());
+    assert!(check("0.4.0-beta.1").is_none());
+    assert!(select(prerelease("v0.3.0-beta.2"), "0.2.3")
+        .unwrap()
+        .is_none());
+}
+
 #[test]
 fn successful_http_response_is_checked_for_a_newer_release() {
     let update = fetch_response(200, &release("v0.3.0").to_string())
