@@ -44,6 +44,7 @@
  * @property {string} packageLibraryPath
  * @property {boolean} onboardingDone
  * @property {boolean} autoCheckUpdates
+ * @property {boolean} includeBetaUpdates
  */
 
 /**

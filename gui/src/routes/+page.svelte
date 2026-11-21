@@ -36,6 +36,8 @@
   let contextRevision = $state(0);
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
   let ready = $derived(!!settings && (platform === 'android' ? edenAccess?.ready === true : settings.onboardingDone));
+  let startupUpdateChannel = $derived(ready && !loading && settings?.autoCheckUpdates
+    ? (settings.includeBetaUpdates ? 'beta' : 'stable') : null);
   let libraryGames = $derived(cheatLibraryGroups(library.games));
   let game = $derived(libraryGames.find(group =>
     normalizeTitleId(group.baseTitleId) === normalizeTitleId(selectedTitleId)) ?? null);
@@ -118,7 +120,6 @@
     await refreshLibrary();
   }
   async function checkStartupUpdate() {
-    if (updateCheckRevision) return;
     const revision = ++updateCheckRevision;
     try {
       const result = await backend.checkAppUpdate();
@@ -166,7 +167,8 @@
     installation = null;
   }
   $effect(()=>{
-    if (ready && !loading && settings?.autoCheckUpdates) untrack(()=>{void checkStartupUpdate();});
+    if (startupUpdateChannel) untrack(()=>{void checkStartupUpdate();});
+    return () => { updateCheckRevision++; };
   });
   $effect(()=>{
     if (ready && !loading) untrack(()=>{void startLibrary();});
@@ -231,8 +233,10 @@
     try {
       await backend.saveSettings(next);
       if (!alive) return;
+      const betaChanged = next.includeBetaUpdates !== settings?.includeBetaUpdates;
+      if (betaChanged && !installation?.busy) installation = null;
+      if (betaChanged || !next.autoCheckUpdates) startupUpdate = null;
       settings = next; contextRevision++; settingsOpen = false;
-      if (!next.autoCheckUpdates) startupUpdate = null;
       notify({tone:'success',message:'Settings saved.'});
       if (started) void refreshLibrary();
     } finally { saving = false; }

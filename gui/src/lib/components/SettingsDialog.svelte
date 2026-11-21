@@ -75,6 +75,7 @@
       packageLibraryPath: value?.packageLibraryPath ?? '',
       onboardingDone: value?.onboardingDone ?? false,
       autoCheckUpdates: value?.autoCheckUpdates ?? true,
+      includeBetaUpdates: value?.includeBetaUpdates ?? false,
     };
   }
 
@@ -115,6 +116,7 @@
   let displayedError = $derived(localError || error);
   let busy = $derived(saving || submitting || Boolean(activeAction) || Boolean(pendingPicker) || installation?.busy);
   let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
+  let betaPreferenceChanged = $derived(draft.includeBetaUpdates !== settings.includeBetaUpdates);
   let availableUpdate = $derived(installation?.update ?? updateResult?.available);
 
   /** @param {unknown} cause */
@@ -529,36 +531,42 @@
         <Icon name="download" size={24} />
         <div>
           <h3 id="settings-updates-title" tabindex="-1">App updates</h3>
-          <p>Check for a newer stable version of EDC.</p>
+          <p>You choose whether to install an available update.</p>
         </div>
       </div>
       <label class="update-preference">
         <input type="checkbox" bind:checked={draft.autoCheckUpdates} disabled={busy} />
         Automatically check for updates when EDC opens
       </label>
+      <label class="update-preference">
+        <input type="checkbox" bind:checked={draft.includeBetaUpdates} disabled={busy} />
+        Include beta updates
+      </label>
       <button
         class="md-button md-button--outlined section-button"
         type="button"
-        disabled={busy}
+        disabled={busy || betaPreferenceChanged}
         onclick={checkUpdates}
       >
         {activeAction === 'app-update-check' ? 'Checking…' : 'Check for updates'}
       </button>
       <div role="status" aria-live="polite" aria-atomic="true">
-        {#if activeAction === 'app-update-check'}
+        {#if betaPreferenceChanged}
+          <p class="action-result">Save your beta preference to check for updates.</p>
+        {:else if activeAction === 'app-update-check'}
           <p class="action-result">Checking for updates…</p>
         {:else if updateResult && !updateResult.available}
-          <p class="action-result">No newer stable release is available.</p>
+          <p class="action-result">{settings.includeBetaUpdates ? 'No newer stable or beta release is available.' : 'No newer stable release is available.'}</p>
         {/if}
       </div>
-      {#if availableUpdate}
+      {#if availableUpdate && !betaPreferenceChanged}
         <AppUpdate update={availableUpdate} {installation} {platform}
           disabled={busy || settingsChanged} oninstall={oninstallupdate} />
         {#if settingsChanged && !installation?.busy}
           <p class="md-supporting-text">Save or cancel your settings changes before updating.</p>
         {/if}
       {/if}
-      {#if availableUpdate?.notes}
+      {#if availableUpdate?.notes && !betaPreferenceChanged}
         <details>
           <summary>Release notes</summary>
           <p class="update-notes">{availableUpdate.notes}</p>
