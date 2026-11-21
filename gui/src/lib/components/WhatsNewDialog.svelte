@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import Dialog from './ui/Dialog.svelte';
+  import AnnouncementBody from './AnnouncementBody.svelte';
   import { fetchAnnouncement, rememberDismissal } from '../domain/announcement.js';
 
   /** @type {{ platform: import('../api/types.js').Platform, onupdatesettings: () => void, ondismiss: () => void }} */
@@ -38,7 +39,7 @@
 
 <Dialog open={!!announcement} title={announcement?.title ?? ''} onclose={dismiss}>
   {#if announcement}
-    <div class="announcement">{@html announcement.html}</div>
+    <AnnouncementBody html={announcement.html} />
   {/if}
   {#snippet actions()}
     {#if announcement?.opensUpdateSettings}
@@ -47,9 +48,3 @@
     <button class="md-button md-button--filled" type="button" onclick={dismiss}>Got it</button>
   {/snippet}
 </Dialog>
-
-<style>
-  .announcement { overflow-wrap: anywhere; }
-  .announcement :global(> * + *) { margin-top: 0.75rem; }
-  .announcement :global(ul), .announcement :global(ol) { padding-inline-start: 1.5rem; }
-</style>

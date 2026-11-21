@@ -2,6 +2,7 @@
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
   import AppUpdate from './AppUpdate.svelte';
+  import AnnouncementHistory from './AnnouncementHistory.svelte';
   import { version } from '../../../package.json';
   import { theme } from '../domain/theme.js';
 
@@ -565,6 +566,10 @@
       {/if}
     </section>
 
+    {#if open}
+      <AnnouncementHistory {platform} />
+    {/if}
+
     {#if displayedError}
       <p class="dialog-error md-error-text" role="alert">{displayedError}</p>
     {/if}
@@ -616,7 +621,6 @@
     padding: 0 0 1.5rem;
     border-bottom:1px solid var(--md-sys-color-outline-variant);
   }
-  .settings-section:last-of-type { border-bottom:0; padding-bottom:0; }
 
   .section-heading {
     display: grid;
