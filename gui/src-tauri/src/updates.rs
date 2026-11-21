@@ -80,6 +80,39 @@ struct Release {
     assets: Vec<ReleaseAsset>,
 }
 
+impl Release {
+    fn update_version(&self, include_beta: bool) -> Result<Option<Version>, String> {
+        if self.draft || (self.prerelease && !include_beta) {
+            return Ok(None);
+        }
+        let version = Version::parse(self.tag_name.strip_prefix('v').unwrap_or(&self.tag_name))
+            .map_err(|e| format!("Invalid release version: {e}"))?;
+        let eligible =
+            if self.prerelease {
+                version.pre.as_str().strip_prefix("beta.").is_some_and(|n| {
+                    !n.is_empty() && n != "0" && n.bytes().all(|b| b.is_ascii_digit())
+                })
+            } else {
+                version.pre.is_empty()
+            };
+        Ok(eligible.then_some(version))
+    }
+
+    fn into_update(
+        self,
+        version: &Version,
+        target: UpdateTarget,
+    ) -> Result<AvailableUpdate, String> {
+        let download = select_download(&self, version, target)?;
+        Ok(AvailableUpdate {
+            version: version.to_string(),
+            notes: self.body.unwrap_or_default(),
+            release_url: format!("{RELEASES_URL}/tag/{}", self.tag_name),
+            download,
+        })
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct UpdateDownload {
     name: String,
@@ -135,26 +168,13 @@ fn select_release(
 ) -> Result<Option<AvailableUpdate>, String> {
     let release: Release = serde_json::from_slice(data)
         .map_err(|e| format!("Could not read GitHub release information: {e}"))?;
-    if release.draft || release.prerelease {
+    let Some(version) = release.update_version(false)? else {
+        return Ok(None);
+    };
+    if !version.cmp_precedence(current).is_gt() {
         return Ok(None);
     }
-    let version = Version::parse(
-        release
-            .tag_name
-            .strip_prefix('v')
-            .unwrap_or(&release.tag_name),
-    )
-    .map_err(|e| format!("Invalid release version: {e}"))?;
-    if !version.pre.is_empty() || !version.cmp_precedence(current).is_gt() {
-        return Ok(None);
-    }
-    let download = select_download(&release, &version, target)?;
-    Ok(Some(AvailableUpdate {
-        version: version.to_string(),
-        notes: release.body.unwrap_or_default(),
-        release_url: format!("{RELEASES_URL}/tag/{}", release.tag_name),
-        download,
-    }))
+    release.into_update(&version, target).map(Some)
 }
 
 async fn fetch_update(
