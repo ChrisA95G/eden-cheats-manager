@@ -37,7 +37,7 @@
    * @property {() => void | Promise<void>} [onretryandroid]
    * @property {() => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
-   * @property {() => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
+   * @property {(returnToStable?: boolean) => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
    * @property {import('../api/types.js').UpdateInstallation | null} [installation]
    * @property {(update: import('../api/types.js').AvailableUpdate) => void | Promise<void>} oninstallupdate
    */
@@ -190,12 +190,13 @@
     }
   }
 
-  async function checkUpdates() {
+  async function checkUpdates(returnToStable = false) {
     updateResult = null;
     const result = await runAction('app-update-check', async () => {
       if (!oncheckupdates) throw new Error('Update checking is unavailable.');
-      return oncheckupdates();
+      return oncheckupdates(returnToStable);
     });
+    if (result?.available && returnToStable) result.available.returnToStable = true;
     if (result) updateResult = result;
   }
 
@@ -546,10 +547,18 @@
         class="md-button md-button--outlined section-button"
         type="button"
         disabled={busy || betaPreferenceChanged}
-        onclick={checkUpdates}
+        onclick={() => checkUpdates()}
       >
         {activeAction === 'app-update-check' ? 'Checking…' : 'Check for updates'}
       </button>
+      {#if /-beta\.[1-9]\d*$/.test(version) && !availableUpdate?.returnToStable}
+        <p class="md-supporting-text">If the beta is giving you trouble or you’re done testing, you can switch back to the stable release.</p>
+        <button class="md-button md-button--outlined section-button" type="button"
+          disabled={busy || settingsChanged} onclick={() => checkUpdates(true)}>Return to stable</button>
+        {#if settingsChanged}
+          <p class="md-supporting-text">Save or cancel your changes before returning to stable.</p>
+        {/if}
+      {/if}
       <div role="status" aria-live="polite" aria-atomic="true">
         {#if betaPreferenceChanged}
           <p class="action-result">Save your beta preference to check for updates.</p>

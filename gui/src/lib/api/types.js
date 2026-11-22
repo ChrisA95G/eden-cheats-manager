@@ -24,6 +24,7 @@
 
 /**
  * @typedef {Object} AvailableUpdate
+ * @property {boolean} [returnToStable]
  * @property {string} version
  * @property {string} notes
  * @property {string} releaseUrl

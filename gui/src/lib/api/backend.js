@@ -1,4 +1,5 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { version } from '../../../package.json';
 import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 
@@ -12,6 +13,8 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 /** @typedef {import('./types.js').PackageDiscoveryStatus} PackageDiscoveryStatus */
 /** @typedef {import('./types.js').PackageMetadata} PackageMetadata */
 /** @typedef {import('./types.js').Platform} Platform */
+
+const pendingStableVersion = 'ecm-return-to-stable';
 
 /** @param {unknown} value @returns {Platform} */
 export function parsePlatform(value) {
@@ -50,6 +53,17 @@ export async function loadBootstrap() {
     }
   }
 
+  // Cancelling Android's installer leaves the beta installed and the preference alone.
+  try {
+    const pending = localStorage.getItem(pendingStableVersion);
+    if (pending && !version.includes('-')) {
+      if (pending === version && settings.includeBetaUpdates) {
+        settings.includeBetaUpdates = false;
+        await saveSettings(settings);
+      }
+      localStorage.removeItem(pendingStableVersion);
+    }
+  } catch { /* Use the settings in memory and retry on the next launch. */ }
   return { platform, settings, edenAccess, edenAccessError };
 }
 
@@ -58,27 +72,25 @@ export async function saveSettings(settings) {
   await invoke('save_settings', { settings });
 }
 
-/** @returns {Promise<import('./types.js').AppUpdateCheck>} */
-export function checkAppUpdate() {
-  return invoke('check_app_update');
+/** @param {boolean} [returnToStable] @returns {Promise<import('./types.js').AppUpdateCheck>} */
+export function checkAppUpdate(returnToStable = false) {
+  return invoke('check_app_update', { returnToStable });
 }
 
 /**
- * @param {string} version
+ * @param {Platform} platform
+ * @param {import('./types.js').AvailableUpdate} update
  * @param {(progress: import('./types.js').UpdateProgress) => void} onProgress
- * @returns {Promise<void>}
+ * @returns {Promise<import('./types.js').AndroidInstallResult | null>}
  */
-export function installDesktopUpdate(version, onProgress) {
-  return invoke('install_desktop_update', { version, onProgress: new Channel(onProgress) });
-}
-
-/**
- * @param {string} version
- * @param {(progress: import('./types.js').UpdateProgress) => void} onProgress
- * @returns {Promise<import('./types.js').AndroidInstallResult>}
- */
-export function installAndroidUpdate(version, onProgress) {
-  return invoke('install_android_update', { version, onProgress: new Channel(onProgress) });
+export function installAppUpdate(platform, update, onProgress) {
+  const { version, returnToStable = false } = update;
+  if (returnToStable) localStorage.setItem(pendingStableVersion, version);
+  else {
+    try { localStorage.removeItem(pendingStableVersion); } catch { /* Ordinary updates work without storage. */ }
+  }
+  const command = platformCommand(platform, 'install_android_update', 'install_desktop_update');
+  return invoke(command, { version, returnToStable, onProgress: new Channel(onProgress) });
 }
 
 /** @returns {Promise<string>} */

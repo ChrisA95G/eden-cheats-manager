@@ -126,13 +126,14 @@
       if (alive && revision === updateCheckRevision && settings?.autoCheckUpdates) startupUpdate = result.available;
     } catch { /* Background checks must not interrupt the library when offline. */ }
   }
-  function checkUpdates() {
+  /** @param {boolean} [returnToStable] */
+  function checkUpdates(returnToStable = false) {
     updateCheckRevision++;
     if (!installation?.busy) {
       installation = null;
       startupUpdate = null;
     }
-    return backend.checkAppUpdate();
+    return backend.checkAppUpdate(returnToStable);
   }
   /** @param {import('$lib/api/types.js').AvailableUpdate} update */
   async function installUpdate(update) {
@@ -144,15 +145,13 @@
       if (alive && revision === installRevision && installation?.busy) installation.progress = progress;
     };
     try {
-      if (platform === 'android') {
-        const handoff = await backend.installAndroidUpdate(update.version, reportProgress);
-        if (alive && revision === installRevision && installation) {
-          installation.handoff = handoff;
-          installation.busy = false;
-        }
+      const handoff = await backend.installAppUpdate(platform, update, reportProgress);
+      if (!alive || revision !== installRevision || !installation) return;
+      if (handoff) {
+        installation.handoff = handoff;
+        installation.busy = false;
       } else {
-        await backend.installDesktopUpdate(update.version, reportProgress);
-        if (alive && revision === installRevision && installation) installation.progress = {event:'restarting'};
+        installation.progress = {event:'restarting'};
       }
     } catch (cause) {
       if (alive && revision === installRevision && installation) {
