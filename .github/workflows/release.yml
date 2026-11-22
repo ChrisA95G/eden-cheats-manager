@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ startsWith(github.ref, 'refs/tags/') && '0' || '1' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -39,7 +41,7 @@ jobs:
       - name: Validate release metadata
         env:
           RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-        run: node scripts/check-release-version.mjs "$RELEASE_TAG"
+        run: node scripts/check-release-version.mjs "$RELEASE_TAG" ${RELEASE_TAG:+--check-android-history}
       - run: npm run check && npm run test && npm run build
         working-directory: gui
       - run: cargo test --locked
@@ -155,9 +157,43 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        apk: ${{ fromJSON(contains(github.ref_name, '-beta.') && '["app","stable-return"]' || '["app"]') }}
+    env:
+      APK_NAME: eden-cheats-manager.apk
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select the published stable source for the return APK
+        # Each beta pins stableReturnVersion in gui/package.json and reserves the next Android versionCode for that APK.
+        id: stable
+        if: matrix.apk == 'stable-return'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$(jq -er .stableReturnVersion gui/package.json)"
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          published=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq 'select(.draft == false and .prerelease == false) | .tag_name')
+          test "$published" = "$tag"
+          echo "ref=refs/tags/$tag" >> "$GITHUB_OUTPUT"
+          echo "APK_NAME=eden-cheats-manager-stable-${tag#v}.apk" >> "$GITHUB_ENV"
+          echo "EDC_ROLLBACK_FROM_BETA=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          jq -er '.bundle.android.versionCode + 1 | "RETURN_CODE=\(.)"' gui/src-tauri/tauri.conf.json >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@v4
+        if: matrix.apk == 'stable-return'
+        with:
+          ref: ${{ steps.stable.outputs.ref }}
+
+      - name: Set the stable APK build number
+        if: matrix.apk == 'stable-return'
+        run: |
+          config=gui/src-tauri/tauri.conf.json
+          test "$APK_NAME" = "eden-cheats-manager-stable-$(jq -r .version "$config").apk"
+          jq --argjson code "$RETURN_CODE" '.bundle.android.versionCode = $code' "$config" > "$RUNNER_TEMP/return-config.json"
+          cp "$RUNNER_TEMP/return-config.json" "$config"
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
@@ -217,6 +253,10 @@ jobs:
             echo "ERROR: apkanalyzer not found; release verification is mandatory"
             exit 1
           fi
+          if [[ -n "${RETURN_CODE:-}" ]]; then
+            test "$("$APKANALYZER" manifest version-code "$APK")" = "$RETURN_CODE"
+            test "eden-cheats-manager-stable-$("$APKANALYZER" manifest version-name "$APK").apk" = "$APK_NAME"
+          fi
           METHODS='getAppUpdateDownloadPath()Ljava/lang/String; installAppUpdate(Ljava/lang/String;)Ljava/lang/String; selectEdenLoadDirectory()V getEdenLoadAccessStatus()Ljava/lang/String; safListDirectory(Ljava/lang/String;)Ljava/lang/String; safWriteTextFile(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String; safDeleteFile(Ljava/lang/String;)Ljava/lang/String; safRemoveEmptyDirectory(Ljava/lang/String;)Ljava/lang/String; selectProdKeysDocument()V selectGamePackageDocument()V getPackageDiscoveryStatus()Ljava/lang/String; openProdKeysReadFd()I openGamePackageReadFd()I selectGameLibraryDirectory()V getGameLibraryStatus()Ljava/lang/String; listGameLibraryPackages()Ljava/lang/String; openGameLibraryPackageReadFd(Ljava/lang/String;)I'
           FAIL=0
           DEX_DUMP=$("$APKANALYZER" dex code --class dev.eden.cheats_manager.MainActivity "$APK")
@@ -246,14 +286,16 @@ jobs:
             --ks-key-alias "$ANDROID_KEY_ALIAS" \
             --ks-pass env:ANDROID_STORE_PASSWORD \
             --key-pass env:ANDROID_KEY_PASSWORD \
-            --out eden-cheats-manager.apk \
+            --out "$APK_NAME" \
             gui/src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk
-          "$APKSIGNER" verify --verbose --print-certs eden-cheats-manager.apk
+          "$APKSIGNER" verify --verbose --print-certs "$APK_NAME"
 
       - name: Upload APK to release
         uses: softprops/action-gh-release@v2
         with:
-          files: eden-cheats-manager.apk
+          tag_name: ${{ github.ref_name }}
+          files: ${{ env.APK_NAME }}
+          fail_on_unmatched_files: true
           draft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 
