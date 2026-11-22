@@ -5,6 +5,16 @@ use tauri_plugin_updater::{Updater, UpdaterExt};
 
 static UPDATE_LOCK: Mutex<()> = Mutex::const_new(());
 
+fn stable_return_comparator(
+    selected: String,
+) -> impl Fn(semver::Version, tauri_plugin_updater::RemoteRelease) -> bool {
+    move |current, release| {
+        super::is_beta(&current)
+            && release.version.pre.is_empty()
+            && release.version.to_string() == selected
+    }
+}
+
 impl UpdateTarget {
     fn updater_target(self) -> Result<&'static str, String> {
         match self {
@@ -88,7 +98,7 @@ pub async fn install_desktop_update(
     let endpoint = download_url
         .join("latest.json")
         .map_err(|e| e.to_string())?;
-    let updater = app
+    let builder = app
         .updater_builder()
         .target(target.updater_target()?)
         .endpoints(vec![endpoint])
@@ -98,9 +108,13 @@ pub async fn install_desktop_update(
             client
                 .https_only(true)
                 .connect_timeout(Duration::from_secs(20))
-        })
-        .build()
-        .map_err(|e| e.to_string())?;
+        });
+    let builder = if return_to_stable == Some(true) {
+        builder.version_comparator(stable_return_comparator(selected.version.clone()))
+    } else {
+        builder
+    };
+    let updater = builder.build().map_err(|e| e.to_string())?;
     download_and_install(updater, &selected, |event| {
         let _ = on_progress.send(event);
     })

@@ -118,10 +118,12 @@ impl Drop for Server {
 #[test]
 fn checksum_parser_requires_one_exact_apk_entry() {
     let hash = hex::encode(Sha256::digest(APK));
+    let name = "eden-cheats-manager-stable-0.2.3.apk";
     assert_eq!(
-        apk_checksum(&format!(
-            "{hash}  other.apk\r\n{hash}  eden-cheats-manager.apk\r\n"
-        ))
+        apk_checksum(
+            &format!("{hash}  {name}\nwrong  eden-cheats-manager.apk"),
+            name
+        )
         .unwrap(),
         <[u8; 32]>::from(Sha256::digest(APK))
     );
@@ -130,7 +132,7 @@ fn checksum_parser_requires_one_exact_apk_entry() {
         format!("{hash}  eden-cheats-manager.apk.sig"),
         format!("{}  eden-cheats-manager.apk", "g".repeat(64)),
     ] {
-        assert!(apk_checksum(&data).is_err());
+        assert!(apk_checksum(&data, "eden-cheats-manager.apk").is_err());
     }
 }
 

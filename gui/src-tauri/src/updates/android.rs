@@ -19,10 +19,10 @@ pub enum AndroidInstallResult {
     InstallerOpened,
 }
 
-fn apk_checksum(data: &str) -> Result<[u8; 32], String> {
+fn apk_checksum(data: &str, apk_name: &str) -> Result<[u8; 32], String> {
     let mut matches = data.lines().filter_map(|line| {
         line.split_once("  ")
-            .filter(|(_, name)| *name == "eden-cheats-manager.apk")
+            .filter(|(_, name)| *name == apk_name)
             .map(|(hash, _)| hash)
     });
     let hash = matches
@@ -100,6 +100,7 @@ fn download_and_install(
     }
     let checksum = apk_checksum(
         std::str::from_utf8(&data).map_err(|_| "Release checksums are not valid text.")?,
+        &selected.download.name,
     )?;
     let cached = File::open(destination).ok().and_then(|file| {
         report(UpdateProgress::Verifying);
