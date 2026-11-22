@@ -7,6 +7,7 @@
    *   open?: boolean,
    *   fullScreen?: boolean,
    *   title: string,
+   *   subtitle?: string,
    *   children?: import('svelte').Snippet,
    *   actions?: import('svelte').Snippet,
    *   onclose?: () => void,
@@ -16,6 +17,7 @@
     open = false,
     fullScreen = false,
     title,
+    subtitle,
     children,
     actions,
     onclose,
@@ -131,7 +133,10 @@
   onclose={restoreOpenerFocus}
 >
   <header class="md-dialog__header dialog__header">
-    <h2 id={titleId}>{title}</h2>
+    <div class="dialog__heading">
+      <h2 id={titleId}>{title}</h2>
+      {#if subtitle}<p class="md-supporting-text">{subtitle}</p>{/if}
+    </div>
     <button
       type="button"
       class="md-icon-button dialog__close"
@@ -179,9 +184,12 @@
     flex: 0 0 auto;
   }
 
-  h2 {
+  .dialog__heading {
     min-width: 0;
     flex: 1;
+  }
+
+  h2 {
     color: var(--md-sys-color-on-surface);
     font-size: var(--md-sys-typescale-headline-small-size);
     font-weight: 400;

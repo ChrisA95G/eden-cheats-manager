@@ -5,8 +5,8 @@ use std::time::Duration;
 use tauri::utils::{config::BundleType, platform::bundle_type};
 use tauri::AppHandle;
 
-const LATEST_RELEASE_URL: &str =
-    "https://api.github.com/repos/ChrisA95G/eden-cheats-manager/releases/latest";
+const RELEASES_API: &str = "https://api.github.com/repos/ChrisA95G/eden-cheats-manager/releases";
+const RELEASES_PER_PAGE: usize = 20;
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const RELEASES_URL: &str = "https://github.com/ChrisA95G/eden-cheats-manager/releases";
 
@@ -80,6 +80,44 @@ struct Release {
     assets: Vec<ReleaseAsset>,
 }
 
+impl Release {
+    fn update_version(&self, include_beta: bool) -> Result<Option<Version>, String> {
+        if self.draft || (self.prerelease && !include_beta) {
+            return Ok(None);
+        }
+        let version = Version::parse(self.tag_name.strip_prefix('v').unwrap_or(&self.tag_name))
+            .map_err(|e| format!("Invalid release version: {e}"))?;
+        let eligible = if self.prerelease {
+            is_beta(&version)
+        } else {
+            version.pre.is_empty()
+        };
+        Ok(eligible.then_some(version))
+    }
+
+    fn into_update(
+        self,
+        version: &Version,
+        target: UpdateTarget,
+    ) -> Result<AvailableUpdate, String> {
+        let download = select_download(&self, target.asset_name(version))?;
+        Ok(AvailableUpdate {
+            version: version.to_string(),
+            notes: self.body.unwrap_or_default(),
+            release_url: format!("{RELEASES_URL}/tag/{}", self.tag_name),
+            download,
+        })
+    }
+}
+
+fn is_beta(version: &Version) -> bool {
+    version
+        .pre
+        .as_str()
+        .strip_prefix("beta.")
+        .is_some_and(|n| !n.is_empty() && n != "0" && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
 #[derive(Debug, Serialize)]
 pub struct UpdateDownload {
     name: String,
@@ -103,12 +141,7 @@ pub struct UpdateCheck {
     available: Option<AvailableUpdate>,
 }
 
-fn select_download(
-    release: &Release,
-    version: &Version,
-    target: UpdateTarget,
-) -> Result<UpdateDownload, String> {
-    let name = target.asset_name(version);
+fn select_download(release: &Release, name: String) -> Result<UpdateDownload, String> {
     let mut matches = release.assets.iter().filter(|asset| asset.name == name);
     let asset = matches
         .next()
@@ -135,34 +168,16 @@ fn select_release(
 ) -> Result<Option<AvailableUpdate>, String> {
     let release: Release = serde_json::from_slice(data)
         .map_err(|e| format!("Could not read GitHub release information: {e}"))?;
-    if release.draft || release.prerelease {
+    let Some(version) = release.update_version(false)? else {
+        return Ok(None);
+    };
+    if !version.cmp_precedence(current).is_gt() {
         return Ok(None);
     }
-    let version = Version::parse(
-        release
-            .tag_name
-            .strip_prefix('v')
-            .unwrap_or(&release.tag_name),
-    )
-    .map_err(|e| format!("Invalid release version: {e}"))?;
-    if !version.pre.is_empty() || !version.cmp_precedence(current).is_gt() {
-        return Ok(None);
-    }
-    let download = select_download(&release, &version, target)?;
-    Ok(Some(AvailableUpdate {
-        version: version.to_string(),
-        notes: release.body.unwrap_or_default(),
-        release_url: format!("{RELEASES_URL}/tag/{}", release.tag_name),
-        download,
-    }))
+    release.into_update(&version, target).map(Some)
 }
 
-async fn fetch_update(
-    client: &Client,
-    url: &str,
-    current: &Version,
-    target: UpdateTarget,
-) -> Result<Option<AvailableUpdate>, String> {
+async fn fetch_release_data(client: &Client, url: &str) -> Result<Vec<u8>, String> {
     let mut response = client
         .get(url)
         .header("Accept", "application/vnd.github+json")
@@ -190,11 +205,104 @@ async fn fetch_update(
         }
         data.extend_from_slice(&chunk);
     }
-    select_release(&data, current, target)
+    Ok(data)
+}
+
+async fn fetch_update(
+    client: &Client,
+    releases_url: &str,
+    current: &Version,
+    target: UpdateTarget,
+    include_beta: bool,
+) -> Result<Option<AvailableUpdate>, String> {
+    if !include_beta {
+        let data = fetch_release_data(client, &format!("{releases_url}/latest")).await?;
+        return select_release(&data, current, target);
+    }
+
+    // Android cannot reinstall the beta whose build number this stable APK superseded.
+    let beta_floor = option_env!("EDC_ROLLBACK_FROM_BETA").and_then(|v| Version::parse(v).ok());
+    let mut newest = current.clone();
+    let mut selected = None;
+    for page in 1.. {
+        let url = format!("{releases_url}?per_page={RELEASES_PER_PAGE}&page={page}");
+        let data = fetch_release_data(client, &url).await?;
+        let releases: Vec<Release> = serde_json::from_slice(&data)
+            .map_err(|e| format!("Could not read GitHub release information: {e}"))?;
+        let last_page = releases.len() < RELEASES_PER_PAGE;
+        for release in releases {
+            let Ok(Some(version)) = release.update_version(true) else {
+                continue;
+            };
+            if release.prerelease
+                && beta_floor
+                    .as_ref()
+                    .is_some_and(|floor| !version.cmp_precedence(floor).is_gt())
+            {
+                continue;
+            }
+            if version.cmp_precedence(&newest).is_gt() {
+                newest = version;
+                selected = Some(release);
+            }
+        }
+        if last_page {
+            break;
+        }
+    }
+    selected
+        .map(|release| release.into_update(&newest, target))
+        .transpose()
+}
+
+async fn find_stable(
+    client: &Client,
+    current: &Version,
+    target: UpdateTarget,
+) -> Result<AvailableUpdate, String> {
+    if !is_beta(current) {
+        return Err("Return to stable is only available on a beta installation.".into());
+    }
+    let data = fetch_release_data(client, &format!("{RELEASES_API}/latest")).await?;
+    let stable: Release = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+    let version = stable
+        .update_version(false)?
+        .ok_or("No published stable release is available.")?;
+    if target != UpdateTarget::Android || version.cmp_precedence(current).is_gt() {
+        return stable.into_update(&version, target);
+    }
+
+    let tag = format!("v{current}");
+    let data = fetch_release_data(client, &format!("{RELEASES_API}/tags/{tag}")).await?;
+    let beta: Release = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+    if beta.tag_name != tag || !beta.prerelease || beta.draft {
+        return Err("The installed beta has no published return package.".into());
+    }
+    // The beta and its release workflow use the same pinned stable version.
+    let package: serde_json::Value =
+        serde_json::from_str(include_str!("../../package.json")).map_err(|e| e.to_string())?;
+    let pinned = package["stableReturnVersion"]
+        .as_str()
+        .and_then(|s| Version::parse(s).ok())
+        .filter(|v| v.pre.is_empty() && v.build.is_empty() && *v <= version)
+        .ok_or("This beta has no compatible stable APK.")?;
+    android_return_package(&beta, &pinned)
+}
+
+fn android_return_package(beta: &Release, version: &Version) -> Result<AvailableUpdate, String> {
+    Ok(AvailableUpdate {
+        download: select_download(beta, format!("eden-cheats-manager-stable-{version}.apk"))?,
+        release_url: format!("{RELEASES_URL}/tag/v{version}"),
+        version: version.to_string(),
+        notes: String::new(),
+    })
 }
 
 #[tauri::command]
-pub async fn check_app_update(app: AppHandle) -> Result<UpdateCheck, String> {
+pub async fn check_app_update(
+    app: AppHandle,
+    return_to_stable: Option<bool>,
+) -> Result<UpdateCheck, String> {
     let target = UpdateTarget::for_installation(
         std::env::consts::OS,
         std::env::consts::ARCH,
@@ -207,9 +315,21 @@ pub async fn check_app_update(app: AppHandle) -> Result<UpdateCheck, String> {
         .user_agent(format!("eden-cheats-manager/{current}"))
         .build()
         .map_err(|e| e.to_string())?;
+    let available = if return_to_stable == Some(true) {
+        Some(find_stable(&client, current, target).await?)
+    } else {
+        fetch_update(
+            &client,
+            RELEASES_API,
+            current,
+            target,
+            crate::settings::get_settings(app.clone()).include_beta_updates,
+        )
+        .await?
+    };
     Ok(UpdateCheck {
         current_version: current.to_string(),
-        available: fetch_update(&client, LATEST_RELEASE_URL, current, target).await?,
+        available,
     })
 }
 

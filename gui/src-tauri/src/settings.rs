@@ -13,6 +13,7 @@ pub struct Settings {
     pub package_library_path: String,
     pub onboarding_done: bool,
     pub auto_check_updates: bool,
+    pub include_beta_updates: bool,
 }
 
 impl Default for Settings {
@@ -24,6 +25,7 @@ impl Default for Settings {
             package_library_path: String::new(),
             onboarding_done: false,
             auto_check_updates: true,
+            include_beta_updates: false,
         }
     }
 }
@@ -374,7 +376,8 @@ mod tests {
                     "prodKeysPath": " retained keys ",
                     "packageLibraryPath": " retained packages ",
                     "onboardingDone": true,
-                    "autoCheckUpdates": false
+                    "autoCheckUpdates": false,
+                    "includeBetaUpdates": true
                 });
                 let mut legacy = current.clone();
                 legacy["edenExePath"] = obsolete;
@@ -397,6 +400,7 @@ mod tests {
             package_library_path: "packages".into(),
             onboarding_done: true,
             auto_check_updates: false,
+            include_beta_updates: true,
         };
 
         assert_eq!(
@@ -407,7 +411,8 @@ mod tests {
                 "prodKeysPath": "keys/prod.keys",
                 "packageLibraryPath": "packages",
                 "onboardingDone": true,
-                "autoCheckUpdates": false
+                "autoCheckUpdates": false,
+                "includeBetaUpdates": true
             })
         );
     }
@@ -418,12 +423,14 @@ mod tests {
             let legacy = settings_json(None, "retained load");
             let settings = deserialize_settings(&legacy, platform);
             assert!(settings.auto_check_updates);
+            assert!(!settings.include_beta_updates);
             assert_eq!(settings.api_token, " token kept exactly ");
             assert_eq!(settings.pc_load_dir, "retained load");
             assert!(settings.onboarding_done);
 
             let opted_out = Settings {
                 auto_check_updates: false,
+                include_beta_updates: true,
                 ..settings
             };
             let saved = serde_json::to_string(&opted_out).unwrap();

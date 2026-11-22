@@ -209,24 +209,40 @@ fn a_different_version_or_architecture_cannot_substitute_for_a_missing_installer
 }
 
 fn fetch_response(status: u16, body: &str) -> Result<Option<AvailableUpdate>, String> {
+    fetch_pages(vec![(status, body.to_owned())], "0.2.1", false)
+}
+
+fn fetch_pages(
+    pages: Vec<(u16, String)>,
+    current: &str,
+    include_beta: bool,
+) -> Result<Option<AvailableUpdate>, String> {
     use std::{
         io::{Read, Write},
-        net::TcpListener,
+        net::{TcpListener, TcpStream},
     };
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}/latest", listener.local_addr().unwrap());
-    let response = format!(
-        "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
+    let address = listener.local_addr().unwrap();
     let server = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().unwrap();
-        stream
-            .set_read_timeout(Some(Duration::from_secs(3)))
-            .unwrap();
-        let mut request = [0; 4096];
-        stream.read(&mut request).unwrap();
-        let _ = stream.write_all(response.as_bytes());
+        for (index, (status, body)) in pages.into_iter().enumerate() {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut request = [0; 4096];
+            let len = stream.read(&mut request).unwrap();
+            let path = if include_beta {
+                format!("/releases?per_page={RELEASES_PER_PAGE}&page={}", index + 1)
+            } else {
+                "/releases/latest".into()
+            };
+            assert!(request[..len].starts_with(format!("GET {path} ").as_bytes()));
+            let response = format!(
+                "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = stream.write_all(response.as_bytes());
+        }
     });
     let client = Client::builder()
         .no_proxy()
@@ -235,12 +251,82 @@ fn fetch_response(status: u16, body: &str) -> Result<Option<AvailableUpdate>, St
         .unwrap();
     let result = tauri::async_runtime::block_on(fetch_update(
         &client,
-        &url,
-        &Version::new(0, 2, 1),
+        &format!("http://{address}/releases"),
+        &Version::parse(current).unwrap(),
         UpdateTarget::Android,
+        include_beta,
     ));
+    // Wake the fixture if the client returned before requesting an expected page.
+    drop(TcpStream::connect(address));
     server.join().unwrap();
     result
+}
+
+fn prerelease(tag: &str) -> serde_json::Value {
+    let mut record = release(tag);
+    record["prerelease"] = json!(true);
+    record
+}
+
+#[test]
+fn android_rollback_uses_the_stable_apk_attached_to_the_installed_beta() {
+    let mut beta: Release = serde_json::from_value(prerelease("v0.3.0-beta.1")).unwrap();
+    let stable = Version::new(0, 2, 3);
+    assert!(android_return_package(&beta, &stable).is_err());
+    let name = "eden-cheats-manager-stable-0.2.3.apk";
+    beta.assets.push(ReleaseAsset {
+        name: name.into(),
+        size: 123,
+        state: "uploaded".into(),
+    });
+    let update = android_return_package(&beta, &stable).unwrap();
+    assert_eq!(update.version, "0.2.3");
+    assert_eq!(
+        update.download.url,
+        format!("{RELEASES_URL}/download/v0.3.0-beta.1/{name}")
+    );
+}
+
+#[test]
+fn beta_opt_in_selects_the_highest_eligible_version_across_pages() {
+    let mut draft = prerelease("v0.4.0-beta.1");
+    draft["draft"] = json!(true);
+    let mut page = vec![
+        draft,
+        prerelease("v0.4.0-rc.1"),
+        prerelease("v0.4.0"),
+        release("v0.4.0-beta.1"),
+        prerelease("v0.4.0-beta.0"),
+        release("nightly"),
+        release("v0.2.3"),
+        prerelease("v0.3.0-beta.2"),
+    ];
+    page.resize(RELEASES_PER_PAGE, release("v0.2.1"));
+    let next_page = json!([prerelease("v0.3.0-beta.10"), prerelease("v0.3.0-beta.1")]);
+    let selected = fetch_pages(
+        vec![(200, json!(page).to_string()), (200, next_page.to_string())],
+        "0.2.3",
+        true,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(selected.version, "0.3.0-beta.10");
+    assert!(selected
+        .download
+        .url
+        .ends_with("/v0.3.0-beta.10/eden-cheats-manager.apk"));
+}
+
+#[test]
+fn beta_testers_get_the_final_stable_release_and_never_a_downgrade() {
+    let releases = json!([prerelease("v0.3.0-beta.2"), release("v0.3.0")]).to_string();
+    let check = |current| fetch_pages(vec![(200, releases.clone())], current, true).unwrap();
+    assert_eq!(check("0.3.0-beta.1").unwrap().version, "0.3.0");
+    assert!(check("0.3.0").is_none());
+    assert!(check("0.4.0-beta.1").is_none());
+    assert!(select(prerelease("v0.3.0-beta.2"), "0.2.3")
+        .unwrap()
+        .is_none());
 }
 
 #[test]

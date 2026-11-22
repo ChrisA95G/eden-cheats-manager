@@ -26,20 +26,25 @@
     : current?.error ? 'Retry update'
     : current?.handoff === 'permissionRequired' ? 'Continue update'
     : current?.handoff === 'installerOpened' ? 'Open installer again'
-    : 'Update now');
+    : update.returnToStable ? 'Install stable version' : 'Update now');
   let guidance = $derived(platform === 'desktop' ? 'EDC will close and restart during the update.'
     : current?.handoff === 'permissionRequired'
       ? 'Allow updates from EDC in Android settings, then return here and choose Continue update.'
     : current?.handoff === 'installerOpened'
       ? 'Finish the update in Android’s installer. If you cancelled, you can open it again.'
+    : update.returnToStable ? 'Android calls this an update. Tap Update to switch or Cancel to stay on the beta.'
     : 'Android will ask you to confirm the update.');
 </script>
 
 <div class="app-update">
   <div class="update-row">
     <div class="update-copy">
-      <p aria-live="polite">{current?.busy ? `Updating to EDC ${update.version}` : `EDC ${update.version} is available.`}</p>
+      <p aria-live="polite">{update.returnToStable ? `EDC ${update.version} (stable)`
+        : current?.busy ? `Updating to EDC ${update.version}` : `EDC ${update.version} is available.`}</p>
       {#if !current?.busy}
+        {#if update.returnToStable && !current?.handoff}
+          <p class="md-supporting-text">You’ll keep your installed cheats and get stable updates. Switching back removes features that are still in beta.</p>
+        {/if}
         <p class="md-supporting-text" role="status" aria-live="polite">{guidance}</p>
       {/if}
     </div>

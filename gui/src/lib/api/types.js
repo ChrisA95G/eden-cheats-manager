@@ -24,6 +24,7 @@
 
 /**
  * @typedef {Object} AvailableUpdate
+ * @property {boolean} [returnToStable]
  * @property {string} version
  * @property {string} notes
  * @property {string} releaseUrl
@@ -44,6 +45,7 @@
  * @property {string} packageLibraryPath
  * @property {boolean} onboardingDone
  * @property {boolean} autoCheckUpdates
+ * @property {boolean} includeBetaUpdates
  */
 
 /**

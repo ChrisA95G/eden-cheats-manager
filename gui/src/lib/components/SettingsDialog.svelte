@@ -2,6 +2,8 @@
   import Icon from './ui/Icon.svelte';
   import Dialog from './ui/Dialog.svelte';
   import AppUpdate from './AppUpdate.svelte';
+  import AnnouncementHistory from './AnnouncementHistory.svelte';
+  import { version } from '../../../package.json';
   import { theme } from '../domain/theme.js';
 
   /** @typedef {import('../api/types.js').AppSettings} AppSettings */
@@ -35,7 +37,7 @@
    * @property {() => void | Promise<void>} [onretryandroid]
    * @property {() => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
-   * @property {() => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
+   * @property {(returnToStable?: boolean) => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
    * @property {import('../api/types.js').UpdateInstallation | null} [installation]
    * @property {(update: import('../api/types.js').AvailableUpdate) => void | Promise<void>} oninstallupdate
    */
@@ -73,6 +75,7 @@
       packageLibraryPath: value?.packageLibraryPath ?? '',
       onboardingDone: value?.onboardingDone ?? false,
       autoCheckUpdates: value?.autoCheckUpdates ?? true,
+      includeBetaUpdates: value?.includeBetaUpdates ?? false,
     };
   }
 
@@ -113,6 +116,7 @@
   let displayedError = $derived(localError || error);
   let busy = $derived(saving || submitting || Boolean(activeAction) || Boolean(pendingPicker) || installation?.busy);
   let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
+  let betaPreferenceChanged = $derived(draft.includeBetaUpdates !== settings.includeBetaUpdates);
   let availableUpdate = $derived(installation?.update ?? updateResult?.available);
 
   /** @param {unknown} cause */
@@ -186,12 +190,13 @@
     }
   }
 
-  async function checkUpdates() {
+  async function checkUpdates(returnToStable = false) {
     updateResult = null;
     const result = await runAction('app-update-check', async () => {
       if (!oncheckupdates) throw new Error('Update checking is unavailable.');
-      return oncheckupdates();
+      return oncheckupdates(returnToStable);
     });
+    if (result?.available && returnToStable) result.available.returnToStable = true;
     if (result) updateResult = result;
   }
 
@@ -231,7 +236,7 @@
   }
 </script>
 
-<Dialog {open} fullScreen title="Settings" onclose={requestClose}>
+<Dialog {open} fullScreen title="Settings" subtitle={`Installed version ${version}`} onclose={requestClose}>
   <form
     id="settings-form"
     class="settings-form"
@@ -526,46 +531,61 @@
       <div class="section-heading">
         <Icon name="download" size={24} />
         <div>
-          <h3 id="settings-updates-title">App updates</h3>
-          <p>Check for a newer stable version of EDC.</p>
+          <h3 id="settings-updates-title" tabindex="-1">App updates</h3>
+          <p>You choose whether to install an available update.</p>
         </div>
       </div>
       <label class="update-preference">
         <input type="checkbox" bind:checked={draft.autoCheckUpdates} disabled={busy} />
         Automatically check for updates when EDC opens
       </label>
+      <label class="update-preference">
+        <input type="checkbox" bind:checked={draft.includeBetaUpdates} disabled={busy} />
+        Include beta updates
+      </label>
       <button
         class="md-button md-button--outlined section-button"
         type="button"
-        disabled={busy}
-        onclick={checkUpdates}
+        disabled={busy || betaPreferenceChanged}
+        onclick={() => checkUpdates()}
       >
         {activeAction === 'app-update-check' ? 'Checking…' : 'Check for updates'}
       </button>
+      {#if /-beta\.[1-9]\d*$/.test(version) && !availableUpdate?.returnToStable}
+        <p class="md-supporting-text">If the beta is giving you trouble or you’re done testing, you can switch back to the stable release.</p>
+        <button class="md-button md-button--outlined section-button" type="button"
+          disabled={busy || settingsChanged} onclick={() => checkUpdates(true)}>Return to stable</button>
+        {#if settingsChanged}
+          <p class="md-supporting-text">Save or cancel your changes before returning to stable.</p>
+        {/if}
+      {/if}
       <div role="status" aria-live="polite" aria-atomic="true">
-        {#if activeAction === 'app-update-check'}
+        {#if betaPreferenceChanged}
+          <p class="action-result">Save your beta preference to check for updates.</p>
+        {:else if activeAction === 'app-update-check'}
           <p class="action-result">Checking for updates…</p>
-        {:else if updateResult}
-          <p class="action-result">Installed version: {updateResult.currentVersion}</p>
-          {#if !updateResult.available}
-            <p class="action-result">No newer stable release is available.</p>
-          {/if}
+        {:else if updateResult && !updateResult.available}
+          <p class="action-result">{settings.includeBetaUpdates ? 'No newer stable or beta release is available.' : 'No newer stable release is available.'}</p>
         {/if}
       </div>
-      {#if availableUpdate}
+      {#if availableUpdate && !betaPreferenceChanged}
         <AppUpdate update={availableUpdate} {installation} {platform}
           disabled={busy || settingsChanged} oninstall={oninstallupdate} />
         {#if settingsChanged && !installation?.busy}
           <p class="md-supporting-text">Save or cancel your settings changes before updating.</p>
         {/if}
       {/if}
-      {#if availableUpdate?.notes}
+      {#if availableUpdate?.notes && !betaPreferenceChanged}
         <details>
           <summary>Release notes</summary>
           <p class="update-notes">{availableUpdate.notes}</p>
         </details>
       {/if}
     </section>
+
+    {#if open}
+      <AnnouncementHistory {platform} />
+    {/if}
 
     {#if displayedError}
       <p class="dialog-error md-error-text" role="alert">{displayedError}</p>
@@ -618,7 +638,6 @@
     padding: 0 0 1.5rem;
     border-bottom:1px solid var(--md-sys-color-outline-variant);
   }
-  .settings-section:last-of-type { border-bottom:0; padding-bottom:0; }
 
   .section-heading {
     display: grid;
