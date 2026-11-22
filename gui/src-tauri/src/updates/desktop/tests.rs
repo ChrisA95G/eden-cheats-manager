@@ -33,6 +33,7 @@ impl Server {
             "linux-x86_64-appimage":{"url":format!("{url}/update.AppImage"),"signature":SIGNATURE}
         }});
         match case {
+            "stable return" => manifest["version"] = json!("0.2.3"),
             "version changed" => manifest["version"] = json!("0.4.0"),
             "different installer" => {
                 manifest["platforms"]["linux-x86_64-appimage"]["url"] =
@@ -111,7 +112,7 @@ fn desktop_updates_verify_before_installing_and_allow_retry_after_failure() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .build({
             let mut context = mock_context(noop_assets());
-            context.package_info_mut().version = "0.2.1".parse().unwrap();
+            context.package_info_mut().version = "0.3.0-beta.1".parse().unwrap();
             context
                 .config_mut()
                 .plugins
@@ -129,6 +130,7 @@ fn desktop_updates_verify_before_installing_and_allow_retry_after_failure() {
         "wrong size",
         "download failed",
         "success",
+        "stable return",
     ] {
         let server = Server::new(case);
         let directory = tempfile::Builder::new()
@@ -141,7 +143,12 @@ fn desktop_updates_verify_before_installing_and_allow_retry_after_failure() {
         std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
         std::fs::write(&settings, b"retained settings").unwrap();
         let selected = AvailableUpdate {
-            version: "0.3.0".into(),
+            version: if case == "stable return" {
+                "0.2.3"
+            } else {
+                "0.3.0"
+            }
+            .into(),
             notes: String::new(),
             release_url: String::new(),
             download: UpdateDownload {
@@ -151,15 +158,21 @@ fn desktop_updates_verify_before_installing_and_allow_retry_after_failure() {
             },
         };
         let build_updater = || {
-            app.updater_builder()
+            let builder = app
+                .updater_builder()
                 .target("linux-x86_64-appimage")
                 .endpoints(vec![format!("{}/latest.json", server.url).parse().unwrap()])
                 .unwrap()
                 .executable_path(&executable)
                 .no_proxy()
-                .timeout(Duration::from_secs(3))
-                .build()
-                .unwrap()
+                .timeout(Duration::from_secs(3));
+            if case == "stable return" {
+                builder.version_comparator(stable_return_comparator(selected.version.clone()))
+            } else {
+                builder
+            }
+            .build()
+            .unwrap()
         };
         if case == "success" {
             let guard = UPDATE_LOCK.try_lock().unwrap();
@@ -186,7 +199,7 @@ fn desktop_updates_verify_before_installing_and_allow_retry_after_failure() {
         let events = events.into_inner().unwrap();
         assert_eq!(events[0]["event"], "checking");
         let installed = std::fs::read(&executable).unwrap();
-        if case == "success" {
+        if matches!(case, "success" | "stable return") {
             result.unwrap();
             assert_eq!(installed, BYTES);
             assert_eq!(events.last().unwrap()["event"], "installing");

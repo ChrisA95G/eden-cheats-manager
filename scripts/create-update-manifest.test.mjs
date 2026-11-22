@@ -38,7 +38,7 @@ function fixture(t, version = '0.3.0') {
   return {directory, release, assets, files, output, run};
 }
 
-for (const version of ['0.3.0', '0.3.0-rc.1']) {
+for (const version of ['0.3.0', '0.3.0-beta.1', '0.3.0-rc.1']) {
   test(`maps each installer to its own signature and fixed release URL (${version})`, t => {
     const f = fixture(t, version);
     const result = f.run();

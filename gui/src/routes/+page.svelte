@@ -5,6 +5,7 @@
   import { cheatLibraryGroups, createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
   import SetupScreen from '$lib/components/SetupScreen.svelte';
   import SettingsDialog from '$lib/components/SettingsDialog.svelte';
+  import WhatsNewDialog from '$lib/components/WhatsNewDialog.svelte';
   import AppUpdate from '$lib/components/AppUpdate.svelte';
   import LibraryPane from '$lib/components/LibraryPane.svelte';
   import GameWorkspace from '$lib/components/GameWorkspace.svelte';
@@ -27,6 +28,7 @@
   let selectedTitleId = $state('');
   let pane = $state('library');
   let settingsOpen = $state(false);
+  let announcementDismissed = $state(false);
   let startupUpdate = $state(/** @type {import('$lib/api/types.js').AvailableUpdate|null} */ (null));
   let installation = $state(/** @type {import('$lib/api/types.js').UpdateInstallation|null} */ (null));
   let visibleUpdate = $derived(installation?.update ?? startupUpdate);
@@ -34,6 +36,8 @@
   let contextRevision = $state(0);
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
   let ready = $derived(!!settings && (platform === 'android' ? edenAccess?.ready === true : settings.onboardingDone));
+  let startupUpdateChannel = $derived(ready && !loading && settings?.autoCheckUpdates
+    ? (settings.includeBetaUpdates ? 'beta' : 'stable') : null);
   let libraryGames = $derived(cheatLibraryGroups(library.games));
   let game = $derived(libraryGames.find(group =>
     normalizeTitleId(group.baseTitleId) === normalizeTitleId(selectedTitleId)) ?? null);
@@ -72,6 +76,10 @@
   }
   function backToLibrary() { if (pane === 'workspace') history.back(); }
   function openSettings() { if (!saving) settingsOpen = true; }
+  function openUpdateSettings() {
+    openSettings();
+    requestAnimationFrame(() => document.getElementById('settings-updates-title')?.focus());
+  }
   /** @param {PopStateEvent} event */
   async function navigateBack(event) {
     if (event.state?.ecm !== 1) return;
@@ -112,20 +120,20 @@
     await refreshLibrary();
   }
   async function checkStartupUpdate() {
-    if (updateCheckRevision) return;
     const revision = ++updateCheckRevision;
     try {
       const result = await backend.checkAppUpdate();
       if (alive && revision === updateCheckRevision && settings?.autoCheckUpdates) startupUpdate = result.available;
     } catch { /* Background checks must not interrupt the library when offline. */ }
   }
-  function checkUpdates() {
+  /** @param {boolean} [returnToStable] */
+  function checkUpdates(returnToStable = false) {
     updateCheckRevision++;
     if (!installation?.busy) {
       installation = null;
       startupUpdate = null;
     }
-    return backend.checkAppUpdate();
+    return backend.checkAppUpdate(returnToStable);
   }
   /** @param {import('$lib/api/types.js').AvailableUpdate} update */
   async function installUpdate(update) {
@@ -137,15 +145,13 @@
       if (alive && revision === installRevision && installation?.busy) installation.progress = progress;
     };
     try {
-      if (platform === 'android') {
-        const handoff = await backend.installAndroidUpdate(update.version, reportProgress);
-        if (alive && revision === installRevision && installation) {
-          installation.handoff = handoff;
-          installation.busy = false;
-        }
+      const handoff = await backend.installAppUpdate(platform, update, reportProgress);
+      if (!alive || revision !== installRevision || !installation) return;
+      if (handoff) {
+        installation.handoff = handoff;
+        installation.busy = false;
       } else {
-        await backend.installDesktopUpdate(update.version, reportProgress);
-        if (alive && revision === installRevision && installation) installation.progress = {event:'restarting'};
+        installation.progress = {event:'restarting'};
       }
     } catch (cause) {
       if (alive && revision === installRevision && installation) {
@@ -160,7 +166,8 @@
     installation = null;
   }
   $effect(()=>{
-    if (ready && !loading && settings?.autoCheckUpdates) untrack(()=>{void checkStartupUpdate();});
+    if (startupUpdateChannel) untrack(()=>{void checkStartupUpdate();});
+    return () => { updateCheckRevision++; };
   });
   $effect(()=>{
     if (ready && !loading) untrack(()=>{void startLibrary();});
@@ -225,8 +232,10 @@
     try {
       await backend.saveSettings(next);
       if (!alive) return;
+      const betaChanged = next.includeBetaUpdates !== settings?.includeBetaUpdates;
+      if (betaChanged && !installation?.busy) installation = null;
+      if (betaChanged || !next.autoCheckUpdates) startupUpdate = null;
       settings = next; contextRevision++; settingsOpen = false;
-      if (!next.autoCheckUpdates) startupUpdate = null;
       notify({tone:'success',message:'Settings saved.'});
       if (started) void refreshLibrary();
     } finally { saving = false; }
@@ -289,6 +298,9 @@
         onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
     </main>
   </div>
+  {#if !announcementDismissed}
+    <WhatsNewDialog {platform} onupdatesettings={openUpdateSettings} ondismiss={() => announcementDismissed = true} />
+  {/if}
   <SettingsDialog open={settingsOpen} {platform} {settings} {edenAccess} {packageStatus} {gameLibraryStatus}
     oncheckupdates={checkUpdates} {installation} oninstallupdate={installUpdate}
     {pendingPicker} {saving} error={statusError} onsave={save} onclose={()=>settingsOpen=false}

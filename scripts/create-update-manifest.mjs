@@ -8,7 +8,7 @@ const { version } = JSON.parse(readFileSync(new URL('../gui/src-tauri/tauri.conf
 const release = JSON.parse(readFileSync(releaseFile, 'utf8'));
 const repository = process.env.GH_REPO;
 assert.match(repository ?? '', /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9][A-Za-z0-9_.-]*$/, 'GH_REPO must be owner/repository');
-assert.match(version, /^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$/);
+assert.match(version, /^\d+\.\d+\.\d+(?:-(?:beta|rc)\.[1-9]\d*)?$/);
 assert.equal(release.tagName, `v${version}`, 'Release tag must match the application version');
 assert.equal(release.isDraft, true, 'Update metadata must be generated for a draft release');
 assert.ok(release.body == null || typeof release.body === 'string', 'Release notes must be text');
