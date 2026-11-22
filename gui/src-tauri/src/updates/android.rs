@@ -156,10 +156,11 @@ fn download_and_install(
 pub async fn install_android_update(
     app: tauri::AppHandle,
     version: String,
+    return_to_stable: Option<bool>,
     on_progress: tauri::ipc::Channel<UpdateProgress>,
 ) -> Result<AndroidInstallResult, String> {
     let _ = on_progress.send(UpdateProgress::Checking);
-    let selected = super::check_app_update(app)
+    let selected = super::check_app_update(app, return_to_stable)
         .await?
         .available
         .ok_or("No newer update is available.")?;

@@ -269,6 +269,25 @@ fn prerelease(tag: &str) -> serde_json::Value {
 }
 
 #[test]
+fn android_rollback_uses_the_stable_apk_attached_to_the_installed_beta() {
+    let mut beta: Release = serde_json::from_value(prerelease("v0.3.0-beta.1")).unwrap();
+    let stable = Version::new(0, 2, 3);
+    assert!(android_return_package(&beta, &stable).is_err());
+    let name = "eden-cheats-manager-stable-0.2.3.apk";
+    beta.assets.push(ReleaseAsset {
+        name: name.into(),
+        size: 123,
+        state: "uploaded".into(),
+    });
+    let update = android_return_package(&beta, &stable).unwrap();
+    assert_eq!(update.version, "0.2.3");
+    assert_eq!(
+        update.download.url,
+        format!("{RELEASES_URL}/download/v0.3.0-beta.1/{name}")
+    );
+}
+
+#[test]
 fn beta_opt_in_selects_the_highest_eligible_version_across_pages() {
     let mut draft = prerelease("v0.4.0-beta.1");
     draft["draft"] = json!(true);

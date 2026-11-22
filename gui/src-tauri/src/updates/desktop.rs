@@ -64,6 +64,7 @@ async fn download_and_install(
 pub async fn install_desktop_update(
     app: AppHandle,
     version: String,
+    return_to_stable: Option<bool>,
     on_progress: Channel<UpdateProgress>,
 ) -> Result<(), String> {
     let target = UpdateTarget::for_installation(
@@ -71,7 +72,7 @@ pub async fn install_desktop_update(
         std::env::consts::ARCH,
         tauri::utils::platform::bundle_type(),
     )?;
-    let selected = check_app_update(app.clone())
+    let selected = check_app_update(app.clone(), return_to_stable)
         .await?
         .available
         .ok_or("No newer update is available.")?;
