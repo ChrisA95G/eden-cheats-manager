@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "edc-feedback",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": false },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "edc-feedback"
+    }
+  ]
+}

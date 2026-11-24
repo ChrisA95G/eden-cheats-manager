@@ -1,0 +1,16 @@
+{
+  "name": "edc-feedback-worker",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "db:local": "wrangler d1 migrations apply edc-feedback --local",
+    "dev": "wrangler dev --local --ip 127.0.0.1",
+    "inbox": "wrangler d1 execute edc-feedback --local --command \"SELECT id, message FROM feedback ORDER BY id DESC LIMIT 50\" --json",
+    "test": "node --test worker.test.mjs"
+  },
+  "devDependencies": {
+    "miniflare": "5.20261001.0-alpha",
+    "wrangler": "4.147.0"
+  }
+}
