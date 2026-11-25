@@ -129,6 +129,11 @@ export async function selectEdenLoadDirectory() {
   await invoke('select_eden_load_directory');
 }
 
+/** A load folder on shared storage for Peanuts Native (Android only). */
+export async function selectPeanutsLoadDirectory() {
+  await invoke('select_peanuts_load_directory');
+}
+
 /** @returns {Promise<string>} */
 export async function testEdenLoadDirectory() {
   return /** @type {string} */ (await invoke('test_eden_load_directory'));

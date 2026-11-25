@@ -58,6 +58,7 @@
  * @property {boolean} writable
  * @property {boolean} ready
  * @property {string} message
+ * @property {'eden' | 'peanuts' | ''} [target]
  */
 
 /**

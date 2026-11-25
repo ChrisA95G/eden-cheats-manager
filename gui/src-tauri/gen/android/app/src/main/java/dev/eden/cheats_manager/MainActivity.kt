@@ -37,6 +37,11 @@ class MainActivity : TauriActivity() {
         }
 
         @JvmStatic
+        fun selectPeanutsLoadDirectory() {
+            instance?.get()?.edenSafStorage?.selectPeanutsLoadDirectory()
+        }
+
+        @JvmStatic
         fun getEdenLoadAccessStatus(): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"

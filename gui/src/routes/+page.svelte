@@ -22,7 +22,7 @@
   let gameLibraryStatus = $state(/** @type {import('$lib/api/types.js').GameLibraryStatus|null} */ (null));
   let statusError = $state('');
   let checkingStatus = $state(false);
-  let pendingPicker = $state(/** @type {{id:number,kind:'edenLoad'|'prodKeys'|'packageLibrary'|'singlePackage'}|null} */ (null));
+  let pendingPicker = $state(/** @type {{id:number,kind:'edenLoad'|'peanutsLoad'|'prodKeys'|'packageLibrary'|'singlePackage'}|null} */ (null));
   let library = $state(createLibraryState());
   let refreshPhase = $state(/** @type {'idle'|'loading'|'error'} */ ('idle'));
   let selectedTitleId = $state('');
@@ -209,12 +209,12 @@
       }
     },250);
   }
-  /** @param {'edenLoad'|'prodKeys'|'packageLibrary'|'singlePackage'} kind */
+  /** @param {'edenLoad'|'peanutsLoad'|'prodKeys'|'packageLibrary'|'singlePackage'} kind */
   async function pickAndroid(kind) {
     if (pendingPicker) return;
     const picker = {id:++pickerId,kind}; pendingPicker = picker;
     try {
-      const actions = {edenLoad:backend.selectEdenLoadDirectory,prodKeys:backend.selectProdKeysDocument,
+      const actions = {edenLoad:backend.selectEdenLoadDirectory,peanutsLoad:backend.selectPeanutsLoadDirectory,prodKeys:backend.selectProdKeysDocument,
         packageLibrary:backend.selectGameLibraryDirectory,singlePackage:backend.selectGamePackageDocument};
       await actions[kind]();
     } catch (cause) { if (pendingPicker?.id === picker.id) pendingPicker=null; throw cause; }
@@ -279,6 +279,7 @@
 {:else if !ready}
   <SetupScreen {platform} {settings} {detectedPcLoadDir} {edenAccess} busy={saving || checkingStatus || !!pendingPicker}
     error={statusError} onsubmit={save} onpickdesktop={pickDesktop} onpickandroid={()=>pickAndroid('edenLoad')}
+    onpickpeanuts={()=>pickAndroid('peanutsLoad')}
     onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
 {:else}
   <div class="app-frame">

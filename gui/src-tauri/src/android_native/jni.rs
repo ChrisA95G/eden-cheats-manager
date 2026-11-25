@@ -23,6 +23,7 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
         ("getAppUpdateDownloadPath", "()Ljava/lang/String;"),
         ("installAppUpdate", "(Ljava/lang/String;)Ljava/lang/String;"),
         ("selectEdenLoadDirectory", "()V"),
+        ("selectPeanutsLoadDirectory", "()V"),
         ("getEdenLoadAccessStatus", "()Ljava/lang/String;"),
         ("safListDirectory", "(Ljava/lang/String;)Ljava/lang/String;"),
         (
@@ -287,4 +288,9 @@ pub(super) fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), 
 #[cfg(target_os = "android")]
 pub(super) fn select_eden_load_directory_from_activity() -> Result<(), String> {
     jni_noarg_void_call("selectEdenLoadDirectory")
+}
+
+#[cfg(target_os = "android")]
+pub(super) fn select_peanuts_load_directory_from_activity() -> Result<(), String> {
+    jni_noarg_void_call("selectPeanutsLoadDirectory")
 }

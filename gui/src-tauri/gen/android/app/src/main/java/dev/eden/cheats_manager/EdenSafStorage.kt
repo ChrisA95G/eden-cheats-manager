@@ -13,6 +13,16 @@ internal class EdenSafStorage(private val activity: MainActivity) {
     companion object {
         private const val SAF_PREFS = "eden_saf"
         private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
+        /** The load folder's document ID when it is a child of the granted tree (the Peanuts Native folder); absent when the tree itself is load. */
+        private const val PREF_LOAD_DOCUMENT_ID = "load_document_id"
+        /** "eden" (Eden's own load) or "peanuts" (a load folder on shared storage that Peanuts Native imports from). */
+        private const val PREF_TARGET = "load_target"
+        const val TARGET_EDEN = "eden"
+        const val TARGET_PEANUTS = "peanuts"
+        /** Where the Peanuts Native picker opens: Internal storage/PeanutsNative, when it exists. */
+        private val PEANUTS_INITIAL_URI: Uri =
+            Uri.parse("content://com.android.externalstorage.documents/document/primary%3APeanutsNative")
+        const val PEANUTS_FOLDER_HINT = "Internal storage/PeanutsNative/load"
     }
 
     private data class SafDocument(
@@ -36,46 +46,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             }
 
             try {
-                val rootUri = resolveLoadDirectory(uri)
-                queryChildren(rootUri)
-                check(documentSupportsCreate(rootUri)) {
-                    "The selected load folder does not allow cheat files to be created."
-                }
-                val flags =
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                val previousUri = preferences()
-                    .getString(PREF_EDEN_LOAD_URI, null)
-                    ?.let(Uri::parse)
-
-                contentResolver.takePersistableUriPermission(uri, flags)
-                val saved = preferences()
-                    .edit()
-                    .putString(PREF_EDEN_LOAD_URI, uri.toString())
-                    .commit()
-                if (!saved) {
-                    if (previousUri != uri) {
-                        contentResolver.releasePersistableUriPermission(uri, flags)
-                    }
-                    throw IllegalStateException("Could not save Eden SAF directory")
-                }
-
-                if (previousUri != null && previousUri != uri) {
-                    try {
-                        contentResolver.releasePersistableUriPermission(previousUri, flags)
-                    } catch (error: SecurityException) {
-                        android.util.Log.w(
-                            "CheatsManager",
-                            "Could not release the previous Eden SAF permission",
-                            error
-                        )
-                    }
-                }
-
-                android.util.Log.i(
-                    "CheatsManager",
-                    "Eden SAF directory permission saved"
-                )
+                persistSelection(uri, null, TARGET_EDEN)
             } catch (error: Exception) {
                 lastSelectionError = error.message ?: "Could not save access to the selected load folder."
                 android.util.Log.e(
@@ -86,9 +57,123 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             }
         }
 
+    /**
+     * The Peanuts Native folder: any folder on shared storage (PeanutsNative is suggested). A folder named load is used as it is; any other gets a load
+     * folder inside it, made now when missing. Peanuts Native imports from it (game › Mods & Cheats › Add › A folder), which Eden's own load in
+     * Android/data cannot be read for.
+     */
+    private val peanutsLoadPicker =
+        activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            lastSelectionError = ""
+            if (uri == null) {
+                android.util.Log.i("CheatsManager", "Peanuts Native folder selection cancelled")
+                return@registerForActivityResult
+            }
+
+            try {
+                require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
+                    "Select a folder on this device using the folder picker."
+                }
+                val treeDocument = DocumentsContract.buildDocumentUriUsingTree(
+                    uri,
+                    DocumentsContract.getTreeDocumentId(uri)
+                )
+                val loadDocumentId = if (displayName(treeDocument) == "load") {
+                    null
+                } else {
+                    val existing = queryChildren(treeDocument).firstOrNull { it.name == "load" }
+                    check(existing == null || existing.directory) {
+                        "The selected folder has a file named load. Pick another folder."
+                    }
+                    val load = existing?.uri ?: run {
+                        check(documentSupportsCreate(treeDocument)) {
+                            "The selected folder does not allow a load folder to be created in it."
+                        }
+                        DocumentsContract.createDocument(
+                            contentResolver,
+                            treeDocument,
+                            DocumentsContract.Document.MIME_TYPE_DIR,
+                            "load"
+                        ) ?: throw IllegalStateException("Could not create the load folder.")
+                    }
+                    DocumentsContract.getDocumentId(load)
+                }
+                persistSelection(uri, loadDocumentId, TARGET_PEANUTS)
+            } catch (error: Exception) {
+                lastSelectionError = error.message ?: "Could not save access to the selected folder."
+                android.util.Log.e(
+                    "CheatsManager",
+                    "Could not persist the Peanuts Native folder permission",
+                    error
+                )
+            }
+        }
+
+    /** The grant kept and the load folder remembered; the previous grant released when it was another tree. */
+    private fun persistSelection(uri: Uri, loadDocumentId: String?, target: String) {
+        val rootUri = resolveLoadDirectory(uri, loadDocumentId)
+        queryChildren(rootUri)
+        check(documentSupportsCreate(rootUri)) {
+            "The selected load folder does not allow cheat files to be created."
+        }
+        val flags =
+            Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+        val previousUri = preferences()
+            .getString(PREF_EDEN_LOAD_URI, null)
+            ?.let(Uri::parse)
+
+        contentResolver.takePersistableUriPermission(uri, flags)
+        val editor = preferences()
+            .edit()
+            .putString(PREF_EDEN_LOAD_URI, uri.toString())
+            .putString(PREF_TARGET, target)
+        if (loadDocumentId == null) {
+            editor.remove(PREF_LOAD_DOCUMENT_ID)
+        } else {
+            editor.putString(PREF_LOAD_DOCUMENT_ID, loadDocumentId)
+        }
+        if (!editor.commit()) {
+            if (previousUri != uri) {
+                contentResolver.releasePersistableUriPermission(uri, flags)
+            }
+            throw IllegalStateException("Could not save the load folder")
+        }
+
+        if (previousUri != null && previousUri != uri) {
+            try {
+                contentResolver.releasePersistableUriPermission(previousUri, flags)
+            } catch (error: SecurityException) {
+                android.util.Log.w(
+                    "CheatsManager",
+                    "Could not release the previous SAF permission",
+                    error
+                )
+            }
+        }
+
+        android.util.Log.i("CheatsManager", "Load folder permission saved ($target)")
+    }
+
     fun selectLoadDirectory() {
         activity.runOnUiThread {
             edenLoadPicker.launch(null)
+        }
+    }
+
+    fun selectPeanutsLoadDirectory() {
+        activity.runOnUiThread {
+            peanutsLoadPicker.launch(PEANUTS_INITIAL_URI)
+        }
+    }
+
+    private fun target(): String =
+        if (preferences().getString(PREF_TARGET, TARGET_EDEN) == TARGET_PEANUTS) TARGET_PEANUTS else TARGET_EDEN
+
+    private fun displayName(documentUri: Uri): String? {
+        val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        return contentResolver.query(documentUri, projection, null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
         }
     }
 
@@ -136,7 +221,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         }
 
         val rootUri = try {
-            resolveLoadDirectory(treeUri)
+            resolveLoadDirectory(treeUri, preferences().getString(PREF_LOAD_DOCUMENT_ID, null))
         } catch (error: Exception) {
             return accessStatusJson(
                 selected = true,
@@ -155,7 +240,11 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             false
         }
         val writable = readable && documentSupportsCreate(rootUri)
+        val peanuts = target() == TARGET_PEANUTS
         val message = when {
+            !readable && peanuts -> "The Peanuts Native load folder could not be read. Select it again."
+            !writable && peanuts -> "The Peanuts Native load folder does not allow cheat files to be created."
+            peanuts -> "The Peanuts Native load folder is ready. In Peanuts Native, open the game › Mods & Cheats › Add › A folder, and pick this load folder."
             !readable -> "Eden's load directory could not be read. Select it again."
             !writable -> "Eden's load directory does not allow cheat files to be created."
             else -> "Eden load access is ready."
@@ -248,15 +337,16 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         if (permission?.isReadPermission != true || permission.isWritePermission != true) {
             throw IllegalStateException("Eden load directory permission is no longer available")
         }
-        return resolveLoadDirectory(treeUri)
+        return resolveLoadDirectory(treeUri, preferences().getString(PREF_LOAD_DOCUMENT_ID, null))
     }
 
-    private fun resolveLoadDirectory(treeUri: Uri): Uri {
+    /** The load folder: the tree itself, or its child loadDocumentId (the Peanuts Native folder's load); either must be a directory named load. */
+    private fun resolveLoadDirectory(treeUri: Uri, loadDocumentId: String? = null): Uri {
         require(treeUri.scheme == "content" && !treeUri.authority.isNullOrBlank() &&
             DocumentsContract.isTreeUri(treeUri)) {
             "Select your Eden installation's load folder using the folder picker."
         }
-        val documentId = DocumentsContract.getTreeDocumentId(treeUri)
+        val documentId = loadDocumentId ?: DocumentsContract.getTreeDocumentId(treeUri)
         require(documentId.isNotBlank()) { "The selected folder has no document ID." }
         val rootUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId)
         val projection = arrayOf(
@@ -312,6 +402,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             validLocation && readPermission && writePermission && readable && writable
         )
         .put("message", lastSelectionError.ifEmpty { message })
+        .put("target", if (selected) target() else "")
         .toString()
 
     private fun pathSegments(relativePath: String): List<String> {

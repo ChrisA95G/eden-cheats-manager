@@ -13,11 +13,12 @@
   /** @typedef {import('../api/types.js').PackageDiscoveryStatus} PackageDiscoveryStatus */
   /** @typedef {import('../api/types.js').Platform} Platform */
   /** @typedef {'edenLoad' | 'prodKeys' | 'packageLibrary'} SettingsPickerKind */
+  /** @typedef {SettingsPickerKind | 'peanutsLoad'} AndroidPickerKind */
 
   /**
    * @typedef {Object} PendingPicker
    * @property {number} id
-   * @property {'edenLoad' | 'prodKeys' | 'packageLibrary' | 'singlePackage'} kind
+   * @property {'edenLoad' | 'peanutsLoad' | 'prodKeys' | 'packageLibrary' | 'singlePackage'} kind
    */
 
   /**
@@ -34,7 +35,7 @@
    * @property {(settings: AppSettings) => void | Promise<void>} [onsave]
    * @property {() => void} onclose
    * @property {(kind: SettingsPickerKind, currentPath: string) => string | null | Promise<string | null>} [onpickdesktop]
-   * @property {(kind: SettingsPickerKind) => void | Promise<void>} [onpickandroid]
+   * @property {(kind: AndroidPickerKind) => void | Promise<void>} [onpickandroid]
    * @property {() => void | Promise<void>} [onretryandroid]
    * @property {() => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
@@ -156,7 +157,7 @@
     if (typeof selected === 'string' && selected) draft[field] = selected;
   }
 
-  /** @param {SettingsPickerKind} kind */
+  /** @param {AndroidPickerKind} kind */
   async function pickAndroid(kind) {
     await runAction(`android-${kind}`, async () => {
       if (!onpickandroid) throw new Error('The Android picker is unavailable.');
@@ -372,7 +373,7 @@
           <Icon name="folder" size={24} />
           <div>
             <h3 id="settings-android-storage-title">Eden storage</h3>
-            <p>Read and write access to Eden → load.</p>
+            <p>{edenAccess?.target === 'peanuts' ? 'Read and write access to the Peanuts Native load folder.' : 'Read and write access to Eden → load.'}</p>
           </div>
         </div>
 
@@ -381,7 +382,7 @@
             <Icon name={edenAccess?.ready ? 'check' : 'warning'} size={20} />
           </span>
           <div class="status-copy">
-            <strong>{edenAccess?.ready ? 'Eden access ready' : 'Eden access required'}</strong>
+            <strong>{edenAccess?.ready ? (edenAccess?.target === 'peanuts' ? 'Peanuts Native folder ready' : 'Eden access ready') : 'Eden access required'}</strong>
             <span>{edenAccess?.message ?? 'Eden access has not been checked.'}</span>
           </div>
           <button
@@ -391,6 +392,24 @@
             onclick={() => pickAndroid('edenLoad')}
           >
             {pendingPicker?.kind === 'edenLoad' ? 'Waiting…' : 'Select folder'}
+          </button>
+        </div>
+
+        <div class="access-entry">
+          <span class:ready={edenAccess?.ready && edenAccess?.target === 'peanuts'} class="status-icon" aria-hidden="true">
+            <Icon name="folder" size={20} />
+          </span>
+          <div class="status-copy">
+            <strong>Peanuts Native</strong>
+            <span>Install cheats into PeanutsNative/load on internal storage, then import them in Peanuts Native: the game › Mods &amp; Cheats › Add › A folder.</span>
+          </div>
+          <button
+            class="md-button md-button--outlined status-action"
+            type="button"
+            disabled={busy || pendingPicker?.kind === 'peanutsLoad'}
+            onclick={() => pickAndroid('peanutsLoad')}
+          >
+            {pendingPicker?.kind === 'peanutsLoad' ? 'Waiting…' : 'Use for Peanuts'}
           </button>
         </div>
 

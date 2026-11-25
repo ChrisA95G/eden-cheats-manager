@@ -18,6 +18,7 @@
    * @property {(settings: AppSettings) => void | Promise<void>} [onsubmit]
    * @property {(kind: DesktopPickerKind, currentPath: string) => string | null | Promise<string | null>} [onpickdesktop]
    * @property {() => void | Promise<void>} [onpickandroid]
+   * @property {() => void | Promise<void>} [onpickpeanuts]
    * @property {() => void | Promise<void>} [onretryandroid]
    */
   /** @type {Props} */
@@ -31,8 +32,11 @@
     onsubmit,
     onpickdesktop,
     onpickandroid,
+    onpickpeanuts,
     onretryandroid,
   } = $props();
+
+  const peanutsTarget = $derived(edenAccess?.target === 'peanuts');
 
   const initialSettings = untrack(() => settings);
   const initialDetectedLoadDir = untrack(() => detectedPcLoadDir);
@@ -126,6 +130,13 @@
     await runAction('android-picker', async () => {
       if (!onpickandroid) throw new Error('The Android folder picker is unavailable.');
       await onpickandroid();
+    });
+  }
+
+  async function pickPeanuts() {
+    await runAction('android-peanuts', async () => {
+      if (!onpickpeanuts) throw new Error('The Android folder picker is unavailable.');
+      await onpickpeanuts();
     });
   }
 
@@ -315,7 +326,7 @@
             <Icon name={androidReady ? 'check' : 'folder'} size={24} />
           </span>
           <div>
-            <h2>{androidReady ? 'Eden storage is ready' : 'Eden storage access required'}</h2>
+            <h2>{androidReady ? (peanutsTarget ? 'Peanuts Native folder is ready' : 'Eden storage is ready') : 'Eden storage access required'}</h2>
             <p>{edenAccess?.message || 'Select Eden → load in Android’s folder picker.'}</p>
           </div>
         </div>
@@ -326,12 +337,21 @@
             <li>Open the folder picker and choose the storage for the <strong>Eden build you use</strong>. Its name may differ for nightly or renamed builds.</li>
             <li>Open <strong>load</strong>, then confirm with <strong>Use this folder</strong>.</li>
           </ol>
+          <h2>Using Peanuts Native instead</h2>
+          <ol>
+            <li>Tap <strong>Folder for Peanuts Native</strong>. In the picker, open Internal storage, create a folder named <strong>PeanutsNative</strong> (or open it), then confirm with <strong>Use this folder</strong>. EDC makes a <strong>load</strong> folder inside it.</li>
+            <li>Install cheats as usual. In Peanuts Native, open the game › <strong>Mods &amp; Cheats</strong> › <strong>Add</strong> › <strong>A folder</strong>, and pick <strong>PeanutsNative/load</strong>. Do this again after installing more cheats.</li>
+          </ol>
         </div>
 
         <div class="android-actions">
           <button class="md-button md-button--filled" type="button" disabled={componentBusy} onclick={pickAndroid}>
             <Icon name="folder" size={20} />
-            {androidReady ? 'Choose again' : 'Select Eden → load'}
+            {androidReady && !peanutsTarget ? 'Choose again' : 'Select Eden → load'}
+          </button>
+          <button class="md-button md-button--outlined" type="button" disabled={componentBusy} onclick={pickPeanuts}>
+            <Icon name="folder" size={20} />
+            {androidReady && peanutsTarget ? 'Choose the Peanuts folder again' : 'Folder for Peanuts Native'}
           </button>
           <button class="md-button md-button--outlined" type="button" disabled={componentBusy} onclick={retryAndroid}>
             <Icon name="refresh" size={20} />
