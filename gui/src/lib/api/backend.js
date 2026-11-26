@@ -72,6 +72,16 @@ export async function saveSettings(settings) {
   await invoke('save_settings', { settings });
 }
 
+/** @returns {Promise<boolean>} */
+export function feedbackEnabled() {
+  return invoke('feedback_enabled');
+}
+
+/** @param {string} message @returns {Promise<void>} */
+export function sendFeedback(message) {
+  return invoke('send_feedback', { message });
+}
+
 /** @param {boolean} [returnToStable] @returns {Promise<import('./types.js').AppUpdateCheck>} */
 export function checkAppUpdate(returnToStable = false) {
   return invoke('check_app_update', { returnToStable });

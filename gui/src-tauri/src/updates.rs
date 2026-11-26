@@ -110,7 +110,7 @@ impl Release {
     }
 }
 
-fn is_beta(version: &Version) -> bool {
+pub(crate) fn is_beta(version: &Version) -> bool {
     version
         .pre
         .as_str()

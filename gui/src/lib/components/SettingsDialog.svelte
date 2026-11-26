@@ -3,6 +3,7 @@
   import Dialog from './ui/Dialog.svelte';
   import AppUpdate from './AppUpdate.svelte';
   import AnnouncementHistory from './AnnouncementHistory.svelte';
+  import FeedbackForm from './FeedbackForm.svelte';
   import { version } from '../../../package.json';
   import { theme } from '../domain/theme.js';
 
@@ -591,6 +592,7 @@
       <p class="dialog-error md-error-text" role="alert">{displayedError}</p>
     {/if}
   </form>
+  <FeedbackForm />
 
   {#snippet actions()}
     <button class="md-button md-button--text" type="button" onclick={requestClose}>

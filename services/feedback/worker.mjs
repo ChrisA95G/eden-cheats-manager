@@ -30,7 +30,8 @@ async function readMessage(body) {
 
 export default {
   async fetch(request, env) {
-    if (new URL(request.url).pathname !== '/v1/feedback') {
+    const path = new URL(request.url).pathname;
+    if (path !== '/v1/feedback') {
       return new Response(null, { status: 404 });
     }
     if (request.method !== 'POST') {
@@ -44,6 +45,12 @@ export default {
     if (message instanceof Response) return message;
 
     try {
+      const { success } = await env.FEEDBACK_LIMITER.limit({ key: path });
+      if (!success) {
+        return new Response('The inbox is busy. Try again in a minute.', {
+          status: 429, headers: { 'Retry-After': '60' },
+        });
+      }
       await env.DB.prepare('INSERT INTO feedback (message) VALUES (?)').bind(message).run();
     } catch {
       return new Response('The inbox is unavailable.', { status: 503 });

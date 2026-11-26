@@ -10,12 +10,16 @@ const url = 'http://localhost/v1/feedback';
 const config = JSON.parse(await readFile(new URL('wrangler.jsonc', import.meta.url), 'utf8'));
 const migration = await readFile(new URL('migrations/0001_feedback.sql', import.meta.url), 'utf8');
 
-function startWorker(directory) {
+function startWorker(directory, limit = config.ratelimits[0].simple.limit) {
+  const limiter = config.ratelimits[0];
   return new Miniflare(convertV4MiniflareOptions({
     modules: true,
     scriptPath: fileURLToPath(new URL(config.main, import.meta.url)),
     compatibilityDate: config.compatibility_date,
     d1Databases: { DB: config.d1_databases[0].database_name },
+    ratelimits: {
+      [limiter.name]: { namespace_id: limiter.namespace_id, simple: { ...limiter.simple, limit } },
+    },
     resourcePersistencePath: directory,
   }));
 }
@@ -79,4 +83,23 @@ test('validates input before writing and only acknowledges a successful insert',
   const boundary = 'é'.repeat(2048);
   assert.equal((await send(boundary)).status, 201);
   assert.deepEqual((await db.prepare('SELECT message FROM feedback').all()).results, [{ message: boundary }]);
+});
+
+test('valid submissions share a route limit and a rejected message never reaches D1', async t => {
+  const worker = startWorker(undefined, 1);
+  t.after(() => worker.dispose());
+  const db = await worker.getD1Database('DB');
+  await db.prepare(migration).run();
+  const submit = (address, body) => worker.dispatchFetch(address, {
+    method: 'POST', headers: { 'Content-Type': 'text/plain' }, body,
+  });
+
+  assert.equal((await submit(url, '  ')).status, 400);
+  assert.equal((await submit(url, 'first message')).status, 201);
+  const limited = await submit(url + '?source=beta', 'second message');
+  assert.equal(limited.status, 429);
+  assert.equal(limited.headers.get('Retry-After'), '60');
+  assert.deepEqual((await db.prepare('SELECT message FROM feedback').all()).results, [
+    { message: 'first message' },
+  ]);
 });

@@ -2,6 +2,7 @@ mod android_native;
 mod cheats;
 mod cheatslips;
 mod db;
+mod feedback;
 mod games;
 mod managed_library;
 mod package_library;
@@ -78,6 +79,8 @@ pub fn run() {
             settings::detect_pc_load_dir,
             settings::get_app_log_path,
             settings::get_platform,
+            feedback::feedback_enabled,
+            feedback::send_feedback,
             // local cheats lookup + custom cheats
             cheatslips::search_cheats,
             cheatslips::save_custom_cheat,

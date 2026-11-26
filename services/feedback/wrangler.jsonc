@@ -4,10 +4,36 @@
   "main": "worker.mjs",
   "compatibility_date": "2026-10-01",
   "observability": { "enabled": false },
+  "ratelimits": [
+    {
+      "name": "FEEDBACK_LIMITER",
+      "namespace_id": "14617001",
+      "simple": { "limit": 30, "period": 60 }
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "edc-feedback"
     }
-  ]
+  ],
+  "env": {
+    "beta": {
+      "workers_dev": true,
+      "ratelimits": [
+        {
+          "name": "FEEDBACK_LIMITER",
+          "namespace_id": "14617002",
+          "simple": { "limit": 30, "period": 60 }
+        }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "edc-feedback-beta",
+          "database_id": "a4895366-4b6d-412c-8248-ef0b93ff44c0"
+        }
+      ]
+    }
+  }
 }
