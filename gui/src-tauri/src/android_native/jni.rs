@@ -22,17 +22,19 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
     const METHODS: &[(&str, &str)] = &[
         ("getAppUpdateDownloadPath", "()Ljava/lang/String;"),
         ("installAppUpdate", "(Ljava/lang/String;)Ljava/lang/String;"),
-        ("selectEdenLoadDirectory", "()V"),
+        ("selectCheatInstallFolder", "()V"),
         ("getEdenLoadAccessStatus", "()Ljava/lang/String;"),
-        ("safListDirectory", "(Ljava/lang/String;)Ljava/lang/String;"),
         (
-            "safWriteTextFile",
+            "safListDirectory",
             "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
         ),
-        ("safDeleteFile", "(Ljava/lang/String;)Ljava/lang/String;"),
         (
-            "safRemoveEmptyDirectory",
-            "(Ljava/lang/String;)Ljava/lang/String;",
+            "safWriteTextFile",
+            "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
+        ),
+        (
+            "safDeleteFile",
+            "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
         ),
         ("selectProdKeysDocument", "()V"),
         ("selectGamePackageDocument", "()V"),
@@ -209,29 +211,44 @@ pub(super) fn jni_string_call(method: &str, value: &str) -> Result<String, Strin
 }
 
 #[cfg(target_os = "android")]
-fn jni_saf_write_call(relative_path: &str, content: &str) -> Result<String, String> {
+fn jni_saf_path_call(
+    method: &str,
+    relative_path: &str,
+    destination_id: Option<&str>,
+    write: Option<(&str, bool)>,
+) -> Result<String, String> {
     use ::jni::objects::{JObject, JString, JValue};
     with_main_class(|env, jcls| {
-        let path = env
-            .new_string(relative_path)
-            .map_err(|e| format!("JNI string: {e}"))?;
-        let content = env
-            .new_string(content)
-            .map_err(|e| format!("JNI string: {e}"))?;
-        let result = env
-            .call_static_method(
+        let path = env.new_string(relative_path).map_err(|e| e.to_string())?;
+        let destination = match destination_id {
+            Some(id) => JObject::from(env.new_string(id).map_err(|e| e.to_string())?),
+            None => JObject::null(),
+        };
+        let result = if let Some((content, replace)) = write {
+            let content = env.new_string(content).map_err(|e| e.to_string())?;
+            env.call_static_method(
                 jcls,
-                "safWriteTextFile",
-                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                method,
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)Ljava/lang/String;",
                 &[
-                    JValue::Object(&JObject::from(path)),
-                    JValue::Object(&JObject::from(content)),
+                    (&path).into(),
+                    (&content).into(),
+                    JValue::Object(&destination),
+                    JValue::Bool(replace.into()),
                 ],
             )
-            .map_err(|e| format!("JNI safWriteTextFile: {e}"))?;
+        } else {
+            env.call_static_method(
+                jcls,
+                method,
+                "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",
+                &[(&path).into(), JValue::Object(&destination)],
+            )
+        }
+        .map_err(|e| format!("JNI {method}: {e}"))?;
         let object = result.l().map_err(|e| format!("JNI object: {e}"))?;
         if object.is_null() {
-            return Err("safWriteTextFile returned null".into());
+            return Err(format!("{method} returned null"));
         }
         env.get_string(&JString::from(object))
             .map(|value| value.into())
@@ -249,14 +266,22 @@ pub(super) fn parse_saf_response(response: String) -> Result<String, String> {
 }
 
 #[cfg(target_os = "android")]
-pub(super) fn jni_saf_list_directory(relative_path: &str) -> Result<Vec<SafEntry>, String> {
-    let response = parse_saf_response(jni_string_call("safListDirectory", relative_path)?)?;
+pub(super) fn jni_saf_list_directory(
+    relative_path: &str,
+    destination_id: Option<&str>,
+) -> Result<Vec<SafEntry>, String> {
+    let response = parse_saf_response(jni_saf_path_call(
+        "safListDirectory",
+        relative_path,
+        destination_id,
+        None,
+    )?)?;
     serde_json::from_str(&response).map_err(|e| format!("Invalid SAF directory response: {e}"))
 }
 
 #[cfg(target_os = "android")]
-pub(super) fn jni_saf_write_text_file(relative_path: &str, content: &str) -> Result<(), String> {
-    let response = parse_saf_response(jni_saf_write_call(relative_path, content)?)?;
+fn saf_result(response: String) -> Result<(), String> {
+    let response = parse_saf_response(response)?;
     if response == "OK" {
         Ok(())
     } else {
@@ -265,26 +290,43 @@ pub(super) fn jni_saf_write_text_file(relative_path: &str, content: &str) -> Res
 }
 
 #[cfg(target_os = "android")]
-pub(super) fn jni_saf_delete_file(relative_path: &str) -> Result<(), String> {
-    let response = parse_saf_response(jni_string_call("safDeleteFile", relative_path)?)?;
-    if response == "OK" {
-        Ok(())
-    } else {
-        Err(format!("Unexpected SAF response: {response}"))
-    }
+pub(super) fn jni_saf_write_text_file(
+    relative_path: &str,
+    content: &str,
+    destination_id: &str,
+    replace: bool,
+) -> Result<(), String> {
+    saf_result(jni_saf_path_call(
+        "safWriteTextFile",
+        relative_path,
+        Some(destination_id),
+        Some((content, replace)),
+    )?)
 }
 
 #[cfg(target_os = "android")]
-pub(super) fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), String> {
-    let response = parse_saf_response(jni_string_call("safRemoveEmptyDirectory", relative_path)?)?;
-    if response == "OK" {
-        Ok(())
-    } else {
-        Err(format!("Unexpected SAF response: {response}"))
-    }
+pub(super) fn jni_saf_delete_file(relative_path: &str, destination_id: &str) -> Result<(), String> {
+    saf_result(jni_saf_path_call(
+        "safDeleteFile",
+        relative_path,
+        Some(destination_id),
+        None,
+    )?)
 }
 
+/// Ask MainActivity to open the cheat install folder picker. JNI resolves the
+/// method name at runtime. A Java exception (no activity) is cleared and
+/// returned as an error so the UI does not wait for a picker that never opened.
 #[cfg(target_os = "android")]
-pub(super) fn select_eden_load_directory_from_activity() -> Result<(), String> {
-    jni_noarg_void_call("selectEdenLoadDirectory")
+pub(super) fn select_cheat_install_folder_from_activity() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        if env
+            .call_static_method(jcls, "selectCheatInstallFolder", "()V", &[])
+            .is_err()
+        {
+            let _ = env.exception_clear();
+            return Err("The folder picker could not open. Return to EDC and try again.".into());
+        }
+        Ok(())
+    })
 }

@@ -1,8 +1,7 @@
 #[cfg(target_os = "android")]
 use super::jni::{
-    jni_noarg_string_call, jni_saf_delete_file, jni_saf_list_directory,
-    jni_saf_remove_empty_directory, jni_saf_write_text_file, parse_saf_response,
-    select_eden_load_directory_from_activity,
+    jni_noarg_string_call, jni_saf_delete_file, jni_saf_list_directory, jni_saf_write_text_file,
+    parse_saf_response, select_cheat_install_folder_from_activity,
 };
 use crate::cheats::InstalledCheat;
 #[cfg(target_os = "android")]
@@ -24,7 +23,7 @@ use tauri::Manager;
 pub(crate) fn scan_eden_games_android_native_with_presence(
     app: &AppHandle,
 ) -> Result<(Vec<GameGroup>, Vec<EdenPresenceRecord>), String> {
-    let entries = jni_saf_list_directory("")?;
+    let entries = jni_saf_list_directory("", None)?;
     let installed_ids: HashSet<String> = entries
         .into_iter()
         .filter(|entry| entry.directory && crate::games::is_valid_tid(&entry.name))
@@ -79,6 +78,8 @@ pub fn install_cheat_android_native(
     cheat_name: String,
     build_id: String,
     content: String,
+    destination_id: String,
+    replace: bool,
 ) -> Result<(), String> {
     crate::cheats::validate_cheat_target(&title_id, &cheat_name, &build_id)?;
     log::info!("[cheats::native] install title={title_id} build={build_id} name={cheat_name}");
@@ -86,14 +87,14 @@ pub fn install_cheat_android_native(
 
     #[cfg(target_os = "android")]
     {
-        jni_saf_write_text_file(&relative_path, &content)?;
+        jni_saf_write_text_file(&relative_path, &content, &destination_id, replace)?;
         log::info!("[cheats::native] install OK via SAF: {relative_path}");
         return Ok(());
     }
 
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (relative_path, content);
+        let _ = (relative_path, content, destination_id, replace);
         Err("Native cheat installation is only available on Android.".into())
     }
 }
@@ -101,6 +102,7 @@ pub fn install_cheat_android_native(
 #[tauri::command]
 pub fn list_installed_cheats_android_native(
     title_id: String,
+    destination_id: String,
 ) -> Result<Vec<InstalledCheat>, String> {
     crate::cheats::validate_hex_id(&title_id)?;
     log::debug!("[cheats::native] list title={title_id}");
@@ -108,12 +110,12 @@ pub fn list_installed_cheats_android_native(
     #[cfg(target_os = "android")]
     {
         let mut result = Vec::new();
-        for cheat in jni_saf_list_directory(&title_id)?
+        for cheat in jni_saf_list_directory(&title_id, Some(&destination_id))?
             .into_iter()
             .filter(|entry| entry.directory)
         {
             let cheats_path = format!("{title_id}/{}/cheats", cheat.name);
-            for file in jni_saf_list_directory(&cheats_path)? {
+            for file in jni_saf_list_directory(&cheats_path, Some(&destination_id))? {
                 if !file.directory && file.name.ends_with(".txt") {
                     let build_id = file.name.strip_suffix(".txt").unwrap().to_string();
                     if crate::cheats::validate_cheat_target(&title_id, &cheat.name, &build_id)
@@ -134,7 +136,7 @@ pub fn list_installed_cheats_android_native(
 
     #[cfg(not(target_os = "android"))]
     {
-        let _ = title_id;
+        let _ = (title_id, destination_id);
         Err("Native cheat listing is only available on Android.".into())
     }
 }
@@ -144,6 +146,7 @@ pub fn delete_cheat_android_native(
     title_id: String,
     cheat_name: String,
     build_id: String,
+    destination_id: String,
 ) -> Result<(), String> {
     crate::cheats::validate_cheat_target(&title_id, &cheat_name, &build_id)?;
     log::info!("[cheats::native] delete title={title_id} build={build_id} name={cheat_name}");
@@ -152,16 +155,14 @@ pub fn delete_cheat_android_native(
 
     #[cfg(target_os = "android")]
     {
-        jni_saf_delete_file(&relative_path)?;
-        jni_saf_remove_empty_directory(&cheats_path)?;
-        jni_saf_remove_empty_directory(&format!("{title_id}/{cheat_name}"))?;
+        jni_saf_delete_file(&relative_path, &destination_id)?;
         log::info!("[cheats::native] delete OK via SAF");
         return Ok(());
     }
 
     #[cfg(not(target_os = "android"))]
     {
-        let _ = (relative_path, cheats_path);
+        let _ = (relative_path, destination_id);
         Err("Native cheat deletion is only available on Android.".into())
     }
 }
@@ -179,9 +180,25 @@ pub struct EdenLoadAccessStatus {
     pub writable: bool,
     pub ready: bool,
     pub message: String,
+    /// `"direct"` (an emulator's own `load`, where the emulator creates each
+    /// title-ID folder) or `"custom"` (files prepared for import into an emulator).
+    #[serde(default)]
+    pub install_mode: String,
+    /// Identifies the resolved load directory across equivalent Android tree grants.
+    #[serde(default)]
+    pub destination_id: String,
+    /// Display label for the selected destination.
+    #[serde(default)]
+    pub folder_label: String,
+    /// Why the last pick failed; the other fields still describe the active folder.
+    #[serde(default)]
+    pub selection_error: String,
+    /// The picker is open or its selection is being saved.
+    #[serde(default)]
+    pub selection_pending: bool,
 }
 
-/// Return the persisted Eden `load` grant and provider capability state.
+/// Return the active cheat install folder and its provider capabilities.
 #[tauri::command]
 pub fn get_eden_load_access_status() -> Result<EdenLoadAccessStatus, String> {
     #[cfg(target_os = "android")]
@@ -196,57 +213,50 @@ pub fn get_eden_load_access_status() -> Result<EdenLoadAccessStatus, String> {
     }
 }
 
-/// Open Androids document-tree picker so the user can grant access to Edens
-/// exposed `load` directory. The picker result is persisted by MainActivity.
+/// Open Android's folder picker for the cheat install folder. It only launches
+/// the picker; MainActivity saves the result and `get_eden_load_access_status`
+/// reports it.
 #[tauri::command]
-pub fn select_eden_load_directory() -> Result<(), String> {
+pub fn select_cheat_install_folder() -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        return select_eden_load_directory_from_activity();
+        return select_cheat_install_folder_from_activity();
     }
     #[cfg(not(target_os = "android"))]
     {
-        Err("Eden SAF directory selection is only available on Android.".into())
+        Err("The Android folder picker is unavailable on this platform.".into())
     }
 }
 
 /// Exercise the production SAF bridge with nested create, write, list, delete,
 /// and empty-directory cleanup operations.
 #[tauri::command]
-pub fn test_eden_load_directory() -> Result<String, String> {
+pub fn test_eden_load_directory(destination_id: String) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| e.to_string())?
-            .as_millis();
+            .as_nanos();
         let probe_root = format!(".ecm-saf-probe-{timestamp}");
         let probe_directory = format!("{probe_root}/nested");
         let probe_file = format!("{probe_directory}/probe.txt");
 
-        let result = (|| {
-            jni_saf_write_text_file(&probe_file, "ECM SAF probe")?;
-            let entries = jni_saf_list_directory(&probe_directory)?;
-            if !entries
-                .iter()
-                .any(|entry| !entry.directory && entry.name == "probe.txt")
-            {
-                return Err("Probe file was not listed through SAF.".into());
-            }
-            jni_saf_delete_file(&probe_file)?;
-            jni_saf_remove_empty_directory(&probe_directory)?;
-            jni_saf_remove_empty_directory(&probe_root)?;
-            Ok("OK".to_string())
-        })();
-
-        let _ = jni_saf_delete_file(&probe_file);
-        let _ = jni_saf_remove_empty_directory(&probe_directory);
-        let _ = jni_saf_remove_empty_directory(&probe_root);
-        return result;
+        jni_saf_write_text_file(&probe_file, "ECM SAF probe", &destination_id, false)?;
+        let listed = jni_saf_list_directory(&probe_directory, Some(&destination_id));
+        jni_saf_delete_file(&probe_file, &destination_id)?;
+        if !listed?
+            .iter()
+            .any(|entry| !entry.directory && entry.name == "probe.txt")
+        {
+            return Err("Probe file was not listed through SAF.".into());
+        }
+        Ok("OK".into())
     }
 
     #[cfg(not(target_os = "android"))]
     {
+        let _ = destination_id;
         Err("Eden SAF access testing is only available on Android.".into())
     }
 }

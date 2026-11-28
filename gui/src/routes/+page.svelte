@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick, untrack } from 'svelte';
   import { initializeTheme } from '$lib/domain/theme.js';
+  import { installFolderChanged, readSettledInstallFolder } from '$lib/domain/install-folder.js';
   import * as backend from '$lib/api/backend.js';
   import { cheatLibraryGroups, createLibraryState, normalizeTitleId, reduceLibraryState } from '$lib/domain/library.js';
   import SetupScreen from '$lib/components/SetupScreen.svelte';
@@ -22,7 +23,7 @@
   let gameLibraryStatus = $state(/** @type {import('$lib/api/types.js').GameLibraryStatus|null} */ (null));
   let statusError = $state('');
   let checkingStatus = $state(false);
-  let pendingPicker = $state(/** @type {{id:number,kind:'edenLoad'|'prodKeys'|'packageLibrary'|'singlePackage'}|null} */ (null));
+  let pendingPicker = $state(/** @type {import('$lib/api/types.js').PendingPicker|null} */ (null));
   let library = $state(createLibraryState());
   let refreshPhase = $state(/** @type {'idle'|'loading'|'error'} */ ('idle'));
   let selectedTitleId = $state('');
@@ -36,6 +37,8 @@
   let contextRevision = $state(0);
   let notice = $state(/** @type {{tone:'info'|'success'|'error',message:string}|null} */ (null));
   let ready = $derived(!!settings && (platform === 'android' ? edenAccess?.ready === true : settings.onboardingDone));
+  let installMode = $derived(edenAccess?.installMode || 'direct');
+  let presenceLocation = $derived(platform === 'desktop' ? 'Eden' : installMode === 'direct' ? 'the load folder' : '');
   let startupUpdateChannel = $derived(ready && !loading && settings?.autoCheckUpdates
     ? (settings.includeBetaUpdates ? 'beta' : 'stable') : null);
   let libraryGames = $derived(cheatLibraryGroups(library.games));
@@ -178,26 +181,40 @@
     });
   });
 
+  /** @param {import('$lib/api/types.js').EdenLoadAccessStatus} status */
+  function applyInstallFolder(status) {
+    const changed = installFolderChanged(edenAccess, status);
+    edenAccess = status;
+    if (changed && started && ready) {
+      // Title presence and installed files belong to the previous destination.
+      contextRevision++;
+      library = createLibraryState();
+      void refreshLibrary();
+    }
+  }
+
   async function refreshAndroidStatus() {
-    if (platform !== 'android') return;
+    if (platform !== 'android' || pendingPicker?.kind === 'cheatInstallFolder') return;
     const revision = ++statusRevision;
+    const isCurrent = () => alive && revision === statusRevision;
     checkingStatus = true;
     const results = await Promise.allSettled([
-      backend.getEdenLoadAccessStatus(),backend.getPackageDiscoveryStatus(),backend.getGameLibraryStatus(),
+      readSettledInstallFolder(backend.getEdenLoadAccessStatus, isCurrent),
+      backend.getPackageDiscoveryStatus(),backend.getGameLibraryStatus(),
     ]);
-    if (!alive || revision !== statusRevision) return;
+    if (!isCurrent()) return;
     const [eden,keys,packages] = results;
-    if (eden.status === 'fulfilled') edenAccess = eden.value;
+    if (eden.status === 'fulfilled' && eden.value) applyInstallFolder(eden.value);
     if (keys.status === 'fulfilled') packageStatus = keys.value;
     if (packages.status === 'fulfilled') gameLibraryStatus = packages.value;
     statusError = results.flatMap(result=>result.status === 'rejected' ? [errorMessage(result.reason)] : []).join('\n');
     checkingStatus = false;
   }
   function resumed() {
-    if (document.visibilityState !== 'visible' || platform !== 'android') return;
+    if (document.visibilityState !== 'visible' || platform !== 'android' || pendingPicker?.kind === 'cheatInstallFolder') return;
     clearTimeout(resumeTimer);
+    const picker = pendingPicker;
     resumeTimer = setTimeout(async()=>{
-      const picker = pendingPicker;
       await refreshAndroidStatus();
       if (!alive) return;
       if (picker && pendingPicker?.id === picker.id) {
@@ -209,12 +226,27 @@
       }
     },250);
   }
-  /** @param {'edenLoad'|'prodKeys'|'packageLibrary'|'singlePackage'} kind */
+  /** @param {import('$lib/api/types.js').AndroidPickerKind} kind */
   async function pickAndroid(kind) {
     if (pendingPicker) return;
+    clearTimeout(resumeTimer);
     const picker = {id:++pickerId,kind}; pendingPicker = picker;
+    if (kind === 'cheatInstallFolder') {
+      // The last settled destination remains active until this picker finishes.
+      statusRevision++;
+      checkingStatus = false;
+      const isCurrent = () => alive && pendingPicker?.id === picker.id;
+      try {
+        await backend.selectCheatInstallFolder();
+        const status = await readSettledInstallFolder(backend.getEdenLoadAccessStatus, isCurrent);
+        if (status) applyInstallFolder(status);
+      } finally {
+        if (isCurrent()) pendingPicker = null;
+      }
+      return;
+    }
     try {
-      const actions = {edenLoad:backend.selectEdenLoadDirectory,prodKeys:backend.selectProdKeysDocument,
+      const actions = {prodKeys:backend.selectProdKeysDocument,
         packageLibrary:backend.selectGameLibraryDirectory,singlePackage:backend.selectGamePackageDocument};
       await actions[kind]();
     } catch (cause) { if (pendingPicker?.id === picker.id) pendingPicker=null; throw cause; }
@@ -278,8 +310,8 @@
   <main class="startup"><h1>Unable to open the app</h1><p role="alert">{bootstrapError}</p><button class="md-button md-button--filled" onclick={bootstrap}>Try again</button></main>
 {:else if !ready}
   <SetupScreen {platform} {settings} {detectedPcLoadDir} {edenAccess} busy={saving || checkingStatus || !!pendingPicker}
-    error={statusError} onsubmit={save} onpickdesktop={pickDesktop} onpickandroid={()=>pickAndroid('edenLoad')}
-    onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
+    error={statusError} onsubmit={save} onpickdesktop={pickDesktop} onpickandroid={()=>pickAndroid('cheatInstallFolder')}
+    onretryandroid={refreshAndroidStatus} />
 {:else}
   <div class="app-frame">
     {#if visibleUpdate}
@@ -290,11 +322,12 @@
       </aside>
     {/if}
     <main class="app-shell" class:show-workspace={pane === 'workspace'}>
-      <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase}
+      <div class="library-slot"><LibraryPane games={libraryGames} {refreshPhase} {presenceLocation}
         packageLibrary={library.packageLibrary}
         refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
       <div class="workspace-slot"><GameWorkspace {game} {platform} {settings} packageLibrary={library.packageLibrary}
-        androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
+        androidPackageStatus={packageStatus} {installMode} {presenceLocation} destinationId={edenAccess?.destinationId ?? ''}
+        installFolderLabel={platform === 'android' ? edenAccess?.folderLabel ?? '' : ''} {pendingPicker} {contextRevision} onback={backToLibrary}
         onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
     </main>
   </div>

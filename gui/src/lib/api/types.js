@@ -58,7 +58,21 @@
  * @property {boolean} writable
  * @property {boolean} ready
  * @property {string} message
+ * @property {InstallMode | ''} [installMode] Absent in older status responses.
+ * @property {string} [folderLabel] Display name or path of the active load directory.
+ * @property {string} [destinationId] Stable identity of that directory across tree grants.
+ * @property {string} [selectionError] Why the last pick failed; the other fields describe the active folder.
+ * @property {boolean} [selectionPending] Android is choosing or saving a folder.
  */
+
+/**
+ * `direct`: an emulator's own load, where the emulator creates each title-ID folder.
+ * `custom`: a load folder on shared storage that another app imports from.
+ * @typedef {'direct' | 'custom'} InstallMode
+ */
+
+/** @typedef {'cheatInstallFolder' | 'prodKeys' | 'packageLibrary' | 'singlePackage'} AndroidPickerKind */
+/** @typedef {{id: number, kind: AndroidPickerKind}} PendingPicker */
 
 /**
  * @typedef {Object} PackageDiscoveryStatus

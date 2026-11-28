@@ -1,5 +1,6 @@
 <script>
   import Icon from './ui/Icon.svelte';
+  import InstallFolderHelp from './InstallFolderHelp.svelte';
   import Dialog from './ui/Dialog.svelte';
   import AppUpdate from './AppUpdate.svelte';
   import AnnouncementHistory from './AnnouncementHistory.svelte';
@@ -12,13 +13,9 @@
   /** @typedef {import('../api/types.js').GameLibraryStatus} GameLibraryStatus */
   /** @typedef {import('../api/types.js').PackageDiscoveryStatus} PackageDiscoveryStatus */
   /** @typedef {import('../api/types.js').Platform} Platform */
+  /** @typedef {import('../api/types.js').AndroidPickerKind} AndroidPickerKind */
+  /** @typedef {import('../api/types.js').PendingPicker} PendingPicker */
   /** @typedef {'edenLoad' | 'prodKeys' | 'packageLibrary'} SettingsPickerKind */
-
-  /**
-   * @typedef {Object} PendingPicker
-   * @property {number} id
-   * @property {'edenLoad' | 'prodKeys' | 'packageLibrary' | 'singlePackage'} kind
-   */
 
   /**
    * @typedef {Object} Props
@@ -34,9 +31,9 @@
    * @property {(settings: AppSettings) => void | Promise<void>} [onsave]
    * @property {() => void} onclose
    * @property {(kind: SettingsPickerKind, currentPath: string) => string | null | Promise<string | null>} [onpickdesktop]
-   * @property {(kind: SettingsPickerKind) => void | Promise<void>} [onpickandroid]
+   * @property {(kind: AndroidPickerKind) => void | Promise<void>} [onpickandroid]
    * @property {() => void | Promise<void>} [onretryandroid]
-   * @property {() => string | Promise<string>} [ontesteden]
+   * @property {(destinationId: string) => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
    * @property {(returnToStable?: boolean) => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
    * @property {import('../api/types.js').UpdateInstallation | null} [installation]
@@ -119,6 +116,12 @@
   let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
   let betaPreferenceChanged = $derived(draft.includeBetaUpdates !== settings.includeBetaUpdates);
   let availableUpdate = $derived(installation?.update ?? updateResult?.available);
+  let testedFolder = $state('');
+
+  // A test result describes the folder it ran against; drop it once another folder is active.
+  $effect(() => {
+    if (edenAccess?.destinationId !== testedFolder) testResult = '';
+  });
 
   /** @param {unknown} cause */
   function errorMessage(cause) {
@@ -156,7 +159,7 @@
     if (typeof selected === 'string' && selected) draft[field] = selected;
   }
 
-  /** @param {SettingsPickerKind} kind */
+  /** @param {AndroidPickerKind} kind */
   async function pickAndroid(kind) {
     await runAction(`android-${kind}`, async () => {
       if (!onpickandroid) throw new Error('The Android picker is unavailable.');
@@ -173,11 +176,14 @@
 
   async function testAndroidEden() {
     testResult = '';
+    const destinationId = edenAccess?.destinationId;
+    if (!destinationId) return;
+    testedFolder = destinationId;
     const result = await runAction('android-test', async () => {
-      if (!ontesteden) throw new Error('The Eden access test is unavailable.');
-      return ontesteden();
+      if (!ontesteden) throw new Error('The access test is unavailable.');
+      return ontesteden(destinationId);
     });
-    if (typeof result === 'string') testResult = result;
+    if (typeof result === 'string' && destinationId === edenAccess?.destinationId) testResult = result;
   }
 
   async function revealAppLog() {
@@ -371,8 +377,8 @@
         <div class="section-heading">
           <Icon name="folder" size={24} />
           <div>
-            <h3 id="settings-android-storage-title">Eden storage</h3>
-            <p>Read and write access to Eden → load.</p>
+            <h3 id="settings-android-storage-title">Cheat install folder</h3>
+            <p>Folder changes take effect immediately, even if you close Settings with Cancel.</p>
           </div>
         </div>
 
@@ -381,16 +387,21 @@
             <Icon name={edenAccess?.ready ? 'check' : 'warning'} size={20} />
           </span>
           <div class="status-copy">
-            <strong>{edenAccess?.ready ? 'Eden access ready' : 'Eden access required'}</strong>
-            <span>{edenAccess?.message ?? 'Eden access has not been checked.'}</span>
+            <strong>{edenAccess?.folderLabel || 'No folder chosen'}</strong>
+            {#if edenAccess?.ready}
+              <span>{edenAccess.installMode === 'custom' ? 'Ready to prepare files for import.' : 'Ready for direct installs.'}</span>
+            {:else}
+              <span>{edenAccess?.message ?? 'The cheat install folder has not been checked.'}</span>
+            {/if}
+            {#if edenAccess?.selectionError}<span class="selection-error" role="alert">{edenAccess.selectionError}</span>{/if}
           </div>
           <button
             class="md-button md-button--outlined status-action"
             type="button"
-            disabled={busy || pendingPicker?.kind === 'edenLoad'}
-            onclick={() => pickAndroid('edenLoad')}
+            disabled={busy}
+            onclick={() => pickAndroid('cheatInstallFolder')}
           >
-            {pendingPicker?.kind === 'edenLoad' ? 'Waiting…' : 'Select folder'}
+            {pendingPicker?.kind === 'cheatInstallFolder' ? 'Waiting…' : 'Change folder'}
           </button>
         </div>
 
@@ -398,7 +409,7 @@
           <button
             class="md-button md-button--text"
             type="button"
-            disabled={busy || !edenAccess?.ready}
+            disabled={busy || !edenAccess?.ready || !edenAccess.destinationId}
             onclick={testAndroidEden}
           >
             Test access
@@ -422,9 +433,10 @@
             role="status"
             aria-live="polite"
           >
-            {testResult === 'OK' ? 'Eden read and write access works.' : testResult}
+            {testResult === 'OK' ? 'Read and write access works.' : testResult}
           </p>
         {/if}
+        <InstallFolderHelp />
       </section>
 
       <section class="settings-section" aria-labelledby="settings-android-packages-title">
@@ -476,7 +488,7 @@
       </section>
 
       <p class="md-sr-only" role="status" aria-live="polite" aria-atomic="true">
-        Eden: {edenAccess?.message ?? 'not checked'}
+        Cheat install folder: {edenAccess?.message ?? 'not checked'}
         Prod.keys: {prodKeysMessage()}
         Package library: {gameLibraryStatus?.message ?? 'not checked'}
       </p>
@@ -715,6 +727,10 @@
     color: var(--md-sys-color-on-surface-variant);
     font-size: var(--md-sys-typescale-body-small-size);
     line-height: 1rem;
+  }
+
+  .status-copy .selection-error {
+    color: var(--md-sys-color-error);
   }
 
   .status-action {

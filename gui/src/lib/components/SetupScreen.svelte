@@ -1,6 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import Icon from './ui/Icon.svelte';
+  import InstallFolderHelp from './InstallFolderHelp.svelte';
 
   /** @typedef {import('../api/types.js').AppSettings} AppSettings */
   /** @typedef {import('../api/types.js').EdenLoadAccessStatus} EdenLoadAccessStatus */
@@ -48,7 +49,6 @@
   let packagePairIncomplete = $derived(
     Boolean(prodKeysPath.trim()) !== Boolean(packageLibraryPath.trim()),
   );
-  let androidReady = $derived(edenAccess?.ready === true);
   let componentBusy = $derived(busy || Boolean(activeAction));
   let displayedError = $derived(localError || error);
 
@@ -144,11 +144,11 @@
       <div>
         <p class="eyebrow">EDC</p>
         <h1 id="setup-title">
-          {platform === 'android' ? 'Connect Eden storage' : 'Finish setting up'}
+          {platform === 'android' ? 'Choose a cheat install folder' : 'Finish setting up'}
         </h1>
         <p class="subtitle">
           {#if platform === 'android'}
-            Grant access to Eden's load directory before managing cheats on this device.
+            Select your emulator’s load folder or a folder for files you’ll import.
           {:else}
             Choose the local Eden folders EDC should use. You can change these later.
           {/if}
@@ -310,34 +310,28 @@
       </form>
     {:else}
       <div class="android-content">
-        <div class="status-card" class:ready={androidReady} role="status" aria-live="polite" aria-atomic="true">
-          <span class="status-icon" aria-hidden="true">
-            <Icon name={androidReady ? 'check' : 'folder'} size={24} />
-          </span>
-          <div>
-            <h2>{androidReady ? 'Eden storage is ready' : 'Eden storage access required'}</h2>
-            <p>{edenAccess?.message || 'Select Eden → load in Android’s folder picker.'}</p>
+        {#if edenAccess?.selected || edenAccess?.selectionError}
+          <div class="error-banner" role="alert">
+            <Icon name="warning" size={20} />
+            <div>
+              {#if edenAccess?.selected}<p>{edenAccess.message}</p>{/if}
+              {#if edenAccess?.selectionError}<p>{edenAccess.selectionError}</p>{/if}
+            </div>
           </div>
-        </div>
-
-        <div class="android-guide">
-          <h2>Choose the correct folder</h2>
-          <ol>
-            <li>Open the folder picker and choose the storage for the <strong>Eden build you use</strong>. Its name may differ for nightly or renamed builds.</li>
-            <li>Open <strong>load</strong>, then confirm with <strong>Use this folder</strong>.</li>
-          </ol>
-        </div>
+        {/if}
 
         <div class="android-actions">
           <button class="md-button md-button--filled" type="button" disabled={componentBusy} onclick={pickAndroid}>
             <Icon name="folder" size={20} />
-            {androidReady ? 'Choose again' : 'Select Eden → load'}
+            Choose folder
           </button>
           <button class="md-button md-button--outlined" type="button" disabled={componentBusy} onclick={retryAndroid}>
             <Icon name="refresh" size={20} />
             Check again
           </button>
         </div>
+
+        <InstallFolderHelp />
       </div>
     {/if}
   </section>
@@ -442,17 +436,14 @@
     color: var(--md-sys-color-primary);
   }
 
-  .section-heading h2,
-  .status-card h2,
-  .android-guide h2 {
+  .section-heading h2 {
     color: var(--md-sys-color-on-surface);
     font-size: var(--md-sys-typescale-title-medium-size);
     font-weight: 500;
     line-height: 1.3;
   }
 
-  .section-heading p,
-  .status-card p {
+  .section-heading p {
     margin-top: 0.25rem;
     color: var(--md-sys-color-on-surface-variant);
     font-size: var(--md-sys-typescale-body-small-size);
@@ -492,52 +483,8 @@
     padding-top: 0.25rem;
   }
 
-  .status-card {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    padding: 1rem;
-    border: 1px solid var(--md-sys-color-outline-variant);
-    border-radius: var(--md-sys-shape-corner-large);
-    background: var(--md-sys-color-surface-container-highest);
-  }
-
-  .status-card.ready {
-    border-color: var(--md-sys-color-tertiary);
-  }
-
-  .status-icon {
-    display: grid;
-    width: 3rem;
-    height: 3rem;
-    flex: 0 0 3rem;
-    place-items: center;
-    border-radius: var(--md-sys-shape-corner-full);
-    color: var(--md-sys-color-on-secondary-container);
-    background: var(--md-sys-color-secondary-container);
-  }
-
-  .status-card.ready .status-icon {
-    color: var(--md-sys-color-on-tertiary-container);
-    background: var(--md-sys-color-tertiary-container);
-  }
-
-  .android-guide {
-    padding: 1rem;
-    border-radius: var(--md-sys-shape-corner-large);
-    background: var(--md-sys-color-surface-container);
-  }
-
-  .android-guide ol {
-    margin: 0.75rem 0 0;
-    padding-left: 1.4rem;
-    color: var(--md-sys-color-on-surface-variant);
-    font-size: var(--md-sys-typescale-body-medium-size);
-    line-height: 1.55;
-  }
-
-  .android-guide li + li {
-    margin-top: 0.5rem;
+  .android-content .error-banner {
+    margin: 0;
   }
 
   .android-actions {

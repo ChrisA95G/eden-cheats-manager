@@ -9,6 +9,7 @@
    * @typedef {Object} Props
    * @property {GameGroup[]} games
    * @property {RefreshPhase} refreshPhase
+   * @property {string} presenceLocation
    * @property {import('../api/types.js').ManagedPackageLibrary|null} packageLibrary
    * @property {string} refreshError
    * @property {string} selectedTitleId
@@ -21,6 +22,7 @@
   let {
     games,
     refreshPhase,
+    presenceLocation,
     packageLibrary,
     refreshError,
     selectedTitleId,
@@ -175,10 +177,10 @@
               <div class="game-heading">
                 <h2>{group.baseName || group.baseTitleId}</h2>
                 <code>{group.baseTitleId}</code>
-                {#if group.baseInstalled || group.updates.some(entry => entry.installed)}
-                  <span class="installed-label"><Icon name="check" size={20} /> Present in Eden</span>
-                {:else}
-                  <span class="absent-label">Not present in Eden</span>
+                {#if presenceLocation && (group.baseInstalled || group.updates.some(entry => entry.installed))}
+                  <span class="installed-label"><Icon name="check" size={20} /> Present in {presenceLocation}</span>
+                {:else if presenceLocation}
+                  <span class="absent-label">Not present in {presenceLocation}</span>
                 {/if}
               </div>
             </button>

@@ -1,7 +1,6 @@
 package dev.eden.cheats_manager
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
@@ -18,6 +17,12 @@ internal class GameLibraryStorage(private val activity: MainActivity) {
         private const val PREF_LIBRARY_URI = "library_uri"
         private const val MAX_SCAN_DEPTH = 5
         private const val MAX_PACKAGES = 2_000
+
+        /** The saved library tree, for the cheat install folder's grant bookkeeping. */
+        fun savedTreeUri(context: Context): Uri? =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(PREF_LIBRARY_URI, null)
+                ?.let { runCatching { Uri.parse(it) }.getOrNull() }
     }
 
     private data class SafDocument(
@@ -37,31 +42,25 @@ internal class GameLibraryStorage(private val activity: MainActivity) {
         activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (uri == null) return@registerForActivityResult
 
-            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            val flags = SafGrants.READ
             val previousUri = preferences().getString(PREF_LIBRARY_URI, null)?.let(Uri::parse)
             try {
+                val acquired = SafGrants.missingFlags(contentResolver, uri, flags)
                 contentResolver.takePersistableUriPermission(uri, flags)
                 val saved = preferences()
                     .edit()
                     .putString(PREF_LIBRARY_URI, uri.toString())
                     .commit()
                 if (!saved) {
-                    if (previousUri != uri) {
-                        contentResolver.releasePersistableUriPermission(uri, flags)
-                    }
+                    preferences().edit().putString(PREF_LIBRARY_URI, previousUri?.toString()).apply()
+                    SafGrants.release(contentResolver, uri, acquired)
                     throw IllegalStateException("Could not save the game-library permission")
                 }
 
-                if (previousUri != null && previousUri != uri) {
-                    try {
-                        contentResolver.releasePersistableUriPermission(previousUri, flags)
-                    } catch (error: SecurityException) {
-                        android.util.Log.w(
-                            "CheatsManager",
-                            "Could not release the previous game-library permission",
-                            error
-                        )
-                    }
+                // The cheat install folder may share the old tree and still needs its read grant.
+                if (previousUri != null && previousUri != uri &&
+                    EdenSafStorage.savedTreeUri(activity) != previousUri) {
+                    SafGrants.release(contentResolver, previousUri, flags)
                 }
                 packageUris = emptyMap()
             } catch (error: Exception) {
