@@ -12,14 +12,9 @@
   /** @typedef {import('../api/types.js').GameLibraryStatus} GameLibraryStatus */
   /** @typedef {import('../api/types.js').PackageDiscoveryStatus} PackageDiscoveryStatus */
   /** @typedef {import('../api/types.js').Platform} Platform */
+  /** @typedef {import('../api/types.js').AndroidPickerKind} AndroidPickerKind */
+  /** @typedef {import('../api/types.js').PendingPicker} PendingPicker */
   /** @typedef {'edenLoad' | 'prodKeys' | 'packageLibrary'} SettingsPickerKind */
-  /** @typedef {SettingsPickerKind | 'peanutsLoad'} AndroidPickerKind */
-
-  /**
-   * @typedef {Object} PendingPicker
-   * @property {number} id
-   * @property {'edenLoad' | 'peanutsLoad' | 'prodKeys' | 'packageLibrary' | 'singlePackage'} kind
-   */
 
   /**
    * @typedef {Object} Props
@@ -120,6 +115,13 @@
   let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
   let betaPreferenceChanged = $derived(draft.includeBetaUpdates !== settings.includeBetaUpdates);
   let availableUpdate = $derived(installation?.update ?? updateResult?.available);
+  let installFolder = $derived(`${edenAccess?.installMode ?? ''}:${edenAccess?.folderLabel ?? ''}`);
+  let testedFolder = '';
+
+  // A test result describes the folder it ran against; drop it once another folder is active.
+  $effect(() => {
+    if (installFolder !== testedFolder) testResult = '';
+  });
 
   /** @param {unknown} cause */
   function errorMessage(cause) {
@@ -174,11 +176,12 @@
 
   async function testAndroidEden() {
     testResult = '';
+    testedFolder = installFolder;
     const result = await runAction('android-test', async () => {
-      if (!ontesteden) throw new Error('The Eden access test is unavailable.');
+      if (!ontesteden) throw new Error('The access test is unavailable.');
       return ontesteden();
     });
-    if (typeof result === 'string') testResult = result;
+    if (typeof result === 'string' && testedFolder === installFolder) testResult = result;
   }
 
   async function revealAppLog() {
@@ -372,8 +375,8 @@
         <div class="section-heading">
           <Icon name="folder" size={24} />
           <div>
-            <h3 id="settings-android-storage-title">Eden storage</h3>
-            <p>{edenAccess?.target === 'peanuts' ? 'Read and write access to the Peanuts Native load folder.' : 'Read and write access to Eden → load.'}</p>
+            <h3 id="settings-android-storage-title">Cheat install folder</h3>
+            <p>A new folder applies as soon as you pick it. Cancel does not undo it.</p>
           </div>
         </div>
 
@@ -382,34 +385,17 @@
             <Icon name={edenAccess?.ready ? 'check' : 'warning'} size={20} />
           </span>
           <div class="status-copy">
-            <strong>{edenAccess?.ready ? (edenAccess?.target === 'peanuts' ? 'Peanuts Native folder ready' : 'Eden access ready') : 'Eden access required'}</strong>
-            <span>{edenAccess?.message ?? 'Eden access has not been checked.'}</span>
+            <strong>{edenAccess?.folderLabel || 'No folder chosen'}</strong>
+            <span>{edenAccess?.message ?? 'The cheat install folder has not been checked.'}</span>
+            {#if edenAccess?.selectionError}<span class="selection-error">{edenAccess.selectionError}</span>{/if}
           </div>
           <button
             class="md-button md-button--outlined status-action"
             type="button"
-            disabled={busy || pendingPicker?.kind === 'edenLoad'}
-            onclick={() => pickAndroid('edenLoad')}
+            disabled={busy}
+            onclick={() => pickAndroid('cheatInstallFolder')}
           >
-            {pendingPicker?.kind === 'edenLoad' ? 'Waiting…' : 'Select folder'}
-          </button>
-        </div>
-
-        <div class="access-entry">
-          <span class:ready={edenAccess?.ready && edenAccess?.target === 'peanuts'} class="status-icon" aria-hidden="true">
-            <Icon name="folder" size={20} />
-          </span>
-          <div class="status-copy">
-            <strong>Peanuts Native</strong>
-            <span>Install cheats into PeanutsNative/load on internal storage, then import them in Peanuts Native: the game › Mods &amp; Cheats › Add › A folder.</span>
-          </div>
-          <button
-            class="md-button md-button--outlined status-action"
-            type="button"
-            disabled={busy || pendingPicker?.kind === 'peanutsLoad'}
-            onclick={() => pickAndroid('peanutsLoad')}
-          >
-            {pendingPicker?.kind === 'peanutsLoad' ? 'Waiting…' : 'Use for Peanuts'}
+            {pendingPicker?.kind === 'cheatInstallFolder' ? 'Waiting…' : 'Change folder'}
           </button>
         </div>
 
@@ -441,7 +427,7 @@
             role="status"
             aria-live="polite"
           >
-            {testResult === 'OK' ? 'Eden read and write access works.' : testResult}
+            {testResult === 'OK' ? 'Read and write access works.' : testResult}
           </p>
         {/if}
       </section>
@@ -495,7 +481,7 @@
       </section>
 
       <p class="md-sr-only" role="status" aria-live="polite" aria-atomic="true">
-        Eden: {edenAccess?.message ?? 'not checked'}
+        Cheat install folder: {edenAccess?.message ?? 'not checked'}
         Prod.keys: {prodKeysMessage()}
         Package library: {gameLibraryStatus?.message ?? 'not checked'}
       </p>
@@ -734,6 +720,10 @@
     color: var(--md-sys-color-on-surface-variant);
     font-size: var(--md-sys-typescale-body-small-size);
     line-height: 1rem;
+  }
+
+  .status-copy .selection-error {
+    color: var(--md-sys-color-error);
   }
 
   .status-action {

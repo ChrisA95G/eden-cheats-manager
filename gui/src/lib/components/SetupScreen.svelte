@@ -18,7 +18,6 @@
    * @property {(settings: AppSettings) => void | Promise<void>} [onsubmit]
    * @property {(kind: DesktopPickerKind, currentPath: string) => string | null | Promise<string | null>} [onpickdesktop]
    * @property {() => void | Promise<void>} [onpickandroid]
-   * @property {() => void | Promise<void>} [onpickpeanuts]
    * @property {() => void | Promise<void>} [onretryandroid]
    */
   /** @type {Props} */
@@ -32,11 +31,8 @@
     onsubmit,
     onpickdesktop,
     onpickandroid,
-    onpickpeanuts,
     onretryandroid,
   } = $props();
-
-  const peanutsTarget = $derived(edenAccess?.target === 'peanuts');
 
   const initialSettings = untrack(() => settings);
   const initialDetectedLoadDir = untrack(() => detectedPcLoadDir);
@@ -133,13 +129,6 @@
     });
   }
 
-  async function pickPeanuts() {
-    await runAction('android-peanuts', async () => {
-      if (!onpickpeanuts) throw new Error('The Android folder picker is unavailable.');
-      await onpickpeanuts();
-    });
-  }
-
   async function retryAndroid() {
     await runAction('android-refresh', async () => {
       if (!onretryandroid) throw new Error('Status refresh is unavailable.');
@@ -155,11 +144,11 @@
       <div>
         <p class="eyebrow">EDC</p>
         <h1 id="setup-title">
-          {platform === 'android' ? 'Connect Eden storage' : 'Finish setting up'}
+          {platform === 'android' ? 'Connect cheat storage' : 'Finish setting up'}
         </h1>
         <p class="subtitle">
           {#if platform === 'android'}
-            Grant access to Eden's load directory before managing cheats on this device.
+            Choose the folder EDC installs cheats into on this device.
           {:else}
             Choose the local Eden folders EDC should use. You can change these later.
           {/if}
@@ -323,40 +312,40 @@
       <div class="android-content">
         <div class="status-card" class:ready={androidReady} role="status" aria-live="polite" aria-atomic="true">
           <span class="status-icon" aria-hidden="true">
-            <Icon name={androidReady ? 'check' : 'folder'} size={24} />
+            <Icon name="folder" size={24} />
           </span>
           <div>
-            <h2>{androidReady ? (peanutsTarget ? 'Peanuts Native folder is ready' : 'Eden storage is ready') : 'Eden storage access required'}</h2>
-            <p>{edenAccess?.message || 'Select Eden → load in Android’s folder picker.'}</p>
+            <h2>Choose a cheat install folder</h2>
+            <p>{edenAccess?.message || 'Choose a folder in Android’s folder picker.'}</p>
+            {#if edenAccess?.selectionError}<p class="selection-error">{edenAccess.selectionError}</p>{/if}
           </div>
-        </div>
-
-        <div class="android-guide">
-          <h2>Choose the correct folder</h2>
-          <ol>
-            <li>Open the folder picker and choose the storage for the <strong>Eden build you use</strong>. Its name may differ for nightly or renamed builds.</li>
-            <li>Open <strong>load</strong>, then confirm with <strong>Use this folder</strong>.</li>
-          </ol>
-          <h2>Using Peanuts Native instead</h2>
-          <ol>
-            <li>Tap <strong>Folder for Peanuts Native</strong>. In the picker, open Internal storage, create a folder named <strong>PeanutsNative</strong> (or open it), then confirm with <strong>Use this folder</strong>. EDC makes a <strong>load</strong> folder inside it.</li>
-            <li>Install cheats as usual. In Peanuts Native, open the game › <strong>Mods &amp; Cheats</strong> › <strong>Add</strong> › <strong>A folder</strong>, and pick <strong>PeanutsNative/load</strong>. Do this again after installing more cheats.</li>
-          </ol>
         </div>
 
         <div class="android-actions">
           <button class="md-button md-button--filled" type="button" disabled={componentBusy} onclick={pickAndroid}>
             <Icon name="folder" size={20} />
-            {androidReady && !peanutsTarget ? 'Choose again' : 'Select Eden → load'}
-          </button>
-          <button class="md-button md-button--outlined" type="button" disabled={componentBusy} onclick={pickPeanuts}>
-            <Icon name="folder" size={20} />
-            {androidReady && peanutsTarget ? 'Choose the Peanuts folder again' : 'Folder for Peanuts Native'}
+            Choose folder
           </button>
           <button class="md-button md-button--outlined" type="button" disabled={componentBusy} onclick={retryAndroid}>
             <Icon name="refresh" size={20} />
             Check again
           </button>
+        </div>
+
+        <div class="android-guide">
+          <h2>Installing into Eden</h2>
+          <ol>
+            <li>In the folder picker, open the storage for the <strong>Eden build you use</strong>. Its name may differ for nightly or renamed builds.</li>
+            <li>Open <strong>load</strong>, then confirm with <strong>Use this folder</strong>.</li>
+          </ol>
+          <details>
+            <summary>Using Peanuts Native?</summary>
+            <ol>
+              <li>In the folder picker, open Internal storage or an SD card and create or open a folder such as <strong>PeanutsNative</strong>, then confirm with <strong>Use this folder</strong>. EDC creates <strong>load</strong> inside it.</li>
+              <li>After installing cheats, open the game in Peanuts Native › <strong>Mods &amp; Cheats</strong> › <strong>Add</strong> › <strong>A folder</strong>, and pick <strong>load/&lt;title ID&gt;</strong> for that game. The importer reads a limited number of files, so the whole <strong>load</strong> folder may not reach the game.</li>
+              <li>Import again after installing more cheats. Reimporting an edited cheat can add a second copy, so remove the old one in Peanuts Native.</li>
+            </ol>
+          </details>
         </div>
       </div>
     {/if}
@@ -558,6 +547,19 @@
 
   .android-guide li + li {
     margin-top: 0.5rem;
+  }
+
+  .android-guide details {
+    margin-top: 1rem;
+  }
+
+  .android-guide summary {
+    cursor: pointer;
+    font-weight: 500;
+  }
+
+  .selection-error {
+    color: var(--md-sys-color-error);
   }
 
   .android-actions {

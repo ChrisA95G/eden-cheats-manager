@@ -58,8 +58,20 @@
  * @property {boolean} writable
  * @property {boolean} ready
  * @property {string} message
- * @property {'eden' | 'peanuts' | ''} [target]
+ * @property {InstallMode | ''} [installMode] Absent in older status responses.
+ * @property {string} [folderLabel] Where EDC writes, e.g. Internal storage/PeanutsNative/load.
+ * @property {string} [selectionError] Why the last pick failed; the other fields describe the active folder.
+ * @property {boolean} [selectionPending] The last pick is still being saved.
  */
+
+/**
+ * `direct`: an emulator's own load, where the emulator creates each title-ID folder.
+ * `custom`: a load folder on shared storage that another app imports from.
+ * @typedef {'direct' | 'custom'} InstallMode
+ */
+
+/** @typedef {'cheatInstallFolder' | 'prodKeys' | 'packageLibrary' | 'singlePackage'} AndroidPickerKind */
+/** @typedef {{id: number, kind: AndroidPickerKind}} PendingPicker */
 
 /**
  * @typedef {Object} PackageDiscoveryStatus

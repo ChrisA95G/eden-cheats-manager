@@ -22,8 +22,7 @@ fn probe_jni_methods(env: &mut ::jni::JNIEnv, cls: &::jni::objects::JClass) {
     const METHODS: &[(&str, &str)] = &[
         ("getAppUpdateDownloadPath", "()Ljava/lang/String;"),
         ("installAppUpdate", "(Ljava/lang/String;)Ljava/lang/String;"),
-        ("selectEdenLoadDirectory", "()V"),
-        ("selectPeanutsLoadDirectory", "()V"),
+        ("selectCheatInstallFolder", "()V"),
         ("getEdenLoadAccessStatus", "()Ljava/lang/String;"),
         ("safListDirectory", "(Ljava/lang/String;)Ljava/lang/String;"),
         (
@@ -285,12 +284,19 @@ pub(super) fn jni_saf_remove_empty_directory(relative_path: &str) -> Result<(), 
     }
 }
 
+/// Ask MainActivity to open the cheat install folder picker. JNI resolves the
+/// method name at runtime. A Java exception (no activity) is cleared and
+/// returned as an error so the UI does not wait for a picker that never opened.
 #[cfg(target_os = "android")]
-pub(super) fn select_eden_load_directory_from_activity() -> Result<(), String> {
-    jni_noarg_void_call("selectEdenLoadDirectory")
-}
-
-#[cfg(target_os = "android")]
-pub(super) fn select_peanuts_load_directory_from_activity() -> Result<(), String> {
-    jni_noarg_void_call("selectPeanutsLoadDirectory")
+pub(super) fn select_cheat_install_folder_from_activity() -> Result<(), String> {
+    with_main_class(|env, jcls| {
+        if env
+            .call_static_method(jcls, "selectCheatInstallFolder", "()V", &[])
+            .is_err()
+        {
+            let _ = env.exception_clear();
+            return Err("The folder picker could not open. Return to EDC and try again.".into());
+        }
+        Ok(())
+    })
 }

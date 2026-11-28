@@ -13,14 +13,17 @@
   /** @type {{game: import('../api/types.js').GameGroup|null, platform: import('../api/types.js').Platform,
    * settings: AppSettings, packageLibrary: import('../api/types.js').ManagedPackageLibrary|null,
    * androidPackageStatus: import('../api/types.js').PackageDiscoveryStatus|null,
+   * installMode: import('../api/types.js').InstallMode, installFolderLabel: string,
    * pendingPicker: {id:number,kind:string}|null, contextRevision: number,
    * onback: ()=>void, onsettings: ()=>void, onpickandroid: (kind:'singlePackage')=>Promise<void>,
    * onnotify: (notice:Notice)=>void}} */
-  let { game, platform, settings, packageLibrary, androidPackageStatus, pendingPicker,
+  let { game, platform, settings, packageLibrary, androidPackageStatus, installMode, installFolderLabel, pendingPicker,
     contextRevision, onback, onsettings, onpickandroid, onnotify } = $props();
 
   const id = $props.id();
   let target = $derived(gameCheatTarget(game));
+  // A custom folder has no emulator creating title-ID folders, so any known game can install into it.
+  let canInstall = $derived(Boolean(target) && (installMode === 'custom' || target?.installed === true));
   let activeTab = $state('catalog');
   let optionsOpen = $state(false);
   let versionOpen = $state(false);
@@ -87,7 +90,8 @@
   /** @param {unknown} error */
   function message(error) { return error instanceof Error ? error.message : String(error); }
   function context() {
-    return { titleId: target?.titleId ?? '', expectedBaseTitleId: target?.baseTitleId ?? '', edenPresent: target?.installed === true, platform, settings: {...settings} };
+    return { titleId: target?.titleId ?? '', expectedBaseTitleId: target?.baseTitleId ?? '', folderPresent: installMode === 'custom' || target?.installed === true,
+      custom: installMode === 'custom', folderLabel: installFolderLabel || 'the cheat install folder', platform, settings: {...settings} };
   }
   /** @param {'catalog'|'installed'} resource @param {ReturnType<typeof context>} ctx */
   async function read(resource, ctx) {
@@ -99,7 +103,7 @@
         const result = await backend.searchCheats(ctx.titleId);
         if (requests.isCurrent(token)) catalog = result;
       } else {
-        const result = ctx.edenPresent ? await backend.listInstalledCheats(ctx.platform, ctx.settings, ctx.titleId) : [];
+        const result = ctx.folderPresent ? await backend.listInstalledCheats(ctx.platform, ctx.settings, ctx.titleId) : [];
         if (requests.isCurrent(token)) installed = result;
       }
     } catch (error) {
@@ -166,12 +170,12 @@
 
   /** @param {string} buildId @param {import('../domain/cheats.js').CheatSection} section */
   function install(buildId, section) {
-    if (!target?.installed) return;
+    if (!canInstall) return;
     const ctx = context();
     const cheatName = cheatFileName(section.name, buildId);
     const action = () => mutate('installed', async () => {
       await backend.installCheat(ctx.platform, ctx.settings, {titleId:ctx.titleId, buildId, cheatName, content:section.content});
-      return `Installed ${cheatName}. Enable it in Eden when ready.`;
+      return ctx.custom ? `Installed ${cheatName} in ${ctx.folderLabel}.` : `Installed ${cheatName}. Enable it in Eden when ready.`;
     });
     if (installedIndex.has(installedTupleKey(buildId, cheatName))) {
       confirmation = {title:'Replace installed cheat?', message:`This overwrites ${cheatName} for Build ID ${buildId}.`, action};
@@ -180,7 +184,7 @@
   /** @param {import('../api/types.js').InstalledCheat} item */
   function removeInstalled(item) {
     const ctx = context();
-    confirmation = {title:'Remove installed cheat?', message:`Remove ${item.cheatName} (${item.buildId}) from Eden? Its catalog entry will remain.`,
+    confirmation = {title:'Remove installed cheat?', message:`Remove ${item.cheatName} (${item.buildId}) from ${ctx.custom ? ctx.folderLabel : 'Eden'}? Its catalog entry will remain.`,
       action: () => mutate('installed', async () => {
         await backend.deleteInstalledCheat(ctx.platform, ctx.settings, {titleId:ctx.titleId,...item});
         return 'Installed cheat removed.';
@@ -304,7 +308,7 @@
             <button class="md-button md-button--outlined" disabled={working} onclick={()=>{customBuild=chosenBuild;customContent='';actionError='';customOpen=true;}}><Icon name="add" size={20} />Custom cheat</button>
             <button class="md-icon-button refresh-catalog" aria-label="Refresh cheat catalog" disabled={catalogLoading || working} onclick={()=>read('catalog',context())}><Icon name="refresh" /></button>
           </div>
-          {#if !target.installed}<p class="support">Open this game in Eden before installing cheats.</p>{/if}
+          {#if !canInstall}<p class="support">Open this game in Eden before installing cheats.</p>{/if}
           {#if catalogError}<p class="error" role="alert">{catalogError}</p>{/if}
           {#if catalogLoading || working}<div class="md-progress" role="progressbar" aria-label={working ? 'Saving changes' : 'Loading cheat catalog'}></div>{/if}
           {#each visibleGroups as group (group.buildId)}
@@ -314,7 +318,7 @@
               {#each group.sections as section}
                 {@const present = installedIndex.has(installedTupleKey(group.buildId,cheatFileName(section.name,group.buildId)))}
                 <div class="cheat-row"><details><summary><Icon name="expand" size={20} /><span>{section.name}{section.custom ? ' · Custom' : ''}</span></summary><pre>{section.content}</pre></details>
-                  <button class="md-button md-button--text" disabled={!target.installed || working || installedLoading || !!installedError} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
+                  <button class="md-button md-button--text" disabled={!canInstall || working || installedLoading || !!installedError} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
               {/each}
               {#each group.customEntries as entry (entry.entryId)}
                 <div class="file-row"><details><summary><Icon name="expand" size={20} /><span>Custom entry #{entry.entryId}</span></summary><pre>{entry.content}</pre></details><button class="md-icon-button" aria-label={`Delete custom entry ${entry.entryId}`} disabled={working} onclick={()=>removeCustom(entry.entryId)}><Icon name="delete" /></button></div>

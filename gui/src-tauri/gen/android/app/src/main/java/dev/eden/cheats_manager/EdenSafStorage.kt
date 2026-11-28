@@ -1,28 +1,43 @@
 package dev.eden.cheats_manager
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.Executors
 
-/** Eden load-directory access through Eden's exported DocumentsProvider. */
+/** The cheat install folder: a `load` folder EDC writes cheats into through SAF. */
 internal class EdenSafStorage(private val activity: MainActivity) {
     companion object {
         private const val SAF_PREFS = "eden_saf"
         private const val PREF_EDEN_LOAD_URI = "eden_load_uri"
-        /** The load folder's document ID when it is a child of the granted tree (the Peanuts Native folder); absent when the tree itself is load. */
+        /**
+         * Document ID of the `load` folder when it is a child of the granted tree. Absent when
+         * the grant points at `load` itself, which can happen in either install mode, so callers
+         * must not infer the mode from this field.
+         */
         private const val PREF_LOAD_DOCUMENT_ID = "load_document_id"
-        /** "eden" (Eden's own load) or "peanuts" (a load folder on shared storage that Peanuts Native imports from). */
-        private const val PREF_TARGET = "load_target"
-        const val TARGET_EDEN = "eden"
-        const val TARGET_PEANUTS = "peanuts"
-        /** Where the Peanuts Native picker opens: Internal storage/PeanutsNative, when it exists. */
-        private val PEANUTS_INITIAL_URI: Uri =
-            Uri.parse("content://com.android.externalstorage.documents/document/primary%3APeanutsNative")
-        const val PEANUTS_FOLDER_HINT = "Internal storage/PeanutsNative/load"
+        /** [MODE_DIRECT] or [MODE_CUSTOM]. A saved tree without a mode predates custom folders and is [MODE_DIRECT]. */
+        private const val PREF_INSTALL_MODE = "install_mode"
+        /** An emulator's own `load`, where the emulator creates each game's title-ID folder. */
+        const val MODE_DIRECT = "direct"
+        /** A `load` folder on shared storage that another app (such as Peanuts Native) imports from. */
+        const val MODE_CUSTOM = "custom"
+        private const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
+        /** Android's own shared-storage providers; a folder from any of them is a custom install. */
+        private val SHARED_STORAGE_AUTHORITIES = setOf(
+            EXTERNAL_STORAGE_AUTHORITY,
+            "com.android.providers.downloads.documents"
+        )
+        private const val RW = SafGrants.READ or SafGrants.WRITE
+
+        /** The saved cheat-install tree, for the game library's grant bookkeeping. */
+        fun savedTreeUri(context: Context): Uri? =
+            context.getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
+                .getString(PREF_EDEN_LOAD_URI, null)
+                ?.let { runCatching { Uri.parse(it) }.getOrNull() }
     }
 
     private data class SafDocument(
@@ -31,177 +46,213 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         val directory: Boolean
     )
 
+    /** The saved tree, `load` child, and mode, read from one preferences snapshot. */
+    private data class Selection(
+        val treeUri: String,
+        val loadDocumentId: String?,
+        val mode: String
+    )
+
     private val contentResolver
         get() = activity.contentResolver
+
+    private val selectionExecutor = Executors.newSingleThreadExecutor()
 
     @Volatile
     private var lastSelectionError = ""
 
-    private val edenLoadPicker =
+    @Volatile
+    private var selectionPending = false
+
+    private val folderPicker =
         activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             lastSelectionError = ""
             if (uri == null) {
-                android.util.Log.i("CheatsManager", "SAF selection cancelled")
+                android.util.Log.i("CheatsManager", "Cheat install folder selection cancelled")
                 return@registerForActivityResult
             }
-
-            try {
-                persistSelection(uri, null, TARGET_EDEN)
-            } catch (error: Exception) {
-                lastSelectionError = error.message ?: "Could not save access to the selected load folder."
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Could not persist Eden SAF permission",
-                    error
-                )
+            val mode = if ((uri.authority ?: "") in SHARED_STORAGE_AUTHORITIES) MODE_CUSTOM else MODE_DIRECT
+            selectionPending = true
+            selectionExecutor.execute {
+                try {
+                    persistSelection(uri, mode)
+                } catch (error: Exception) {
+                    lastSelectionError = error.message ?: "Could not save access to the selected folder."
+                    android.util.Log.e("CheatsManager", "Could not save the cheat install folder", error)
+                } finally {
+                    selectionPending = false
+                }
             }
         }
 
     /**
-     * The Peanuts Native folder: any folder on shared storage (PeanutsNative is suggested). A folder named load is used as it is; any other gets a load
-     * folder inside it, made now when missing. Peanuts Native imports from it (game › Mods & Cheats › Add › A folder), which Eden's own load in
-     * Android/data cannot be read for.
+     * Keep the grant first, then use the selected `load` directory, or find or create its
+     * `load` child. Runs off the UI thread. On failure only the flags this pick acquired are
+     * released and the previous selection stays active.
      */
-    private val peanutsLoadPicker =
-        activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            lastSelectionError = ""
-            if (uri == null) {
-                android.util.Log.i("CheatsManager", "Peanuts Native folder selection cancelled")
-                return@registerForActivityResult
+    private fun persistSelection(uri: Uri, mode: String) {
+        require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
+            "Select a folder on this device using the folder picker."
+        }
+        val treeDocument = DocumentsContract.buildDocumentUriUsingTree(
+            uri,
+            DocumentsContract.getTreeDocumentId(uri)
+        )
+        val treeName = displayName(treeDocument)
+            ?: throw IllegalStateException("Android could not read the selected folder's name. Choose another folder.")
+
+        val previous = savedSelection()
+        val acquired = SafGrants.missingFlags(contentResolver, uri, RW)
+        contentResolver.takePersistableUriPermission(uri, RW)
+        try {
+            val loadDocumentId = if (treeName == "load") null else findOrCreateLoad(treeDocument)
+            val rootUri = resolveLoadDirectory(uri, loadDocumentId)
+            queryChildren(rootUri)
+            check(documentSupportsCreate(rootUri)) {
+                "The selected load folder does not allow cheat files to be created."
             }
-
-            try {
-                require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
-                    "Select a folder on this device using the folder picker."
-                }
-                val treeDocument = DocumentsContract.buildDocumentUriUsingTree(
-                    uri,
-                    DocumentsContract.getTreeDocumentId(uri)
-                )
-                val loadDocumentId = if (displayName(treeDocument) == "load") {
-                    null
-                } else {
-                    val existing = queryChildren(treeDocument).firstOrNull { it.name == "load" }
-                    check(existing == null || existing.directory) {
-                        "The selected folder has a file named load. Pick another folder."
-                    }
-                    val load = existing?.uri ?: run {
-                        check(documentSupportsCreate(treeDocument)) {
-                            "The selected folder does not allow a load folder to be created in it."
-                        }
-                        DocumentsContract.createDocument(
-                            contentResolver,
-                            treeDocument,
-                            DocumentsContract.Document.MIME_TYPE_DIR,
-                            "load"
-                        ) ?: throw IllegalStateException("Could not create the load folder.")
-                    }
-                    DocumentsContract.getDocumentId(load)
-                }
-                persistSelection(uri, loadDocumentId, TARGET_PEANUTS)
-            } catch (error: Exception) {
-                lastSelectionError = error.message ?: "Could not save access to the selected folder."
-                android.util.Log.e(
-                    "CheatsManager",
-                    "Could not persist the Peanuts Native folder permission",
-                    error
-                )
+            val editor = preferences()
+                .edit()
+                .putString(PREF_EDEN_LOAD_URI, uri.toString())
+                .putString(PREF_INSTALL_MODE, mode)
+            if (loadDocumentId == null) {
+                editor.remove(PREF_LOAD_DOCUMENT_ID)
+            } else {
+                editor.putString(PREF_LOAD_DOCUMENT_ID, loadDocumentId)
             }
-        }
-
-    /** The grant kept and the load folder remembered; the previous grant released when it was another tree. */
-    private fun persistSelection(uri: Uri, loadDocumentId: String?, target: String) {
-        val rootUri = resolveLoadDirectory(uri, loadDocumentId)
-        queryChildren(rootUri)
-        check(documentSupportsCreate(rootUri)) {
-            "The selected load folder does not allow cheat files to be created."
-        }
-        val flags =
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        val previousUri = preferences()
-            .getString(PREF_EDEN_LOAD_URI, null)
-            ?.let(Uri::parse)
-
-        contentResolver.takePersistableUriPermission(uri, flags)
-        val editor = preferences()
-            .edit()
-            .putString(PREF_EDEN_LOAD_URI, uri.toString())
-            .putString(PREF_TARGET, target)
-        if (loadDocumentId == null) {
-            editor.remove(PREF_LOAD_DOCUMENT_ID)
-        } else {
-            editor.putString(PREF_LOAD_DOCUMENT_ID, loadDocumentId)
-        }
-        if (!editor.commit()) {
-            if (previousUri != uri) {
-                contentResolver.releasePersistableUriPermission(uri, flags)
+            if (!editor.commit()) {
+                restoreSelection(previous)
+                throw IllegalStateException("Could not save the cheat install folder.")
             }
-            throw IllegalStateException("Could not save the load folder")
+        } catch (error: Exception) {
+            SafGrants.release(contentResolver, uri, acquired)
+            throw error
         }
 
+        val previousUri = previous?.treeUri?.let { runCatching { Uri.parse(it) }.getOrNull() }
         if (previousUri != null && previousUri != uri) {
-            try {
-                contentResolver.releasePersistableUriPermission(previousUri, flags)
-            } catch (error: SecurityException) {
-                android.util.Log.w(
-                    "CheatsManager",
-                    "Could not release the previous SAF permission",
-                    error
-                )
+            val libraryKeeps = if (GameLibraryStorage.savedTreeUri(activity) == previousUri) SafGrants.READ else 0
+            SafGrants.release(contentResolver, previousUri, RW, keep = libraryKeeps)
+        }
+        android.util.Log.i("CheatsManager", "Cheat install folder saved ($mode)")
+    }
+
+    /** The document ID of [treeDocument]'s `load` child, created when missing. */
+    private fun findOrCreateLoad(treeDocument: Uri): String {
+        val existing = queryChildren(treeDocument).firstOrNull { it.name == "load" }
+        check(existing == null || existing.directory) {
+            "The selected folder has a file named load. Pick another folder."
+        }
+        val load = existing?.uri ?: run {
+            check(documentSupportsCreate(treeDocument)) {
+                "The selected folder does not allow a load folder to be created in it."
+            }
+            DocumentsContract.createDocument(
+                contentResolver,
+                treeDocument,
+                DocumentsContract.Document.MIME_TYPE_DIR,
+                "load"
+            ) ?: throw IllegalStateException("Could not create the load folder.")
+        }
+        return DocumentsContract.getDocumentId(load)
+    }
+
+    /** Put back the selection a failed save left in memory. */
+    private fun restoreSelection(previous: Selection?) {
+        val editor = preferences().edit()
+        if (previous == null) {
+            editor.remove(PREF_EDEN_LOAD_URI).remove(PREF_LOAD_DOCUMENT_ID).remove(PREF_INSTALL_MODE)
+        } else {
+            editor.putString(PREF_EDEN_LOAD_URI, previous.treeUri)
+                .putString(PREF_INSTALL_MODE, previous.mode)
+            if (previous.loadDocumentId == null) {
+                editor.remove(PREF_LOAD_DOCUMENT_ID)
+            } else {
+                editor.putString(PREF_LOAD_DOCUMENT_ID, previous.loadDocumentId)
             }
         }
-
-        android.util.Log.i("CheatsManager", "Load folder permission saved ($target)")
+        editor.apply()
     }
 
-    fun selectLoadDirectory() {
+    /** Open the folder picker. Throws when it cannot be launched, so the caller is not left waiting. */
+    fun selectFolder() {
         activity.runOnUiThread {
-            edenLoadPicker.launch(null)
+            try {
+                lastSelectionError = ""
+                folderPicker.launch(null)
+            } catch (error: Exception) {
+                lastSelectionError = "Android could not open the folder picker."
+                android.util.Log.e("CheatsManager", "Could not open the folder picker", error)
+            }
         }
     }
 
-    fun selectPeanutsLoadDirectory() {
-        activity.runOnUiThread {
-            peanutsLoadPicker.launch(PEANUTS_INITIAL_URI)
-        }
+    private fun savedSelection(): Selection? {
+        val values = preferences().all
+        val treeUri = values[PREF_EDEN_LOAD_URI] as? String ?: return null
+        val mode = if (values[PREF_INSTALL_MODE] == MODE_CUSTOM) MODE_CUSTOM else MODE_DIRECT
+        return Selection(treeUri, values[PREF_LOAD_DOCUMENT_ID] as? String, mode)
     }
-
-    private fun target(): String =
-        if (preferences().getString(PREF_TARGET, TARGET_EDEN) == TARGET_PEANUTS) TARGET_PEANUTS else TARGET_EDEN
 
     private fun displayName(documentUri: Uri): String? {
         val projection = arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-        return contentResolver.query(documentUri, projection, null, null, null)?.use {
-            if (it.moveToFirst()) it.getString(0) else null
+        return try {
+            contentResolver.query(documentUri, projection, null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 
+    /** Where EDC writes, for messages: a shared-storage path, or the provider's app and folder names. */
+    private fun folderLabel(treeUri: Uri, loadDocumentId: String?): String {
+        val documentId = loadDocumentId ?: DocumentsContract.getTreeDocumentId(treeUri)
+        if (treeUri.authority == EXTERNAL_STORAGE_AUTHORITY && documentId.contains(':')) {
+            val volume = documentId.substringBefore(':')
+            val path = documentId.substringAfter(':')
+            val volumeName = if (volume == "primary") "Internal storage" else volume
+            return if (path.isEmpty()) volumeName else "$volumeName/$path"
+        }
+        val provider = try {
+            val packageManager = activity.packageManager
+            packageManager.resolveContentProvider(treeUri.authority ?: "", 0)
+                ?.loadLabel(packageManager)?.toString()
+        } catch (_: Exception) {
+            null
+        }
+        val treeName = displayName(
+            DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+        )
+        val parts = listOfNotNull(provider, treeName, if (loadDocumentId != null) "load" else null)
+        return parts.filterIndexed { index, part -> index == 0 || part != parts[index - 1] }
+            .joinToString("/")
+            .ifEmpty { "load" }
+    }
+
     fun getAccessStatus(): String {
-        val savedUri = preferences().getString(PREF_EDEN_LOAD_URI, null)
-        if (savedUri == null) {
-            return accessStatusJson(
-                selected = false,
+        val selection = savedSelection()
+            ?: return accessStatusJson(
+                selection = null,
                 validLocation = false,
                 readPermission = false,
                 writePermission = false,
                 readable = false,
                 writable = false,
-                message = "Select Eden → load to continue."
+                message = "Choose a cheat install folder to continue."
             )
-        }
 
         val treeUri = try {
-            Uri.parse(savedUri)
+            Uri.parse(selection.treeUri)
         } catch (_: Exception) {
             return accessStatusJson(
-                selected = true,
+                selection = selection,
                 validLocation = false,
                 readPermission = false,
                 writePermission = false,
                 readable = false,
                 writable = false,
-                message = "The saved Eden directory is invalid. Select it again."
+                message = "The saved cheat install folder is invalid. Choose it again."
             )
         }
         val permission = contentResolver.persistedUriPermissions
@@ -210,27 +261,27 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         val writePermission = permission?.isWritePermission == true
         if (!readPermission || !writePermission) {
             return accessStatusJson(
-                selected = true,
+                selection = selection,
                 validLocation = false,
                 readPermission = readPermission,
                 writePermission = writePermission,
                 readable = false,
                 writable = false,
-                message = "Android no longer grants full access. Select Eden → load again."
+                message = "Android no longer grants full access to the cheat install folder. Choose it again."
             )
         }
 
         val rootUri = try {
-            resolveLoadDirectory(treeUri, preferences().getString(PREF_LOAD_DOCUMENT_ID, null))
+            resolveLoadDirectory(treeUri, selection.loadDocumentId)
         } catch (error: Exception) {
             return accessStatusJson(
-                selected = true,
+                selection = selection,
                 validLocation = false,
                 readPermission = readPermission,
                 writePermission = writePermission,
                 readable = false,
                 writable = false,
-                message = error.message ?: "The saved load folder is unavailable. Select it again."
+                message = error.message ?: "The saved cheat install folder is unavailable. Choose it again."
             )
         }
         val readable = try {
@@ -240,23 +291,20 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             false
         }
         val writable = readable && documentSupportsCreate(rootUri)
-        val peanuts = target() == TARGET_PEANUTS
         val message = when {
-            !readable && peanuts -> "The Peanuts Native load folder could not be read. Select it again."
-            !writable && peanuts -> "The Peanuts Native load folder does not allow cheat files to be created."
-            peanuts -> "The Peanuts Native load folder is ready. In Peanuts Native, open the game › Mods & Cheats › Add › A folder, and pick this load folder."
-            !readable -> "Eden's load directory could not be read. Select it again."
-            !writable -> "Eden's load directory does not allow cheat files to be created."
-            else -> "Eden load access is ready."
+            !readable -> "EDC could not read the cheat install folder. Choose it again."
+            !writable -> "The cheat install folder does not allow new files. Choose a writable folder."
+            else -> "Cheat install folder is ready."
         }
         return accessStatusJson(
-            selected = true,
+            selection = selection,
             validLocation = true,
             readPermission = true,
             writePermission = true,
             readable = readable,
             writable = writable,
-            message = message
+            message = message,
+            folderLabel = folderLabel(treeUri, selection.loadDocumentId)
         )
     }
 
@@ -329,22 +377,22 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         activity.getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
 
     private fun loadRootUri(): Uri {
-        val savedUri = preferences().getString(PREF_EDEN_LOAD_URI, null)
-            ?: throw IllegalStateException("Select Eden's load directory first")
-        val treeUri = Uri.parse(savedUri)
+        val selection = savedSelection()
+            ?: throw IllegalStateException("Choose a cheat install folder first")
+        val treeUri = Uri.parse(selection.treeUri)
         val permission = contentResolver.persistedUriPermissions
             .firstOrNull { it.uri == treeUri }
         if (permission?.isReadPermission != true || permission.isWritePermission != true) {
-            throw IllegalStateException("Eden load directory permission is no longer available")
+            throw IllegalStateException("Access to the cheat install folder is no longer available")
         }
-        return resolveLoadDirectory(treeUri, preferences().getString(PREF_LOAD_DOCUMENT_ID, null))
+        return resolveLoadDirectory(treeUri, selection.loadDocumentId)
     }
 
-    /** The load folder: the tree itself, or its child loadDocumentId (the Peanuts Native folder's load); either must be a directory named load. */
+    /** The `load` folder EDC writes to: the granted tree itself, or its `load` child [loadDocumentId]. */
     private fun resolveLoadDirectory(treeUri: Uri, loadDocumentId: String? = null): Uri {
         require(treeUri.scheme == "content" && !treeUri.authority.isNullOrBlank() &&
             DocumentsContract.isTreeUri(treeUri)) {
-            "Select your Eden installation's load folder using the folder picker."
+            "Choose the cheat install folder using the folder picker."
         }
         val documentId = loadDocumentId ?: DocumentsContract.getTreeDocumentId(treeUri)
         require(documentId.isNotBlank()) { "The selected folder has no document ID." }
@@ -360,7 +408,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
                 it.getString(it.getColumnIndexOrThrow(projection[0])) == "load" &&
                 it.getString(it.getColumnIndexOrThrow(projection[1])) ==
                     DocumentsContract.Document.MIME_TYPE_DIR) {
-                "Select the folder named load inside your Eden installation, not its parent or a game folder."
+                "The cheat install folder's load folder is missing. Choose the folder again."
             }
         }
         return rootUri
@@ -382,16 +430,18 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         }
     }
 
+    /** Status of the active folder; a failed or unfinished pick is reported separately. */
     private fun accessStatusJson(
-        selected: Boolean,
+        selection: Selection?,
         validLocation: Boolean,
         readPermission: Boolean,
         writePermission: Boolean,
         readable: Boolean,
         writable: Boolean,
-        message: String
+        message: String,
+        folderLabel: String = ""
     ): String = JSONObject()
-        .put("selected", selected)
+        .put("selected", selection != null)
         .put("validLocation", validLocation)
         .put("readPermission", readPermission)
         .put("writePermission", writePermission)
@@ -401,8 +451,11 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             "ready",
             validLocation && readPermission && writePermission && readable && writable
         )
-        .put("message", lastSelectionError.ifEmpty { message })
-        .put("target", if (selected) target() else "")
+        .put("message", message)
+        .put("installMode", selection?.mode ?: "")
+        .put("folderLabel", folderLabel)
+        .put("selectionError", lastSelectionError)
+        .put("selectionPending", selectionPending)
         .toString()
 
     private fun pathSegments(relativePath: String): List<String> {
@@ -425,7 +478,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
             DocumentsContract.Document.COLUMN_MIME_TYPE
         )
         val cursor = contentResolver.query(childrenUri, projection, null, null, null)
-            ?: throw IllegalStateException("Could not query Eden directory")
+            ?: throw IllegalStateException("Could not read the cheat install folder")
         val children = mutableListOf<SafDocument>()
         cursor.use {
             val idColumn = it.getColumnIndexOrThrow(

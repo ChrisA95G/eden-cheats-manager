@@ -102,8 +102,7 @@ pub fn run() {
             package_library_pc::discover_package_metadata_for_title_pc,
             // android native (SAF — no ADB)
             android_native::get_eden_load_access_status,
-            android_native::select_eden_load_directory,
-            android_native::select_peanuts_load_directory,
+            android_native::select_cheat_install_folder,
             android_native::test_eden_load_directory,
             android_native::get_package_discovery_status,
             android_native::select_prod_keys_document,

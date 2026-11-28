@@ -2,7 +2,7 @@
 use super::jni::{
     jni_noarg_string_call, jni_saf_delete_file, jni_saf_list_directory,
     jni_saf_remove_empty_directory, jni_saf_write_text_file, parse_saf_response,
-    select_eden_load_directory_from_activity, select_peanuts_load_directory_from_activity,
+    select_cheat_install_folder_from_activity,
 };
 use crate::cheats::InstalledCheat;
 #[cfg(target_os = "android")]
@@ -179,10 +179,22 @@ pub struct EdenLoadAccessStatus {
     pub writable: bool,
     pub ready: bool,
     pub message: String,
-    /// `"eden"` (Eden's own `load`), `"peanuts"` (a `load` folder on shared storage
-    /// that Peanuts Native imports from), or empty when nothing is selected.
+    /// `"direct"` (an emulator's own `load`, where the emulator creates each
+    /// title-ID folder) or `"custom"` (a `load` folder on shared storage that
+    /// another app imports from); empty when nothing is selected. Defaults to
+    /// empty for older status responses.
     #[serde(default)]
-    pub target: String,
+    pub install_mode: String,
+    /// Where EDC writes, for install and removal messages, e.g.
+    /// `Internal storage/PeanutsNative/load`.
+    #[serde(default)]
+    pub folder_label: String,
+    /// Why the last pick failed; the other fields still describe the active folder.
+    #[serde(default)]
+    pub selection_error: String,
+    /// The last pick is still being saved.
+    #[serde(default)]
+    pub selection_pending: bool,
 }
 
 /// Return the persisted Eden `load` grant and provider capability state.
@@ -200,33 +212,18 @@ pub fn get_eden_load_access_status() -> Result<EdenLoadAccessStatus, String> {
     }
 }
 
-/// Open Androids document-tree picker so the user can grant access to Edens
-/// exposed `load` directory. The picker result is persisted by MainActivity.
+/// Open Android's folder picker for the cheat install folder. It only launches
+/// the picker; MainActivity saves the result and `get_eden_load_access_status`
+/// reports it.
 #[tauri::command]
-pub fn select_eden_load_directory() -> Result<(), String> {
+pub fn select_cheat_install_folder() -> Result<(), String> {
     #[cfg(target_os = "android")]
     {
-        return select_eden_load_directory_from_activity();
+        return select_cheat_install_folder_from_activity();
     }
     #[cfg(not(target_os = "android"))]
     {
-        Err("Eden SAF directory selection is only available on Android.".into())
-    }
-}
-
-/// Open Android's document-tree picker for a folder Peanuts Native can read
-/// (Internal storage/PeanutsNative is suggested). MainActivity uses a folder
-/// named `load` as it is and makes a `load` folder inside any other, then
-/// installs cheats there in Eden's layout.
-#[tauri::command]
-pub fn select_peanuts_load_directory() -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        return select_peanuts_load_directory_from_activity();
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        Err("The Peanuts Native folder is only available on Android.".into())
+        Err("The Android folder picker is unavailable on this platform.".into())
     }
 }
 

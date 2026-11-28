@@ -31,14 +31,12 @@ class MainActivity : TauriActivity() {
             return activity.appUpdateInstaller.install(expectedVersion)
         }
 
+        /** Throws when the activity is gone, so Rust reports a launch error instead of waiting. */
         @JvmStatic
-        fun selectEdenLoadDirectory() {
-            instance?.get()?.edenSafStorage?.selectLoadDirectory()
-        }
-
-        @JvmStatic
-        fun selectPeanutsLoadDirectory() {
-            instance?.get()?.edenSafStorage?.selectPeanutsLoadDirectory()
+        fun selectCheatInstallFolder() {
+            val activity = instance?.get()
+                ?: throw IllegalStateException("Main activity unavailable")
+            activity.edenSafStorage.selectFolder()
         }
 
         @JvmStatic

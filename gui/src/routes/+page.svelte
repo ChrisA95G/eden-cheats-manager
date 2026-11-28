@@ -22,7 +22,7 @@
   let gameLibraryStatus = $state(/** @type {import('$lib/api/types.js').GameLibraryStatus|null} */ (null));
   let statusError = $state('');
   let checkingStatus = $state(false);
-  let pendingPicker = $state(/** @type {{id:number,kind:'edenLoad'|'peanutsLoad'|'prodKeys'|'packageLibrary'|'singlePackage'}|null} */ (null));
+  let pendingPicker = $state(/** @type {import('$lib/api/types.js').PendingPicker|null} */ (null));
   let library = $state(createLibraryState());
   let refreshPhase = $state(/** @type {'idle'|'loading'|'error'} */ ('idle'));
   let selectedTitleId = $state('');
@@ -193,28 +193,35 @@
     statusError = results.flatMap(result=>result.status === 'rejected' ? [errorMessage(result.reason)] : []).join('\n');
     checkingStatus = false;
   }
+  /** @param {import('$lib/api/types.js').EdenLoadAccessStatus|null} status */
+  function installFolderKey(status) { return `${status?.installMode ?? ''}:${status?.folderLabel ?? ''}`; }
   function resumed() {
     if (document.visibilityState !== 'visible' || platform !== 'android') return;
     clearTimeout(resumeTimer);
     resumeTimer = setTimeout(async()=>{
       const picker = pendingPicker;
+      const folderBefore = installFolderKey(edenAccess);
       await refreshAndroidStatus();
       if (!alive) return;
       if (picker && pendingPicker?.id === picker.id) {
+        // EDC saves a picked install folder in the background; keep waiting until it is done.
+        if (picker.kind === 'cheatInstallFolder' && edenAccess?.selectionPending) { resumed(); return; }
         pendingPicker = null;
-        if (picker.kind !== 'singlePackage') {
+        const changed = picker.kind === 'cheatInstallFolder'
+          ? installFolderKey(edenAccess) !== folderBefore : picker.kind !== 'singlePackage';
+        if (changed) {
           contextRevision++;
           if (started) void refreshLibrary();
         }
       }
     },250);
   }
-  /** @param {'edenLoad'|'peanutsLoad'|'prodKeys'|'packageLibrary'|'singlePackage'} kind */
+  /** @param {import('$lib/api/types.js').AndroidPickerKind} kind */
   async function pickAndroid(kind) {
     if (pendingPicker) return;
     const picker = {id:++pickerId,kind}; pendingPicker = picker;
     try {
-      const actions = {edenLoad:backend.selectEdenLoadDirectory,peanutsLoad:backend.selectPeanutsLoadDirectory,prodKeys:backend.selectProdKeysDocument,
+      const actions = {cheatInstallFolder:backend.selectCheatInstallFolder,prodKeys:backend.selectProdKeysDocument,
         packageLibrary:backend.selectGameLibraryDirectory,singlePackage:backend.selectGamePackageDocument};
       await actions[kind]();
     } catch (cause) { if (pendingPicker?.id === picker.id) pendingPicker=null; throw cause; }
@@ -278,8 +285,7 @@
   <main class="startup"><h1>Unable to open the app</h1><p role="alert">{bootstrapError}</p><button class="md-button md-button--filled" onclick={bootstrap}>Try again</button></main>
 {:else if !ready}
   <SetupScreen {platform} {settings} {detectedPcLoadDir} {edenAccess} busy={saving || checkingStatus || !!pendingPicker}
-    error={statusError} onsubmit={save} onpickdesktop={pickDesktop} onpickandroid={()=>pickAndroid('edenLoad')}
-    onpickpeanuts={()=>pickAndroid('peanutsLoad')}
+    error={statusError} onsubmit={save} onpickdesktop={pickDesktop} onpickandroid={()=>pickAndroid('cheatInstallFolder')}
     onretryandroid={async()=>{pendingPicker=null;await refreshAndroidStatus();}} />
 {:else}
   <div class="app-frame">
@@ -295,7 +301,8 @@
         packageLibrary={library.packageLibrary}
         refreshError={library.refreshError} {selectedTitleId} onselect={selectTitle} onrefresh={refreshLibrary} onsettings={openSettings}/></div>
       <div class="workspace-slot"><GameWorkspace {game} {platform} {settings} packageLibrary={library.packageLibrary}
-        androidPackageStatus={packageStatus} {pendingPicker} {contextRevision} onback={backToLibrary}
+        androidPackageStatus={packageStatus} installMode={platform === 'android' ? edenAccess?.installMode || 'direct' : 'direct'}
+        installFolderLabel={platform === 'android' ? edenAccess?.folderLabel ?? '' : ''} {pendingPicker} {contextRevision} onback={backToLibrary}
         onsettings={openSettings} onpickandroid={pickAndroid} onnotify={notify}/></div>
     </main>
   </div>

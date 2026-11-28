@@ -125,13 +125,9 @@ export async function getEdenLoadAccessStatus() {
   );
 }
 
-export async function selectEdenLoadDirectory() {
-  await invoke('select_eden_load_directory');
-}
-
-/** A load folder on shared storage for Peanuts Native (Android only). */
-export async function selectPeanutsLoadDirectory() {
-  await invoke('select_peanuts_load_directory');
+/** Open the Android folder picker for the cheat install folder. */
+export async function selectCheatInstallFolder() {
+  await invoke('select_cheat_install_folder');
 }
 
 /** @returns {Promise<string>} */
