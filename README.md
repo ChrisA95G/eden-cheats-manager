@@ -1,6 +1,6 @@
 # Eden Cheats Manager
 
-EDC lets you browse, install and manage cheats for Eden on Android, Windows and Linux.
+EDC lets you browse and manage Switch cheats on Android, Windows and Linux. It can install cheats directly into Eden or, on Android, prepare files for an emulator that imports them.
 
 [Downloads](https://github.com/ChrisA95G/eden-cheats-manager/releases) ·
 [Setup](#quick-start) ·
@@ -11,7 +11,7 @@ EDC lets you browse, install and manage cheats for Eden on Android, Windows and 
 - Scan NSP, XCI, and NSZ/XCZ games and updates into one library.
 - Browse cheats by game and version.
 - Use the included cheat catalog, add your own codes, or fetch cheats from Cheatslips.
-- Install and remove cheat files in Eden.
+- Manage cheat files in your chosen install folder.
 - Adapts to desktop and handheld screens.
 
 ## Downloads
@@ -28,7 +28,7 @@ On Linux, make the AppImage executable before opening it.
 
 ## What you need
 
-- Eden installed on the same device, with access to its `load` folder.
+- Access to your emulator’s `load` folder for direct installs, or a writable Android folder for imports.
 - Your game files and any updates you use.
 - Your `prod.keys` file to read the game files.
 
@@ -37,13 +37,18 @@ if you want to use that source.
 
 ## Quick start
 
-1. Open EDC and select the `load` folder used by your Eden installation.
-   On Android, choose the storage for your Eden build in the folder picker,
-   open `load`, and grant access with **Use this folder**.
+1. On Windows or Linux, select your Eden installation’s `load` folder. On Android,
+   tap **Choose folder**, select a directory, and confirm with **Use this folder**.
+   Choose **Install directly** for the emulator’s existing `load` folder or
+   **Prepare for import** to keep files in a separate folder. EDC uses that
+   folder’s `load` subfolder, creating it if needed.
 2. In **Settings → Game library**, select `prod.keys` and the folder containing
    your game files, then save.
-3. Select a game from the library and choose the game version you use in Eden.
-4. Choose a cheat and select **Install**, then enable it in Eden.
+3. Select a game and choose the version you play.
+4. Choose a cheat and select **Install**. For a direct install, enable the cheat
+   in your emulator. For an import, open the emulator’s importer and select
+   `load/<title ID>` for that game. The import guide is available in
+   **Settings → Cheat install folder**.
 
 ## Help and license
 

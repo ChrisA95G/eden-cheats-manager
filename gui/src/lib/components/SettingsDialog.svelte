@@ -1,5 +1,6 @@
 <script>
   import Icon from './ui/Icon.svelte';
+  import InstallFolderHelp from './InstallFolderHelp.svelte';
   import Dialog from './ui/Dialog.svelte';
   import AppUpdate from './AppUpdate.svelte';
   import AnnouncementHistory from './AnnouncementHistory.svelte';
@@ -32,7 +33,7 @@
    * @property {(kind: SettingsPickerKind, currentPath: string) => string | null | Promise<string | null>} [onpickdesktop]
    * @property {(kind: AndroidPickerKind) => void | Promise<void>} [onpickandroid]
    * @property {() => void | Promise<void>} [onretryandroid]
-   * @property {() => string | Promise<string>} [ontesteden]
+   * @property {(destinationId: string) => string | Promise<string>} [ontesteden]
    * @property {() => boolean | Promise<boolean>} [onrevealapplog]
    * @property {(returnToStable?: boolean) => Promise<import('../api/types.js').AppUpdateCheck>} [oncheckupdates]
    * @property {import('../api/types.js').UpdateInstallation | null} [installation]
@@ -115,12 +116,11 @@
   let settingsChanged = $derived(JSON.stringify(draft) !== JSON.stringify(copySettings(settings)));
   let betaPreferenceChanged = $derived(draft.includeBetaUpdates !== settings.includeBetaUpdates);
   let availableUpdate = $derived(installation?.update ?? updateResult?.available);
-  let installFolder = $derived(`${edenAccess?.installMode ?? ''}:${edenAccess?.folderLabel ?? ''}`);
-  let testedFolder = '';
+  let testedFolder = $state('');
 
   // A test result describes the folder it ran against; drop it once another folder is active.
   $effect(() => {
-    if (installFolder !== testedFolder) testResult = '';
+    if (edenAccess?.destinationId !== testedFolder) testResult = '';
   });
 
   /** @param {unknown} cause */
@@ -176,12 +176,14 @@
 
   async function testAndroidEden() {
     testResult = '';
-    testedFolder = installFolder;
+    const destinationId = edenAccess?.destinationId;
+    if (!destinationId) return;
+    testedFolder = destinationId;
     const result = await runAction('android-test', async () => {
       if (!ontesteden) throw new Error('The access test is unavailable.');
-      return ontesteden();
+      return ontesteden(destinationId);
     });
-    if (typeof result === 'string' && testedFolder === installFolder) testResult = result;
+    if (typeof result === 'string' && destinationId === edenAccess?.destinationId) testResult = result;
   }
 
   async function revealAppLog() {
@@ -376,7 +378,7 @@
           <Icon name="folder" size={24} />
           <div>
             <h3 id="settings-android-storage-title">Cheat install folder</h3>
-            <p>A new folder applies as soon as you pick it. Cancel does not undo it.</p>
+            <p>Folder changes take effect immediately, even if you close Settings with Cancel.</p>
           </div>
         </div>
 
@@ -386,8 +388,12 @@
           </span>
           <div class="status-copy">
             <strong>{edenAccess?.folderLabel || 'No folder chosen'}</strong>
-            <span>{edenAccess?.message ?? 'The cheat install folder has not been checked.'}</span>
-            {#if edenAccess?.selectionError}<span class="selection-error">{edenAccess.selectionError}</span>{/if}
+            {#if edenAccess?.ready}
+              <span>{edenAccess.installMode === 'custom' ? 'Ready to prepare files for import.' : 'Ready for direct installs.'}</span>
+            {:else}
+              <span>{edenAccess?.message ?? 'The cheat install folder has not been checked.'}</span>
+            {/if}
+            {#if edenAccess?.selectionError}<span class="selection-error" role="alert">{edenAccess.selectionError}</span>{/if}
           </div>
           <button
             class="md-button md-button--outlined status-action"
@@ -403,7 +409,7 @@
           <button
             class="md-button md-button--text"
             type="button"
-            disabled={busy || !edenAccess?.ready}
+            disabled={busy || !edenAccess?.ready || !edenAccess.destinationId}
             onclick={testAndroidEden}
           >
             Test access
@@ -430,6 +436,7 @@
             {testResult === 'OK' ? 'Read and write access works.' : testResult}
           </p>
         {/if}
+        <InstallFolderHelp />
       </section>
 
       <section class="settings-section" aria-labelledby="settings-android-packages-title">

@@ -59,9 +59,10 @@
  * @property {boolean} ready
  * @property {string} message
  * @property {InstallMode | ''} [installMode] Absent in older status responses.
- * @property {string} [folderLabel] Where EDC writes, e.g. Internal storage/PeanutsNative/load.
+ * @property {string} [folderLabel] Display name or path of the active load directory.
+ * @property {string} [destinationId] Stable identity of that directory across tree grants.
  * @property {string} [selectionError] Why the last pick failed; the other fields describe the active folder.
- * @property {boolean} [selectionPending] The last pick is still being saved.
+ * @property {boolean} [selectionPending] Android is choosing or saving a folder.
  */
 
 /**

@@ -47,31 +47,24 @@ class MainActivity : TauriActivity() {
         }
 
         @JvmStatic
-        fun safListDirectory(relativePath: String): String {
+        fun safListDirectory(relativePath: String, destinationId: String?): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.edenSafStorage.listDirectory(relativePath)
+            return activity.edenSafStorage.listDirectory(relativePath, destinationId)
         }
 
         @JvmStatic
-        fun safWriteTextFile(relativePath: String, content: String): String {
+        fun safWriteTextFile(relativePath: String, content: String, destinationId: String, replace: Boolean): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.edenSafStorage.writeTextFile(relativePath, content)
+            return activity.edenSafStorage.writeTextFile(relativePath, content, destinationId, replace)
         }
 
         @JvmStatic
-        fun safDeleteFile(relativePath: String): String {
+        fun safDeleteFile(relativePath: String, destinationId: String): String {
             val activity = instance?.get()
                 ?: return "ERROR: Main activity unavailable"
-            return activity.edenSafStorage.deleteFile(relativePath)
-        }
-
-        @JvmStatic
-        fun safRemoveEmptyDirectory(relativePath: String): String {
-            val activity = instance?.get()
-                ?: return "ERROR: Main activity unavailable"
-            return activity.edenSafStorage.removeEmptyDirectory(relativePath)
+            return activity.edenSafStorage.deleteFile(relativePath, destinationId)
         }
 
         @JvmStatic

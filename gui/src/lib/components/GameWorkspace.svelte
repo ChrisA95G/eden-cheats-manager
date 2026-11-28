@@ -14,11 +14,12 @@
    * settings: AppSettings, packageLibrary: import('../api/types.js').ManagedPackageLibrary|null,
    * androidPackageStatus: import('../api/types.js').PackageDiscoveryStatus|null,
    * installMode: import('../api/types.js').InstallMode, installFolderLabel: string,
+   * destinationId: string, presenceLocation: string,
    * pendingPicker: {id:number,kind:string}|null, contextRevision: number,
    * onback: ()=>void, onsettings: ()=>void, onpickandroid: (kind:'singlePackage')=>Promise<void>,
    * onnotify: (notice:Notice)=>void}} */
-  let { game, platform, settings, packageLibrary, androidPackageStatus, installMode, installFolderLabel, pendingPicker,
-    contextRevision, onback, onsettings, onpickandroid, onnotify } = $props();
+  let { game, platform, settings, packageLibrary, androidPackageStatus, installMode, installFolderLabel,
+    destinationId, presenceLocation, pendingPicker, contextRevision, onback, onsettings, onpickandroid, onnotify } = $props();
 
   const id = $props.id();
   let target = $derived(gameCheatTarget(game));
@@ -51,6 +52,8 @@
   let installedError = $state('');
   let actionError = $state('');
   let working = $state(false);
+  let fileActionsBusy = $derived(working || installedLoading || Boolean(installedError)
+    || (platform === 'android' && (!destinationId || pendingPicker?.kind === 'cheatInstallFolder')));
   let inspecting = $state(false);
   let chosen = $state(/** @type {PackageCandidate|null} */ (null));
   let fallback = $state(/** @type {PackageCandidate|null} */ (null));
@@ -90,8 +93,12 @@
   /** @param {unknown} error */
   function message(error) { return error instanceof Error ? error.message : String(error); }
   function context() {
-    return { titleId: target?.titleId ?? '', expectedBaseTitleId: target?.baseTitleId ?? '', folderPresent: installMode === 'custom' || target?.installed === true,
-      custom: installMode === 'custom', folderLabel: installFolderLabel || 'the cheat install folder', platform, settings: {...settings} };
+    return {
+      titleId: target?.titleId ?? '',
+      expectedBaseTitleId: target?.baseTitleId ?? '',
+      folderPresent: installMode === 'custom' || target?.installed === true,
+      destinationId, folderLabel: installFolderLabel || 'the cheat install folder', platform, settings: {...settings},
+    };
   }
   /** @param {'catalog'|'installed'} resource @param {ReturnType<typeof context>} ctx */
   async function read(resource, ctx) {
@@ -103,7 +110,8 @@
         const result = await backend.searchCheats(ctx.titleId);
         if (requests.isCurrent(token)) catalog = result;
       } else {
-        const result = ctx.folderPresent ? await backend.listInstalledCheats(ctx.platform, ctx.settings, ctx.titleId) : [];
+        const result = ctx.folderPresent
+          ? await backend.listInstalledCheats(ctx.platform, ctx.settings, ctx.titleId, ctx.destinationId) : [];
         if (requests.isCurrent(token)) installed = result;
       }
     } catch (error) {
@@ -123,6 +131,7 @@
     const titleId = target?.titleId;
     const edenPresent = target?.installed;
     const revision = contextRevision;
+    const hasDestination = platform !== 'android' || Boolean(destinationId);
     untrack(() => {
       requests.beginSelection();
       activeTab = 'catalog'; optionsOpen = false; versionOpen = false; imageFailed = false;
@@ -130,7 +139,7 @@
       catalogError = ''; installedError = ''; actionError = '';
       working = false; inspecting = false; customOpen = false; confirmation = null;
       customBuild = ''; customContent = ''; catalogLoading = false; installedLoading = false;
-      if (titleId) {
+      if (titleId && hasDestination) {
         const ctx = context();
         void read('catalog', ctx); void read('installed', ctx);
       }
@@ -144,7 +153,7 @@
 
   /** @param {'catalog'|'installed'} resource @param {()=>Promise<string>} action */
   async function mutate(resource, action) {
-    if (working || !target) return;
+    if (working || !target || (resource === 'installed' && fileActionsBusy)) return;
     const ctx = context();
     const token = requests.begin('mutation');
     requests.invalidate(resource);
@@ -170,23 +179,27 @@
 
   /** @param {string} buildId @param {import('../domain/cheats.js').CheatSection} section */
   function install(buildId, section) {
-    if (!canInstall) return;
+    if (!canInstall || fileActionsBusy) return;
     const ctx = context();
     const cheatName = cheatFileName(section.name, buildId);
+    const replace = installedIndex.has(installedTupleKey(buildId, cheatName));
     const action = () => mutate('installed', async () => {
-      await backend.installCheat(ctx.platform, ctx.settings, {titleId:ctx.titleId, buildId, cheatName, content:section.content});
-      return ctx.custom ? `Installed ${cheatName} in ${ctx.folderLabel}.` : `Installed ${cheatName}. Enable it in Eden when ready.`;
+      const file = {titleId:ctx.titleId, buildId, cheatName, content:section.content};
+      await backend.installCheat(ctx.platform, ctx.settings, file, ctx.destinationId, replace);
+      if (ctx.platform === 'android') return `Installed ${cheatName} in ${ctx.folderLabel}.`;
+      return `Installed ${cheatName}. Enable it in Eden when ready.`;
     });
-    if (installedIndex.has(installedTupleKey(buildId, cheatName))) {
+    if (replace) {
       confirmation = {title:'Replace installed cheat?', message:`This overwrites ${cheatName} for Build ID ${buildId}.`, action};
     } else void action();
   }
   /** @param {import('../api/types.js').InstalledCheat} item */
   function removeInstalled(item) {
+    if (fileActionsBusy) return;
     const ctx = context();
-    confirmation = {title:'Remove installed cheat?', message:`Remove ${item.cheatName} (${item.buildId}) from ${ctx.custom ? ctx.folderLabel : 'Eden'}? Its catalog entry will remain.`,
+    confirmation = {title:'Remove installed cheat?', message:`Remove ${item.cheatName} (${item.buildId}) from ${ctx.platform === 'android' ? ctx.folderLabel : 'Eden'}? Its catalog entry will remain.`,
       action: () => mutate('installed', async () => {
-        await backend.deleteInstalledCheat(ctx.platform, ctx.settings, {titleId:ctx.titleId,...item});
+        await backend.deleteInstalledCheat(ctx.platform, ctx.settings, {titleId:ctx.titleId,...item}, ctx.destinationId);
         return 'Installed cheat removed.';
       })};
   }
@@ -249,9 +262,9 @@
       <div class="game-identity">
         <h1 tabindex="-1" data-workspace-heading>{game.baseName || target.name || game.baseTitleId}</h1>
         <div class="game-meta"><p>{game.baseTitleId}</p>
-        {#if game.baseInstalled || game.updates.some(entry => entry.installed)}
-          <span class="presence"><Icon name="check" size={20} />Present in Eden</span>
-        {:else}<small>Not present in Eden</small>
+        {#if presenceLocation && (game.baseInstalled || game.updates.some(entry => entry.installed))}
+          <span class="presence"><Icon name="check" size={20} />Present in {presenceLocation}</span>
+        {:else if presenceLocation}<small>Not present in {presenceLocation}</small>
         {/if}
         </div>
       </div>
@@ -270,7 +283,7 @@
           </button>
           <div id={`${id}-version-help`} class="version-help">
             {#if chosenBuild}
-              <span>Build {chosenBuild} · Does not change the version in Eden.</span>
+              <span>Showing cheats for build {chosenBuild}.</span>
             {:else if candidates.length}
               <span>Choose your base game or update to show matching cheats.</span>
             {:else}
@@ -288,12 +301,12 @@
         </div>
 
         <div class="tab-panel" id={`${id}-installed-panel`} role="tabpanel" tabindex="0" hidden={activeTab !== 'installed'} aria-labelledby={`${id}-installed-tab`} aria-busy={installedLoading}>
-          <div class="section-heading"><h2 tabindex="-1" bind:this={installedHeading}>Installed in Eden</h2><button class="md-icon-button" aria-label="Refresh installed cheats" disabled={installedLoading || working} onclick={()=>read('installed',context())}><Icon name="refresh" /></button></div>
-          <p class="support">All builds · Enable installed cheats in Eden.</p>
+          <div class="section-heading"><h2 tabindex="-1" bind:this={installedHeading}>{installMode === 'custom' ? 'Files for import' : 'Installed cheats'}</h2><button class="md-icon-button" aria-label="Refresh installed cheats" disabled={installedLoading || working} onclick={()=>read('installed',context())}><Icon name="refresh" /></button></div>
+          <p class="support">{installMode === 'custom' ? `In your emulator, import this game’s folder from ${installFolderLabel}/${target.titleId}.` : 'Enable installed cheats in your emulator.'}</p>
           {#if installedError}<p class="error" role="alert">{installedError}</p>{/if}
           {#if installedLoading}<div class="md-progress" role="progressbar" aria-label="Loading installed cheats"></div>{/if}
           {#each installed as item (installedTupleKey(item.buildId,item.cheatName))}
-            <div class="file-row"><div>{item.cheatName}<small>{item.buildId}</small></div><button class="md-icon-button" aria-label={`Remove ${item.cheatName}`} disabled={working} onclick={()=>removeInstalled(item)}><Icon name="delete" /></button></div>
+            <div class="file-row"><div>{item.cheatName}<small>{item.buildId}</small></div><button class="md-icon-button" aria-label={`Remove ${item.cheatName}`} disabled={fileActionsBusy} onclick={()=>removeInstalled(item)}><Icon name="delete" /></button></div>
           {:else}{#if !installedLoading && !installedError}<p class="support">No cheat files installed for this title.</p>{/if}{/each}
         </div>
 
@@ -308,7 +321,7 @@
             <button class="md-button md-button--outlined" disabled={working} onclick={()=>{customBuild=chosenBuild;customContent='';actionError='';customOpen=true;}}><Icon name="add" size={20} />Custom cheat</button>
             <button class="md-icon-button refresh-catalog" aria-label="Refresh cheat catalog" disabled={catalogLoading || working} onclick={()=>read('catalog',context())}><Icon name="refresh" /></button>
           </div>
-          {#if !canInstall}<p class="support">Open this game in Eden before installing cheats.</p>{/if}
+          {#if installMode === 'direct' && !target.installed}<p class="support">Open this game in your emulator before installing cheats.</p>{/if}
           {#if catalogError}<p class="error" role="alert">{catalogError}</p>{/if}
           {#if catalogLoading || working}<div class="md-progress" role="progressbar" aria-label={working ? 'Saving changes' : 'Loading cheat catalog'}></div>{/if}
           {#each visibleGroups as group (group.buildId)}
@@ -318,7 +331,7 @@
               {#each group.sections as section}
                 {@const present = installedIndex.has(installedTupleKey(group.buildId,cheatFileName(section.name,group.buildId)))}
                 <div class="cheat-row"><details><summary><Icon name="expand" size={20} /><span>{section.name}{section.custom ? ' · Custom' : ''}</span></summary><pre>{section.content}</pre></details>
-                  <button class="md-button md-button--text" disabled={!canInstall || working || installedLoading || !!installedError} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
+                  <button class="md-button md-button--text" disabled={!canInstall || fileActionsBusy} onclick={()=>install(group.buildId,section)}>{present ? 'Replace file' : 'Install'}</button></div>
               {/each}
               {#each group.customEntries as entry (entry.entryId)}
                 <div class="file-row"><details><summary><Icon name="expand" size={20} /><span>Custom entry #{entry.entryId}</span></summary><pre>{entry.content}</pre></details><button class="md-icon-button" aria-label={`Delete custom entry ${entry.entryId}`} disabled={working} onclick={()=>removeCustom(entry.entryId)}><Icon name="delete" /></button></div>

@@ -4,9 +4,12 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.Executors
 
 /** The cheat install folder: a `load` folder EDC writes cheats into through SAF. */
 internal class EdenSafStorage(private val activity: MainActivity) {
@@ -23,15 +26,19 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         private const val PREF_INSTALL_MODE = "install_mode"
         /** An emulator's own `load`, where the emulator creates each game's title-ID folder. */
         const val MODE_DIRECT = "direct"
-        /** A `load` folder on shared storage that another app (such as Peanuts Native) imports from. */
+        /** A `load` folder another app imports from. */
         const val MODE_CUSTOM = "custom"
         private const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
-        /** Android's own shared-storage providers; a folder from any of them is a custom install. */
-        private val SHARED_STORAGE_AUTHORITIES = setOf(
-            EXTERNAL_STORAGE_AUTHORITY,
-            "com.android.providers.downloads.documents"
-        )
+        // Keep each write or removal on its original grant until it finishes.
+        private val mutationLock = Any()
+        private val TITLE_ID = Regex("[0-9A-Fa-f]{16}")
         private const val RW = SafGrants.READ or SafGrants.WRITE
+
+        internal fun needsLoadChild(treeName: String, mode: String): Boolean {
+            if (treeName == "load") return false
+            require(mode == MODE_CUSTOM) { "For a direct install, choose the emulator’s existing load folder." }
+            return true
+        }
 
         /** The saved cheat-install tree, for the game library's grant bookkeeping. */
         fun savedTreeUri(context: Context): Uri? =
@@ -51,45 +58,65 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         val treeUri: String,
         val loadDocumentId: String?,
         val mode: String
-    )
+    ) {
+        /** A load directory keeps this ID when selected directly or through its parent. */
+        val destinationId: String
+            get() {
+                val tree = Uri.parse(treeUri)
+                val id = loadDocumentId ?: DocumentsContract.getTreeDocumentId(tree)
+                return DocumentsContract.buildDocumentUri(tree.authority, id).toString()
+            }
+    }
 
     private val contentResolver
         get() = activity.contentResolver
 
-    private val selectionExecutor = Executors.newSingleThreadExecutor()
+    private class PendingPick(val previous: Selection?) {
+        @Volatile var status: String? = null
+    }
 
-    @Volatile
+    private var pendingPick: PendingPick? = null
     private var lastSelectionError = ""
-
-    @Volatile
-    private var selectionPending = false
 
     private val folderPicker =
         activity.registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-            lastSelectionError = ""
             if (uri == null) {
-                android.util.Log.i("CheatsManager", "Cheat install folder selection cancelled")
+                finishPick()
                 return@registerForActivityResult
             }
-            val mode = if ((uri.authority ?: "") in SHARED_STORAGE_AUTHORITIES) MODE_CUSTOM else MODE_DIRECT
-            selectionPending = true
-            selectionExecutor.execute {
-                try {
-                    persistSelection(uri, mode)
-                } catch (error: Exception) {
-                    lastSelectionError = error.message ?: "Could not save access to the selected folder."
-                    android.util.Log.e("CheatsManager", "Could not save the cheat install folder", error)
-                } finally {
-                    selectionPending = false
-                }
+            // Android can deliver a picker result to a recreated activity.
+            synchronized(this) {
+                if (pendingPick == null) pendingPick = PendingPick(savedSelection())
             }
+            MaterialAlertDialogBuilder(activity)
+                .setTitle("How will you use this folder?")
+                .setMessage("Direct installs use the emulator’s existing load folder. " +
+                    "For imports, select load itself or a folder where EDC can find or create load.")
+                .setPositiveButton("Install directly") { _, _ -> savePickedFolder(uri, MODE_DIRECT) }
+                .setNegativeButton("Prepare for import") { _, _ -> savePickedFolder(uri, MODE_CUSTOM) }
+                .setNeutralButton(android.R.string.cancel) { _, _ -> finishPick() }
+                .setOnCancelListener { finishPick() }
+                .show()
         }
 
-    /**
-     * Keep the grant first, then use the selected `load` directory, or find or create its
-     * `load` child. Runs off the UI thread. On failure only the flags this pick acquired are
-     * released and the previous selection stays active.
-     */
+    private fun savePickedFolder(uri: Uri, mode: String) {
+        activity.lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                synchronized(mutationLock) { persistSelection(uri, mode) }
+                finishPick()
+            } catch (error: Exception) {
+                finishPick(error.message ?: "Could not save access to the selected folder.")
+                android.util.Log.e("CheatsManager", "Could not save the cheat install folder", error)
+            }
+        }
+    }
+
+    @Synchronized
+    private fun finishPick(error: String = "") {
+        lastSelectionError = error
+        pendingPick = null
+    }
+
     private fun persistSelection(uri: Uri, mode: String) {
         require(uri.scheme == "content" && DocumentsContract.isTreeUri(uri)) {
             "Select a folder on this device using the folder picker."
@@ -101,11 +128,12 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         val treeName = displayName(treeDocument)
             ?: throw IllegalStateException("Android could not read the selected folder's name. Choose another folder.")
 
+        val useChild = needsLoadChild(treeName, mode)
         val previous = savedSelection()
         val acquired = SafGrants.missingFlags(contentResolver, uri, RW)
         contentResolver.takePersistableUriPermission(uri, RW)
         try {
-            val loadDocumentId = if (treeName == "load") null else findOrCreateLoad(treeDocument)
+            val loadDocumentId = if (useChild) findOrCreateLoad(treeDocument) else null
             val rootUri = resolveLoadDirectory(uri, loadDocumentId)
             queryChildren(rootUri)
             check(documentSupportsCreate(rootUri)) {
@@ -174,14 +202,17 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         editor.apply()
     }
 
-    /** Open the folder picker. Throws when it cannot be launched, so the caller is not left waiting. */
     fun selectFolder() {
+        synchronized(this) {
+            check(pendingPick == null) { "A folder selection is already in progress." }
+            pendingPick = PendingPick(savedSelection())
+            lastSelectionError = ""
+        }
         activity.runOnUiThread {
             try {
-                lastSelectionError = ""
                 folderPicker.launch(null)
             } catch (error: Exception) {
-                lastSelectionError = "Android could not open the folder picker."
+                finishPick("Android could not open the folder picker.")
                 android.util.Log.e("CheatsManager", "Could not open the folder picker", error)
             }
         }
@@ -231,8 +262,26 @@ internal class EdenSafStorage(private val activity: MainActivity) {
     }
 
     fun getAccessStatus(): String {
-        val selection = savedSelection()
-            ?: return accessStatusJson(
+        val pick: PendingPick?
+        val selection: Selection?
+        val error: String
+        synchronized(this) {
+            pick = pendingPick
+            pick?.status?.let { return it }
+            selection = if (pick == null) savedSelection() else pick.previous
+            error = lastSelectionError
+        }
+        val status = readAccessStatus(selection)
+            .put("selectionPending", pick != null)
+            .put("selectionError", error)
+            .toString()
+        pick?.status = status
+        return status
+    }
+
+    private fun readAccessStatus(selection: Selection?): JSONObject {
+        if (selection == null) {
+            return accessStatusJson(
                 selection = null,
                 validLocation = false,
                 readPermission = false,
@@ -241,6 +290,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
                 writable = false,
                 message = "Choose a cheat install folder to continue."
             )
+        }
 
         val treeUri = try {
             Uri.parse(selection.treeUri)
@@ -308,9 +358,10 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         )
     }
 
-    fun listDirectory(relativePath: String): String {
+    fun listDirectory(relativePath: String, destinationId: String? = null): String {
         return try {
-            val directory = resolveDirectory(relativePath, false) ?: return "[]"
+            val root = loadRootUri(destinationId)
+            val directory = resolveDirectory(root, pathSegments(relativePath), false) ?: return "[]"
             val result = JSONArray()
             for (child in queryChildren(directory)) {
                 result.put(
@@ -325,60 +376,62 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         }
     }
 
-    fun writeTextFile(relativePath: String, content: String): String = safStatus {
-        val segments = pathSegments(relativePath)
-        if (segments.isEmpty()) {
-            throw IllegalArgumentException("A file path is required")
+    fun writeTextFile(relativePath: String, content: String, destinationId: String, replace: Boolean): String =
+        mutateDestination(destinationId) { root ->
+            val segments = pathSegments(relativePath)
+            require(segments.isNotEmpty()) { "A file path is required" }
+            val parent = resolveDirectory(root, segments.dropLast(1), true)
+                ?: throw IllegalStateException("Could not resolve parent directory")
+            val filename = segments.last()
+            val existing = findChild(parent, filename)
+            check(existing?.directory != true) { "Path is a directory: $relativePath" }
+            check(existing == null || replace) {
+                "This cheat file already exists. Choose Replace file to overwrite it."
+            }
+            val fileUri = existing?.uri ?: DocumentsContract.createDocument(
+                contentResolver, parent, "text/plain", filename
+            ) ?: throw IllegalStateException("Could not create file: $filename")
+            try {
+                if (existing == null) {
+                    check(displayName(fileUri) == filename) { "The provider could not create the file as $filename." }
+                }
+                val output = contentResolver.openOutputStream(fileUri, "wt")
+                    ?: throw IllegalStateException("Could not open file: $filename")
+                output.use { it.write(content.toByteArray(Charsets.UTF_8)) }
+            } catch (error: Exception) {
+                if (existing == null) runCatching { DocumentsContract.deleteDocument(contentResolver, fileUri) }
+                throw error
+            }
         }
-        val parent = resolveDirectory(
-            segments.dropLast(1).joinToString("/"),
-            true
-        ) ?: throw IllegalStateException("Could not resolve parent directory")
-        val filename = segments.last()
-        val existing = findChild(parent, filename)
-        if (existing?.directory == true) {
-            throw IllegalStateException("Path is a directory: $relativePath")
-        }
-        val fileUri = existing?.uri ?: DocumentsContract.createDocument(
-            contentResolver,
-            parent,
-            "text/plain",
-            filename
-        ) ?: throw IllegalStateException("Could not create file: $filename")
-        val output = contentResolver.openOutputStream(fileUri, "wt")
-            ?: throw IllegalStateException("Could not open file: $filename")
-        output.use {
-            it.write(content.toByteArray(Charsets.UTF_8))
-        }
-    }
 
-    fun deleteFile(relativePath: String): String = safStatus {
-        val document = resolveDocument(relativePath) ?: return@safStatus
-        if (document.directory) {
-            throw IllegalStateException("Path is a directory: $relativePath")
+    fun deleteFile(relativePath: String, destinationId: String): String =
+        mutateDestination(destinationId) { root ->
+            val segments = pathSegments(relativePath)
+            require(segments.isNotEmpty()) { "A file path is required" }
+            val file = resolveDocument(root, segments)
+            if (file != null) {
+                check(!file.directory) { "Path is a directory: $relativePath" }
+                check(DocumentsContract.deleteDocument(contentResolver, file.uri)) { "Could not delete file: $relativePath" }
+            }
+            // Clean up the cheats and mod directories while retaining the game's title directory.
+            for (level in 1..minOf(2, segments.lastIndex)) {
+                val parent = resolveDocument(root, segments.dropLast(level)) ?: continue
+                if (!parent.directory || queryChildren(parent.uri).isNotEmpty()) break
+                check(DocumentsContract.deleteDocument(contentResolver, parent.uri)) {
+                    "Could not remove the empty directory: ${parent.name}"
+                }
+            }
         }
-        if (!DocumentsContract.deleteDocument(contentResolver, document.uri)) {
-            throw IllegalStateException("Could not delete file: $relativePath")
-        }
-    }
-
-    fun removeEmptyDirectory(relativePath: String): String = safStatus {
-        val document = resolveDocument(relativePath) ?: return@safStatus
-        if (!document.directory) {
-            throw IllegalStateException("Path is not a directory: $relativePath")
-        }
-        if (queryChildren(document.uri).isEmpty() &&
-            !DocumentsContract.deleteDocument(contentResolver, document.uri)) {
-            throw IllegalStateException("Could not delete directory: $relativePath")
-        }
-    }
 
     private fun preferences() =
         activity.getSharedPreferences(SAF_PREFS, Context.MODE_PRIVATE)
 
-    private fun loadRootUri(): Uri {
+    private fun loadRootUri(expectedDestinationId: String? = null): Uri {
         val selection = savedSelection()
             ?: throw IllegalStateException("Choose a cheat install folder first")
+        check(expectedDestinationId == null || selection.destinationId == expectedDestinationId) {
+            "The cheat install folder changed. Refresh the installed cheats and try again."
+        }
         val treeUri = Uri.parse(selection.treeUri)
         val permission = contentResolver.persistedUriPermissions
             .firstOrNull { it.uri == treeUri }
@@ -440,7 +493,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         writable: Boolean,
         message: String,
         folderLabel: String = ""
-    ): String = JSONObject()
+    ): JSONObject = JSONObject()
         .put("selected", selection != null)
         .put("validLocation", validLocation)
         .put("readPermission", readPermission)
@@ -454,9 +507,7 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         .put("message", message)
         .put("installMode", selection?.mode ?: "")
         .put("folderLabel", folderLabel)
-        .put("selectionError", lastSelectionError)
-        .put("selectionPending", selectionPending)
-        .toString()
+        .put("destinationId", selection?.let { runCatching { it.destinationId }.getOrNull() }.orEmpty())
 
     private fun pathSegments(relativePath: String): List<String> {
         if (relativePath.isBlank()) return emptyList()
@@ -511,17 +562,19 @@ internal class EdenSafStorage(private val activity: MainActivity) {
     private fun findChild(parentUri: Uri, name: String): SafDocument? =
         queryChildren(parentUri).firstOrNull { it.name == name }
 
-    private fun resolveDirectory(relativePath: String, create: Boolean): Uri? {
-        var current = loadRootUri()
-        for (segment in pathSegments(relativePath)) {
+    private fun resolveDirectory(root: Uri, segments: List<String>, create: Boolean): Uri? {
+        var current = root
+        val canCreateTitle = create && savedSelection()?.mode == MODE_CUSTOM
+        for (segment in segments) {
             val existing = findChild(current, segment)
             current = when {
-                existing == null && create -> DocumentsContract.createDocument(
-                    contentResolver,
-                    current,
-                    DocumentsContract.Document.MIME_TYPE_DIR,
-                    segment
-                ) ?: throw IllegalStateException("Could not create directory: $segment")
+                existing == null && create -> {
+                    check(current != root || canCreateTitle || !TITLE_ID.matches(segment)) {
+                        "Open this game in your emulator before installing cheats."
+                    }
+                    DocumentsContract.createDocument(contentResolver, current, DocumentsContract.Document.MIME_TYPE_DIR, segment)
+                        ?: throw IllegalStateException("Could not create directory: $segment")
+                }
                 existing == null -> return null
                 !existing.directory -> throw IllegalStateException("Not a directory: $segment")
                 else -> existing.uri
@@ -530,21 +583,16 @@ internal class EdenSafStorage(private val activity: MainActivity) {
         return current
     }
 
-    private fun resolveDocument(relativePath: String): SafDocument? {
-        val segments = pathSegments(relativePath)
-        if (segments.isEmpty()) {
-            throw IllegalArgumentException("A file path is required")
-        }
-        val parent = resolveDirectory(segments.dropLast(1).joinToString("/"), false)
-            ?: return null
+    private fun resolveDocument(root: Uri, segments: List<String>): SafDocument? {
+        val parent = resolveDirectory(root, segments.dropLast(1), false) ?: return null
         return findChild(parent, segments.last())
     }
 
     private fun safError(error: Exception): String =
         "ERROR: ${error.message ?: error.javaClass.simpleName}"
 
-    private fun safStatus(action: () -> Unit): String = try {
-        action()
+    private fun mutateDestination(destinationId: String, action: (Uri) -> Unit): String = try {
+        synchronized(mutationLock) { action(loadRootUri(destinationId)) }
         "OK"
     } catch (error: Exception) {
         safError(error)

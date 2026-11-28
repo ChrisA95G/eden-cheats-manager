@@ -52,6 +52,7 @@ internal class GameLibraryStorage(private val activity: MainActivity) {
                     .putString(PREF_LIBRARY_URI, uri.toString())
                     .commit()
                 if (!saved) {
+                    preferences().edit().putString(PREF_LIBRARY_URI, previousUri?.toString()).apply()
                     SafGrants.release(contentResolver, uri, acquired)
                     throw IllegalStateException("Could not save the game-library permission")
                 }

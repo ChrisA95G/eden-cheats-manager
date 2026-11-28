@@ -130,9 +130,9 @@ export async function selectCheatInstallFolder() {
   await invoke('select_cheat_install_folder');
 }
 
-/** @returns {Promise<string>} */
-export async function testEdenLoadDirectory() {
-  return /** @type {string} */ (await invoke('test_eden_load_directory'));
+/** @param {string} destinationId @returns {Promise<string>} */
+export async function testEdenLoadDirectory(destinationId) {
+  return /** @type {string} */ (await invoke('test_eden_load_directory', { destinationId }));
 }
 
 /** @returns {Promise<PackageDiscoveryStatus>} */
@@ -252,16 +252,17 @@ export async function searchCheats(titleId) {
  * @param {Platform} platform
  * @param {AppSettings} settings
  * @param {string} titleId
+ * @param {string} destinationId
  * @returns {Promise<InstalledCheat[]>}
  */
-export async function listInstalledCheats(platform, settings, titleId) {
+export async function listInstalledCheats(platform, settings, titleId, destinationId) {
   const command = platformCommand(
     platform,
     'list_installed_cheats_android_native',
     'list_installed_cheats_pc',
   );
   const args = platform === 'android'
-    ? { titleId }
+    ? { titleId, destinationId }
     : { loadDir: settings.pcLoadDir, titleId };
   return /** @type {InstalledCheat[]} */ (await invoke(command, args));
 }
@@ -270,15 +271,17 @@ export async function listInstalledCheats(platform, settings, titleId) {
  * @param {Platform} platform
  * @param {AppSettings} settings
  * @param {{ titleId: string, cheatName: string, buildId: string, content: string }} cheat
+ * @param {string} destinationId
+ * @param {boolean} replace
  */
-export async function installCheat(platform, settings, cheat) {
+export async function installCheat(platform, settings, cheat, destinationId, replace) {
   const command = platformCommand(
     platform,
     'install_cheat_android_native',
     'install_cheat_pc',
   );
   const args = platform === 'android'
-    ? cheat
+    ? { ...cheat, destinationId, replace }
     : { loadDir: settings.pcLoadDir, ...cheat };
   await invoke(command, args);
 }
@@ -287,15 +290,16 @@ export async function installCheat(platform, settings, cheat) {
  * @param {Platform} platform
  * @param {AppSettings} settings
  * @param {{ titleId: string, cheatName: string, buildId: string }} cheat
+ * @param {string} destinationId
  */
-export async function deleteInstalledCheat(platform, settings, cheat) {
+export async function deleteInstalledCheat(platform, settings, cheat, destinationId) {
   const command = platformCommand(
     platform,
     'delete_cheat_android_native',
     'delete_cheat_pc',
   );
   const args = platform === 'android'
-    ? cheat
+    ? { ...cheat, destinationId }
     : { loadDir: settings.pcLoadDir, ...cheat };
   await invoke(command, args);
 }
